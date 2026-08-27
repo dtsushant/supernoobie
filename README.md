@@ -5,10 +5,11 @@ motion comes out of an ODE. Zero dependencies, so `cargo test` is the whole
 toolchain.
 
 ```bash
-cargo test                                  # 31 tests - the mathematics, verified
-cargo run                                   # tables + writes pulley.svg, pulley_sim.svg
-cargo run --example play_complex            # scratchpad: edit the numbers, re-run
-cargo run --features serve --bin serve      # live console at http://127.0.0.1:3000
+cargo test                                    # 37 tests - the mathematics, verified
+cargo run                                     # tables + writes pulley.svg, pulley_sim.svg
+cargo run --example play_complex              # scratchpad: edit the numbers, re-run
+cargo run --release --features play --bin play    # interactive window, CPU-rendered
+cargo run --features serve --bin serve        # live console at http://127.0.0.1:3000
 ```
 
 Nothing to install: the maths core is `std`-only, and the two web crates are
@@ -24,6 +25,51 @@ behind a feature flag.
 | `src/svg.rs` | drawing only | skip while learning |
 | `src/main.rs` | the CLI report | last |
 | `src/bin/serve.rs` | Axum + Tokio + HTMX console | when you want to poke it |
+
+## The interactive window — no GPU anywhere
+
+```
+cargo run --release --features play --bin play
+```
+
+| key | |
+|---|---|
+| **← / →** (or A / D) | hold to apply torque to the crank |
+| space | pause |
+| R | reset the preset |
+| Tab | next preset |
+| 1 2 3 4 | explicit Euler · semi-implicit · Verlet · RK4 |
+| − / = | slow down / speed up time |
+| Esc | quit |
+
+Every pixel is written by the CPU — `src/raster.rs` is a `Vec<u32>` plus
+Bresenham lines, midpoint circles, and a 5×7 bitmap font in 320 bytes. No
+shader, no graphics API, no GPU. `minifb` only supplies the window and the
+keyboard.
+
+**Two ideas make it work.**
+
+*Input is one term.* Making the machine interactive meant adding
+`input_torque` to the equation of motion and changing nothing else:
+
+```
+M_eff · θ̈ = gravity − k·θ − c·θ̇ + INPUT
+```
+
+*The physics step never varies.* A loop that steps by "however long the last
+frame took" behaves differently on different hardware, and one hitch can
+tunnel a weight through its end stop. Instead, real time is accumulated and
+spent in fixed chunks:
+
+```rust
+acc += frame_time * time_scale;
+while acc >= DT { sim.step(DT, integrator); acc -= DT; }
+```
+
+`--snapshot N` renders one frame of preset N straight to PNG and exits — no
+display needed, which makes the renderer checkable on a headless box. The PNG
+writer is hand-rolled too (`write_png`): stored deflate blocks, CRC-32 and
+Adler-32, about sixty lines. A PNG turns out to be mostly bookkeeping.
 
 ## The live console
 

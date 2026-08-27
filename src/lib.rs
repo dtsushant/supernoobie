@@ -1,4 +1,4 @@
-//! # Recursion I
+﻿//! # Recursion I
 //!
 //! A pulley machine built entirely from complex numbers.
 //!
@@ -12,4 +12,6 @@
 pub mod complex;
 pub mod dynamics;
 pub mod pulley;
+pub mod raster;
 pub mod svg;
+

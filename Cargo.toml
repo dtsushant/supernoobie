@@ -1,18 +1,22 @@
 [package]
 name = "recursion1"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
-description = "Pulley system on the complex plane - geometry, dynamics, and a live HTMX console"
+description = "Pulley system on the complex plane - geometry, dynamics, a software rasteriser and a live HTMX console"
 
-# The mathematics core (complex / pulley / dynamics) has NO dependencies and
-# never will. Axum and Tokio are optional and only build the `serve` binary,
-# so `cargo test` still runs against pure std.
+# The mathematics core (complex / pulley / dynamics / raster) has NO
+# dependencies and never will. Everything below is optional and feature-gated,
+# so `cargo test` always runs against pure std.
 [dependencies]
 axum = { version = "0.8", optional = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net"], optional = true }
+minifb = { version = "0.28", optional = true }
 
 [features]
+# live browser console, rendered server-side
 serve = ["dep:axum", "dep:tokio"]
+# interactive window, every pixel drawn on the CPU
+play = ["dep:minifb"]
 
 [lib]
 name = "recursion1"
@@ -26,6 +30,11 @@ path = "src/main.rs"
 name = "serve"
 path = "src/bin/serve.rs"
 required-features = ["serve"]
+
+[[bin]]
+name = "play"
+path = "src/bin/play.rs"
+required-features = ["play"]
 
 [profile.release]
 opt-level = 3
