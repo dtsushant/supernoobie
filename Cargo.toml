@@ -1,0 +1,31 @@
+[package]
+name = "recursion1"
+version = "0.2.0"
+edition = "2021"
+description = "Pulley system on the complex plane - geometry, dynamics, and a live HTMX console"
+
+# The mathematics core (complex / pulley / dynamics) has NO dependencies and
+# never will. Axum and Tokio are optional and only build the `serve` binary,
+# so `cargo test` still runs against pure std.
+[dependencies]
+axum = { version = "0.8", optional = true }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net"], optional = true }
+
+[features]
+serve = ["dep:axum", "dep:tokio"]
+
+[lib]
+name = "recursion1"
+path = "src/lib.rs"
+
+[[bin]]
+name = "recursion1"
+path = "src/main.rs"
+
+[[bin]]
+name = "serve"
+path = "src/bin/serve.rs"
+required-features = ["serve"]
+
+[profile.release]
+opt-level = 3
