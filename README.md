@@ -26,6 +26,63 @@ behind a feature flag.
 | `src/main.rs` | the CLI report | last |
 | `src/bin/serve.rs` | Axum + Tokio + HTMX console | when you want to poke it |
 
+## Rigid bodies — `src/rigid.rs`
+
+```
+cargo run --release --features play --bin bodies
+```
+
+**The mathematics is in one file and nothing else is.** `rigid.rs` never
+draws, never reads a key, never opens a window — so it can be read and argued
+with on its own. `bin/bodies.rs` is only keys-in, pixels-out.
+
+Every body is a disc. Not a limitation of the method — the impulse mathematics
+is identical for any shape — it just keeps collision *detection* to two lines
+so collision *response* is not buried under it.
+
+**The whole method is one line.** For a contact with normal `n`:
+
+```text
+v_n = relative velocity at the contact, along n
+K   = inv_m_a + inv_m_b + inv_i_a (ra x n)^2 + inv_i_b (rb x n)^2
+j   = -(1 + e) v_n / K
+```
+
+`K` is the effective inverse mass *at that contact, along that normal* — the
+direct analogue of `M_eff` in the pulley. It grows when the contact is off
+centre, because some of the impulse goes into spin instead of translation.
+
+Three places the complex type does real work:
+
+| | |
+|---|---|
+| `perp(r) = i * r` | a point offset `r` on a body spinning at `omega` moves at `omega * perp(r)` |
+| `a.dot(b) = Re(conj(a) * b)` | both plane products fall out of **one** multiplication… |
+| `a.cross(b) = Im(conj(a) * b)` | …the dot is its real part, the 2-D cross its imaginary part |
+| `gravity * e^(i*tilt)` | tilting the arena is one multiplication |
+
+**Keys:** arrows tilt gravity · ↓ reset it · S spawn · Tab scene · N reseed ·
+1–4 solver iterations · C contacts · space pause.
+
+### What the tests pin down
+
+Momentum conserved by every collision; energy conserved at `e = 1` and lost at
+`e < 1` **while momentum still is** — that pair is the point. Off-centre hits
+create spin, centred hits create none. Stacks stay stacked, resting contacts
+do not sink, friction slows a sliding disc and frictionless does not.
+
+And a proper **Newton's cradle**: five touching discs, strike the end, the
+striker stops dead, the middle three never move, the far one leaves at exactly
+the incoming speed — momentum and energy conserved to machine precision.
+
+Two things I assumed and the tests disproved, both now recorded as tests:
+
+* A single solver iteration does **not** smear the cradle. The impulse
+  propagates one contact per *timestep*, so iteration count barely matters
+  there.
+* Where iterations do matter is **stacks** — many contacts that must hold
+  simultaneously against gravity. One sweep sags, forty holds.
+
 ## The interactive window — no GPU anywhere
 
 ```

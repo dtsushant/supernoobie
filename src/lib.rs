@@ -13,5 +13,7 @@ pub mod complex;
 pub mod dynamics;
 pub mod pulley;
 pub mod raster;
+pub mod rigid;
 pub mod svg;
+
 

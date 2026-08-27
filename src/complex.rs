@@ -99,6 +99,36 @@ impl Cx {
     pub fn rotate(self, theta: f64) -> Self {
         self * Cx::expi(theta)
     }
+
+    /// Rotate a quarter turn anticlockwise. `i * self`, and the workhorse of
+    /// rigid-body code: the velocity a spinning body gives to a point offset
+    /// `r` from its centre is `omega * perp(r)`.
+    pub fn perp(self) -> Self {
+        Cx::new(-self.im, self.re)
+    }
+
+    /// Dot product `a . b`.
+    ///
+    /// Both 2-D products fall out of ONE complex multiplication:
+    ///
+    /// ```text
+    /// conj(a) * b = (ax*bx + ay*by)  +  i (ax*by - ay*bx)
+    ///                \___________/         \___________/
+    ///                  the DOT               the CROSS
+    /// ```
+    ///
+    /// So the dot product is its real part and the 2-D cross product is its
+    /// imaginary part. Nothing else in the plane needs defining.
+    pub fn dot(self, o: Cx) -> f64 {
+        (self.conj() * o).re
+    }
+
+    /// The scalar 2-D cross product `a x b = ax*by - ay*bx`.
+    /// Positive when `b` is anticlockwise from `a`. See [`Cx::dot`] for why
+    /// this is just the imaginary part of the same product.
+    pub fn cross(self, o: Cx) -> f64 {
+        (self.conj() * o).im
+    }
 }
 
 impl Add for Cx {
@@ -272,6 +302,34 @@ mod tests {
         assert!(close_c(z2, Cx::new(0.0, 2.0)));
         assert!(close_c(z4, Cx::new(-4.0, 0.0)));
         assert!(close_c(z8, Cx::new(16.0, 0.0)));
+    }
+
+    /// Both plane products come out of a single complex multiplication.
+    #[test]
+    fn dot_and_cross_are_one_multiplication() {
+        let a = Cx::new(3.0, 1.0);
+        let b = Cx::new(-2.0, 4.0);
+        let p = a.conj() * b;
+        assert!(close(a.dot(b), 3.0 * -2.0 + 1.0 * 4.0)); // -2
+        assert!(close(a.cross(b), 3.0 * 4.0 - 1.0 * -2.0)); // 14
+        assert!(close(p.re, a.dot(b)));
+        assert!(close(p.im, a.cross(b)));
+    }
+
+    /// Perpendicular vectors have zero dot; parallel ones have zero cross.
+    #[test]
+    fn dot_and_cross_detect_the_right_things() {
+        let a = Cx::new(2.0, 0.0);
+        assert!(close(a.dot(a.perp()), 0.0));
+        assert!(close(a.cross(a.scale(3.0)), 0.0));
+        assert!(close(a.cross(a.perp()), a.abs_sq()));
+    }
+
+    /// `perp` is exactly multiplication by i.
+    #[test]
+    fn perp_is_multiplication_by_i() {
+        let z = Cx::new(2.0, -5.0);
+        assert!(close_c(z.perp(), Cx::I * z));
     }
 
     /// arg must handle every quadrant - the atan2 lesson.

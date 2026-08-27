@@ -36,5 +36,10 @@ name = "play"
 path = "src/bin/play.rs"
 required-features = ["play"]
 
+[[bin]]
+name = "bodies"
+path = "src/bin/bodies.rs"
+required-features = ["play"]
+
 [profile.release]
 opt-level = 3
