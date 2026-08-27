@@ -11,6 +11,8 @@
 
 pub mod complex;
 pub mod dynamics;
+pub mod fluid;
+pub mod grid;
 pub mod pulley;
 pub mod raster;
 pub mod rigid;

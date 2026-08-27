@@ -46,5 +46,10 @@ name = "cloth"
 path = "src/bin/cloth.rs"
 required-features = ["window"]
 
+[[bin]]
+name = "fluid"
+path = "src/bin/fluid.rs"
+required-features = ["window"]
+
 [profile.release]
 opt-level = 3

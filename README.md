@@ -5,13 +5,14 @@ motion comes out of an ODE. Zero dependencies, so `cargo test` is the whole
 toolchain.
 
 ```bash
-cargo test                                     # 69 tests - the mathematics, verified
+cargo test                                     # 86 tests - the mathematics, verified
 cargo run                                      # tables + pulley.svg, pulley_sim.svg
 cargo run --example play_complex               # complex-number scratchpad
 
 cargo run --release --features window --bin play     # the pulley, crank it
 cargo run --release --features window --bin bodies   # rigid bodies
 cargo run --release --features window --bin cloth    # cloth, rope, soft bodies
+cargo run --release --features window --bin fluid    # SPH fluid
 cargo run --features serve --bin serve         # browser console on :3000
 ```
 
@@ -31,6 +32,71 @@ behind a feature flag.
 | `src/svg.rs` | drawing only | skip while learning |
 | `src/main.rs` | the CLI report | last |
 | `src/bin/serve.rs` | Axum + Tokio + HTMX console | when you want to poke it |
+
+## SPH fluid — `src/fluid.rs` + `src/grid.rs`
+
+```
+cargo run --release --features window --bin fluid     # release matters: ~20x
+```
+
+Fluid dynamics is written for **fields** — density and pressure defined at
+every point. Particles are not a field, they are a scatter of dots. SPH is the
+bridge:
+
+> **Read a field off a scatter of particles by smearing each one into a soft
+> blob and adding up the overlaps.**
+
+That blob is the **kernel** `W(r,h)`: a bump, peaked at the particle, exactly
+zero past `h`. Every field becomes a weighted sum over neighbours, and every
+*derivative* becomes a sum over the derivative of the kernel — which is known
+analytically. Calculus on a point cloud, with no mesh.
+
+```text
+rho_i = sum_j m_j W(|r_i - r_j|, h)              density
+p_i   = k (rho_i - rho_0)   clamped at zero      pressure
+f_press = -sum_j m_j (p_i + p_j)/(2 rho_j) grad W_spiky
+f_visc  =  mu sum_j m_j (v_j - v_i)/rho_j  lap  W_visc
+```
+
+The pressure term is **symmetrised** (`(p_i + p_j)/2`) so that j pushes i
+exactly as hard as i pushes j. An unsymmetric pair invents momentum from
+nothing; there is a test that it does not.
+
+**Three different kernels, and it is not fussiness:**
+
+| kernel | for | why |
+|---|---|---|
+| poly6 | density | smooth, and a function of `r^2` so no square root |
+| spiky | pressure | poly6's gradient **vanishes** at `r=0`, so coincident particles feel no push apart and clump. Spiky's is strongest there. |
+| viscosity | the Laplacian | poly6's Laplacian goes negative near `h`, *adding* energy |
+
+Each is chosen for how a *derivative* of it behaves. Get it wrong and you do
+not get a slightly worse fluid, you get clumping or a detonation.
+
+### `grid.rs` — the spatial hash
+
+Every sum above is "over j within h", so SPH lives or dies on neighbour search.
+Chop space into cells the size of the interaction radius; anything close enough
+to matter is in your cell or the eight around it. Cost per particle then tracks
+local **density**, not population — O(n) instead of O(n²).
+
+One structure, three payoffs: neighbours for `fluid.rs`, a broadphase for
+`rigid.rs` (still brute force today), and eventually self-collision for
+`soft.rs`.
+
+### Two bugs this rung produced, both now tests
+
+* **`stable_dt` used the wrong sound speed.** With `p = k(rho - rho_0)` the
+  wave speed is `sqrt(k)` — it does *not* involve density. My version returned
+  **2.6 seconds** instead of ~1.4 ms, so the fluid detonated on the first step
+  while the diagnostic said everything was fine.
+* **Stiffness cannot be guessed.** It has to hold up a column of fluid:
+  `k = g·depth/squash`, and the rest density cancels. My initial guess was off
+  by four orders of magnitude. `tune_stiffness(depth, squash)` now derives it.
+
+Also: the hash used to panic on overflow when the fluid exploded, so the *hash*
+reported the failure instead of the fluid. It now clamps and files the rubbish,
+leaving the caller's own diagnostics to say what really went wrong.
 
 ## Cloth, rope and soft bodies — `src/soft.rs`
 

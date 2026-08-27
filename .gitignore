@@ -8,6 +8,7 @@ pulley_sim.svg
 frame*.png
 bodies*.png
 cloth*.png
+fluid*.png
 
 # Editors
 /.idea/
