@@ -1,4 +1,4 @@
-﻿//! # Recursion I
+//! # Recursion I
 //!
 //! A pulley machine built entirely from complex numbers.
 //!
@@ -9,11 +9,14 @@
 //!
 //! Reading order: `complex` -> `pulley` -> `dynamics`.
 
+pub mod body3;
 pub mod complex;
 pub mod dynamics;
 pub mod fluid;
 pub mod grid;
 pub mod pulley;
+pub mod quat;
+pub mod vec3;
 pub mod raster;
 pub mod rigid;
 pub mod soft;

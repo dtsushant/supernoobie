@@ -165,13 +165,23 @@ impl Canvas {
         self.line(x + w, y, x + w, y + h, c);
     }
 
-    /// Draw text with the 5x7 font. Lowercase is folded to uppercase because
-    /// the font has no lowercase glyphs.
+    /// Draw text with the 5x7 font.
+    ///
+    /// The table covers ASCII 32..95, so lowercase is folded to uppercase and
+    /// a few symbols above `_` are patched in by hand. Anything else becomes
+    /// `?` — which is how `|L|` once rendered as `?L?` in the 3-D demo.
     pub fn text(&mut self, x: i32, y: i32, s: &str, c: u32, scale: i32) {
         let mut cx = x;
         for ch in s.chars() {
             let up = ch.to_ascii_uppercase() as usize;
-            let glyph = if (32..96).contains(&up) { FONT[up - 32] } else { FONT[31] };
+            let glyph = match up {
+                32..=95 => FONT[up - 32],
+                124 => [0x00, 0x00, 0x7F, 0x00, 0x00], // |
+                123 => [0x00, 0x08, 0x36, 0x41, 0x00], // {
+                125 => [0x00, 0x41, 0x36, 0x08, 0x00], // }
+                126 => [0x08, 0x04, 0x08, 0x10, 0x08], // ~
+                _ => FONT[31],                         // ?
+            };
             for (col, bits) in glyph.iter().enumerate() {
                 for row in 0..7 {
                     if (bits >> row) & 1 == 1 {

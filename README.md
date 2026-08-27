@@ -5,7 +5,7 @@ motion comes out of an ODE. Zero dependencies, so `cargo test` is the whole
 toolchain.
 
 ```bash
-cargo test                                     # 86 tests - the mathematics, verified
+cargo test                                     # 114 tests - the mathematics, verified
 cargo run                                      # tables + pulley.svg, pulley_sim.svg
 cargo run --example play_complex               # complex-number scratchpad
 
@@ -13,6 +13,7 @@ cargo run --release --features window --bin play     # the pulley, crank it
 cargo run --release --features window --bin bodies   # rigid bodies
 cargo run --release --features window --bin cloth    # cloth, rope, soft bodies
 cargo run --release --features window --bin fluid    # SPH fluid
+cargo run --release --features window --bin spin3d   # 3D rotation, quaternions
 cargo run --features serve --bin serve         # browser console on :3000
 ```
 
@@ -32,6 +33,82 @@ behind a feature flag.
 | `src/svg.rs` | drawing only | skip while learning |
 | `src/main.rs` | the CLI report | last |
 | `src/bin/serve.rs` | Axum + Tokio + HTMX console | when you want to poke it |
+
+## Three dimensions — `src/quat.rs`, `src/body3.rs`, `src/vec3.rs`
+
+```
+cargo run --release --features window --bin spin3d
+```
+
+This is the sequel to `complex.rs`, and the reason the project started with
+complex numbers rather than vectors.
+
+A complex number rotates the **plane** in one multiplication. So what rotates
+**space**? The obvious answer — three angles — is wrong, and not obviously
+wrong until it bites. Hamilton spent thirteen years looking for a three-number
+system that multiplies properly. There isn't one. In 1843 he realised you need
+**four**, and that the multiplication cannot commute:
+
+```text
+i^2 = j^2 = k^2 = i j k = -1
+```
+
+Everything else follows, including `ij = k` but `ji = -k`. **Order matters** —
+and it has to, because rotating about x then y genuinely differs from y then x.
+Non-commutativity isn't an inconvenience of the algebra; it is the physics
+being reported accurately.
+
+```text
+q  = cos(theta/2) + sin(theta/2) * axis      note the HALF angle
+v' = q v q*                                  the sandwich product
+```
+
+The half angle is not a convention you could drop: the vector is multiplied on
+*both* sides, so the rotation lands twice and the half compensates.
+
+| | plane | space |
+|---|---|---|
+| rotate | `z' = e^(i t) z` | `v' = q v q*` |
+| numbers | 2 | 4 |
+| commutes | yes | **no** |
+| stored angle | `theta` | `theta/2` |
+| degenerates | never | never (Euler angles do) |
+
+Restrict a quaternion to `w + z k` and you have `complex.rs` back, doing
+exactly what it did. A complex number is a quaternion that has only heard of
+one axis — there is a test that says so.
+
+### Three things the demo shows
+
+**Gimbal lock**, drawn as the three Euler axes really are. At pitch 90° the
+yaw and roll axes become the *same line* — `YAW . ROLL = 0.9998` — so three
+knobs reach only a two-dimensional set of orientations. Apollo 11's inertial
+platform had the same problem in hardware.
+
+**The Dzhanibekov effect.** A free box spun about its **middle** moment of
+inertia flips end over end, forever, with no torque. Spun about the largest or
+smallest it is stable. The cause is the gyroscopic term in Euler's equations:
+
+```text
+I omega_dot = torque - omega x (I omega)
+```
+
+Start at `omega = (0.03, 5.0, 0.03)` and 3.4 s later it reads
+`(+0.06, -5.00, +0.07)` — completely inverted, while the angular momentum
+arrow has not moved and the energy is unchanged. Cosmonaut Dzhanibekov filmed
+a wingnut doing this in 1985 and the footage was classified for a decade.
+
+**Slerp against lerp.** Same endpoints, same time, visibly different speed
+through the middle — and slerp knows to take the short way round the double
+cover.
+
+### The double cover
+
+`q` and `-q` are the *same rotation* (both signs cancel in the sandwich), so a
+full 360° turn leaves the quaternion at `-1`, and **720°** is needed to come
+home. That is not notation: it is why an electron must be turned twice to
+return to itself, and why you can untwist your arm by rotating a held glass
+through two full turns but not one. Try it.
 
 ## SPH fluid — `src/fluid.rs` + `src/grid.rs`
 

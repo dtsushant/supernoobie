@@ -9,6 +9,7 @@ frame*.png
 bodies*.png
 cloth*.png
 fluid*.png
+spin*.png
 
 # Editors
 /.idea/
