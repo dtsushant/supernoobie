@@ -15,8 +15,8 @@ minifb = { version = "0.28", optional = true }
 [features]
 # live browser console, rendered server-side
 serve = ["dep:axum", "dep:tokio"]
-# interactive window, every pixel drawn on the CPU
-play = ["dep:minifb"]
+# interactive windows, every pixel drawn on the CPU
+window = ["dep:minifb"]
 
 [lib]
 name = "recursion1"
@@ -34,12 +34,17 @@ required-features = ["serve"]
 [[bin]]
 name = "play"
 path = "src/bin/play.rs"
-required-features = ["play"]
+required-features = ["window"]
 
 [[bin]]
 name = "bodies"
 path = "src/bin/bodies.rs"
-required-features = ["play"]
+required-features = ["window"]
+
+[[bin]]
+name = "cloth"
+path = "src/bin/cloth.rs"
+required-features = ["window"]
 
 [profile.release]
 opt-level = 3

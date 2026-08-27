@@ -5,12 +5,18 @@ motion comes out of an ODE. Zero dependencies, so `cargo test` is the whole
 toolchain.
 
 ```bash
-cargo test                                    # 37 tests - the mathematics, verified
-cargo run                                     # tables + writes pulley.svg, pulley_sim.svg
-cargo run --example play_complex              # scratchpad: edit the numbers, re-run
-cargo run --release --features play --bin play    # interactive window, CPU-rendered
-cargo run --features serve --bin serve        # live console at http://127.0.0.1:3000
+cargo test                                     # 69 tests - the mathematics, verified
+cargo run                                      # tables + pulley.svg, pulley_sim.svg
+cargo run --example play_complex               # complex-number scratchpad
+
+cargo run --release --features window --bin play     # the pulley, crank it
+cargo run --release --features window --bin bodies   # rigid bodies
+cargo run --release --features window --bin cloth    # cloth, rope, soft bodies
+cargo run --features serve --bin serve         # browser console on :3000
 ```
+
+Every windowed binary also takes `--snapshot N [seconds]`, which renders one
+frame to PNG and exits — no display required.
 
 Nothing to install: the maths core is `std`-only, and the two web crates are
 behind a feature flag.
@@ -26,10 +32,73 @@ behind a feature flag.
 | `src/main.rs` | the CLI report | last |
 | `src/bin/serve.rs` | Axum + Tokio + HTMX console | when you want to poke it |
 
+## Cloth, rope and soft bodies — `src/soft.rs`
+
+```
+cargo run --release --features window --bin cloth
+```
+
+Left-drag grabs a node, **right-drag is a knife**, arrows tilt gravity.
+
+Everything so far has been *force-based*: forces → acceleration → velocity →
+position. Cloth breaks that. A sheet is thousands of stiff springs, and stiff
+springs need a tiny timestep or they explode — exactly as explicit Euler did on
+the pulley.
+
+So invert it. Work **directly with positions**, and describe the fabric not as
+forces but as **constraints**: *"these two particles are 10 apart."* Move them
+until it is true. No spring constant, nothing to blow up.
+
+**Verlet — where the velocity went.** Store the *previous* position instead of
+a velocity:
+
+```text
+next = p + (p - prev) * damping + a * dt^2
+```
+
+`(p - prev)` **is** the velocity. It is never stored, only inferred, and that
+one choice carries the method:
+
+> **If you move a particle, you have changed its velocity.**
+
+A constraint that yanks a node sideways gives it sideways momentum for free.
+Collisions become "put it back outside the wall" and the bounce falls out.
+Dragging with the mouse genuinely *throws* the fabric.
+
+**The distance constraint** — the entire physics of cloth:
+
+```text
+corr = d/dist * (dist - L) * k / (wa + wb)
+pa  += corr * wa          pb -= corr * wb
+```
+
+Split by **inverse** mass, so a pinned node (`w = 0`) never moves and its
+partner takes the whole correction. Sweep the list repeatedly — the same
+Gauss-Seidel loop as the contact solver in `rigid.rs`. Stiffness is corrected
+by `k' = 1 - (1-k)^(1/n)` so iterations buy *accuracy*, not stiffness.
+
+**Which pairs you link is the material:** structural (N/S/E/W) holds length but
+shears freely; diagonals resist shearing; skip-a-neighbour resists folding.
+
+### Three things I got wrong, all now tests
+
+* **Damping was per *step*.** A plausible-looking `0.995` at 600 Hz leaves
+  `0.995^600 = 0.05` of the motion — cloth fell at a fifth of the right speed,
+  suspended in treacle. It is now per *second* via `damping^dt`, which also
+  makes it step-size independent. Two tests pin it.
+* **A 2-D sheet cannot drape.** Draping is fabric buckling *out of plane*, and
+  a flat world has none. Fully triangulated at full stiffness, a grid is a
+  rigid truss that tumbles like a dinner tray. Hence soft diagonals — and hence
+  the honest 2-D analogue of cloth-over-a-sphere being a **slack rope** over
+  one, which produces a proper catenary at 0.5% strain.
+* **There is no self-collision.** Blobs fall straight through the rope. That is
+  the genuinely expensive half of cloth simulation (spatial hashing,
+  particle-versus-edge, continuous detection) and it is not here.
+
 ## Rigid bodies — `src/rigid.rs`
 
 ```
-cargo run --release --features play --bin bodies
+cargo run --release --features window --bin bodies
 ```
 
 **The mathematics is in one file and nothing else is.** `rigid.rs` never
@@ -86,7 +155,7 @@ Two things I assumed and the tests disproved, both now recorded as tests:
 ## The interactive window — no GPU anywhere
 
 ```
-cargo run --release --features play --bin play
+cargo run --release --features window --bin play
 ```
 
 | key | |
