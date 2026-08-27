@@ -10,6 +10,7 @@ bodies*.png
 cloth*.png
 fluid*.png
 spin*.png
+render*.png
 
 # Editors
 /.idea/

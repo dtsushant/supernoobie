@@ -56,5 +56,10 @@ name = "spin3d"
 path = "src/bin/spin3d.rs"
 required-features = ["window"]
 
+[[bin]]
+name = "render"
+path = "src/bin/render.rs"
+required-features = ["window"]
+
 [profile.release]
 opt-level = 3

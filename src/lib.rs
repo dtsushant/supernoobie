@@ -18,6 +18,7 @@ pub mod pulley;
 pub mod quat;
 pub mod vec3;
 pub mod raster;
+pub mod render3;
 pub mod rigid;
 pub mod soft;
 pub mod svg;

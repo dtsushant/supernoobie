@@ -5,7 +5,7 @@ motion comes out of an ODE. Zero dependencies, so `cargo test` is the whole
 toolchain.
 
 ```bash
-cargo test                                     # 114 tests - the mathematics, verified
+cargo test                                     # 129 tests - the mathematics, verified
 cargo run                                      # tables + pulley.svg, pulley_sim.svg
 cargo run --example play_complex               # complex-number scratchpad
 
@@ -14,6 +14,7 @@ cargo run --release --features window --bin bodies   # rigid bodies
 cargo run --release --features window --bin cloth    # cloth, rope, soft bodies
 cargo run --release --features window --bin fluid    # SPH fluid
 cargo run --release --features window --bin spin3d   # 3D rotation, quaternions
+cargo run --release --features window --bin render   # lit, depth-buffered 3D
 cargo run --features serve --bin serve         # browser console on :3000
 ```
 
@@ -33,6 +34,68 @@ behind a feature flag.
 | `src/svg.rs` | drawing only | skip while learning |
 | `src/main.rs` | the CLI report | last |
 | `src/bin/serve.rs` | Axum + Tokio + HTMX console | when you want to poke it |
+
+## The software renderer — `src/render3.rs`
+
+```
+cargo run --release --features window --bin render
+```
+
+Filled, depth-buffered, lit triangles. Still a `Vec<u32>` written by the CPU;
+no GPU, no shader language, no graphics API.
+
+**Perspective is a division.** That is the whole of it — things far away look
+small because you divide by how far away they are. Everything awkward that
+follows (clipping, the depth buffer, perspective-correct interpolation) is a
+consequence of that one division.
+
+**Which pixels are inside a triangle?** The *edge function*:
+
+```text
+E(a, b, p) = (b - a) x (p - a)
+```
+
+Positive one side, negative the other, zero on the line — a point is inside
+when all three agree. That is the same scalar cross product from `complex.rs`
+(`Im(conj(a)·b)`, the signed area) doing an entirely different job. Divide the
+three by their sum and they become **barycentric coordinates**, the weights
+that blend attributes across the face. One primitive gives you the inside
+test, the interpolation, *and* backface culling — the sign of the total area
+is the winding.
+
+### The three toggles are the lesson
+
+**P — perspective-correct interpolation.** Screen space is not linear in world
+space, so what varies linearly across the screen is `1/z`:
+
+```text
+WRONG:  attr = w0*a0 + w1*a1 + w2*a2
+RIGHT:  (w0*a0/z0 + w1*a1/z1 + w2*a2/z2) / (w0/z0 + w1/z1 + w2/z2)
+```
+
+Turn it off and the floor checker shears along each quad's diagonal — the
+artefact in every PlayStation 1 game, whose hardware genuinely could not
+afford the divide. A test measures the error on a receding edge.
+
+**Z — the depth buffer.** Painting far-to-near fails the moment two objects
+interpenetrate. Keep a depth per *pixel* instead and the result stops
+depending on submission order at all — there is a test that renders the same
+two triangles in both orders and demands identical buffers.
+
+**C — backface culling.** Roughly half of every closed mesh faces away.
+
+### Two sign bugs, both found by looking, both now pinned
+
+* **The camera basis was mirrored.** `forward × up` gives `−right`, so the
+  whole image was flipped and every winding reversed — culling then kept
+  exactly the wrong half of every mesh. It is `up × forward`.
+* **The culling test was itself wrong.** I built a "front-facing" triangle
+  whose assigned normal said `−Z` while its winding said `+Z`, and the test
+  cheerfully enshrined the wrong sign. The floor vanished. The test now
+  *derives* the normal from the winding and asserts it faces the camera.
+
+The second is the more useful lesson: a test can be confidently green and
+still be measuring the wrong thing.
 
 ## Three dimensions — `src/quat.rs`, `src/body3.rs`, `src/vec3.rs`
 
