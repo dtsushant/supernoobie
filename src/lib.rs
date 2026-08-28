@@ -9,6 +9,7 @@
 //!
 //! Reading order: `complex` -> `pulley` -> `dynamics`.
 
+pub mod bike;
 pub mod body3;
 pub mod complex;
 pub mod dynamics;

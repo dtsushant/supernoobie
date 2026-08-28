@@ -9,6 +9,7 @@
 //! With the overlay off it is a game. With it on it is a diagram you can play.
 
 use minifb::{Key, KeyRepeat, MouseButton, MouseMode, Window, WindowOptions};
+use recursion1::bike::{two_bone_ik, Bike, Terrain};
 use recursion1::complex::Cx;
 use recursion1::fluid::{Bound, Fluid};
 use recursion1::game::{chrome, pen, Input, Overlay, Readout, Stage, Status, View};
@@ -663,6 +664,208 @@ impl Stage for Flow {
 }
 
 // ===========================================================================
+// 5. RIDE — the gears, as a bicycle
+// ===========================================================================
+
+/// A bicycle is the two-gear machine from `pulley.rs`, pedalled. The chain is
+/// drawn with the same external-tangent construction the pulley rope uses.
+struct Ride {
+    t: Terrain,
+    bike: Bike,
+    cam: f64,
+    finish: f64,
+    time: f64,
+}
+
+impl Ride {
+    fn new() -> Self {
+        let t = Terrain::default();
+        let mut r = Ride { t, bike: Bike::new(&t, 220.0), cam: 0.0, finish: 4200.0, time: 0.0 };
+        r.reset();
+        r
+    }
+    /// The chain: the two common tangents of chainring and sprocket, computed
+    /// exactly as `pulley.rs` computes them for its rope.
+    fn chain(&self) -> (Cx, Cx, Cx, Cx, Cx, f64, f64) {
+        let c = self.bike.crank_centre();
+        let s = self.bike.rear;
+        let (rc, rs) = (self.bike.drive.chainring, self.bike.drive.sprocket);
+        let d = s - c;
+        let dist = d.abs().max(1e-6);
+        let phi = d.arg();
+        // alpha = acos((rc - rs)/dist); at equal radii it is pi/2 and the
+        // offset becomes exactly i * dhat
+        let alpha = ((rc - rs) / dist).clamp(-1.0, 1.0).acos();
+        let up = Cx::expi(phi + alpha);
+        let dn = Cx::expi(phi - alpha);
+        (c, c + up.scale(rc), s + up.scale(rs), c + dn.scale(rc), s + dn.scale(rs), rc, rs)
+    }
+}
+
+impl Stage for Ride {
+    fn name(&self) -> &'static str {
+        "RIDE"
+    }
+    fn goal(&self) -> &'static str {
+        "PEDAL OVER THE HILLS TO THE FLAG - DROP A GEAR TO CLIMB, SHIFT UP TO FLY"
+    }
+    fn controls(&self) -> &'static str {
+        "SPACE PEDAL  DOWN BRAKE  LEFT/RIGHT GEAR  R RESET  ESC MENU"
+    }
+    fn formula(&self) -> &'static [&'static str] {
+        &[
+            "CHAIN    W_WHEEL = W_CRANK * (R_CHAINRING / R_SPROCKET)",
+            "GROUND   S = R_WHEEL * THETA_WHEEL            (ARC LENGTH)",
+            "FORCE    F = TAU * R_SPROCKET / (R_CHAINRING * R_WHEEL)",
+            "HILL     H(X) = SUM A SIN(F X + P)   SLOPE DIFFERENTIATED",
+            "LEGS     TWO-BONE IK = TWO CIRCLES INTERSECTING",
+        ]
+    }
+    fn reset(&mut self) {
+        self.bike = Bike::new(&self.t, 220.0);
+        self.cam = 0.0;
+        self.time = 0.0;
+    }
+
+    fn update(&mut self, dt: f64, i: &Input) -> Status {
+        self.time += dt;
+        if i.left {
+            self.bike.drive.chainring = (self.bike.drive.chainring - 26.0 * dt).max(12.0);
+        }
+        if i.right {
+            self.bike.drive.chainring = (self.bike.drive.chainring + 26.0 * dt).min(46.0);
+        }
+        let pedal = if i.action { 1.0 } else { 0.0 };
+        let brake = if i.down { 1.0 } else { 0.0 };
+        self.bike.step(&self.t, dt, pedal, brake);
+        self.cam += (self.bike.rear.re - 330.0 - self.cam) * (4.0 * dt).min(1.0);
+
+        if self.bike.rear.re > self.finish {
+            Status::Won
+        } else {
+            Status::Playing
+        }
+    }
+
+    fn draw(&self, c: &mut Canvas, v: &View, ov: Overlay) {
+        let b = &self.bike;
+        let off = Cx::new(-self.cam, 0.0);
+        let sh = |p: Cx| p + off;
+
+        // the hill
+        let mut prev: Option<Cx> = None;
+        let mut x = self.cam - 20.0;
+        while x < self.cam + W as f64 + 20.0 {
+            let p = sh(self.t.at(x));
+            if let Some(q) = prev {
+                v.line(c, q, p, 2, 0x3D5A73);
+            }
+            if (x as i64) % 24 == 0 {
+                v.line(c, p, p + Cx::new(-13.0, -20.0), 1, 0x1B2733);
+            }
+            prev = Some(p);
+            x += 6.0;
+        }
+
+        // the flag
+        let fp = sh(self.t.at(self.finish));
+        v.line(c, fp, fp + Cx::new(0.0, 92.0), 2, colour::GOOD);
+        v.line(c, fp + Cx::new(0.0, 92.0), fp + Cx::new(44.0, 76.0), 2, colour::GOOD);
+        v.line(c, fp + Cx::new(44.0, 76.0), fp + Cx::new(0.0, 60.0), 2, colour::GOOD);
+
+        // wheels, spun by the drivetrain
+        let ang = b.drive.wheel_angle;
+        for w in [b.rear, b.front] {
+            v.ring(c, sh(w), b.wheel_r, 2, colour::INK);
+            for k in 0..6 {
+                let a = ang + k as f64 * std::f64::consts::PI / 3.0;
+                v.line(c, sh(w), sh(w + Cx::expi(a).scale(b.wheel_r * 0.9)), 1, 0x2B3945);
+            }
+        }
+
+        // frame and drivetrain
+        let (crank, ct, st, cb, sb, rc, rs) = self.chain();
+        for (a, z) in [
+            (b.rear, b.seat),
+            (b.front, b.seat),
+            (b.rear, crank),
+            (b.front, crank),
+            (b.front, b.bars()),
+        ] {
+            v.line(c, sh(a), sh(z), 2, colour::IMAG);
+        }
+        v.ring(c, sh(crank), rc, 2, colour::REAL);
+        v.ring(c, sh(b.rear), rs, 2, colour::REAL);
+        v.line(c, sh(ct), sh(st), 2, colour::REAL);
+        v.line(c, sh(cb), sh(sb), 2, colour::REAL);
+
+        // the rider — legs follow the pedals, so the animation IS the gearing
+        let (pa, pb) = b.drive.pedals(crank, 18.0);
+        let up = (b.seat - b.rear).unit();
+        let hip = b.seat + up.scale(6.0);
+        let shoulder = hip + up.scale(38.0);
+        let head = shoulder + up.scale(17.0);
+        for foot in [pa, pb] {
+            let knee = two_bone_ik(hip, foot, 40.0, 40.0, 1.0);
+            v.line(c, sh(hip), sh(knee), 2, colour::MOD);
+            v.line(c, sh(knee), sh(foot), 2, colour::MOD);
+            v.disc(c, sh(foot), 3.0, colour::MOD);
+        }
+        v.line(c, sh(hip), sh(shoulder), 2, colour::MOD);
+        let hand = b.bars();
+        let elbow = two_bone_ik(shoulder, hand, 26.0, 26.0, -1.0);
+        v.line(c, sh(shoulder), sh(elbow), 2, colour::MOD);
+        v.line(c, sh(elbow), sh(hand), 2, colour::MOD);
+        v.ring(c, sh(head), 11.0, 2, colour::MOD);
+
+        // ---- annotations -------------------------------------------------
+        if ov.on(Overlay::RADII) {
+            pen::radius(c, v, sh(crank), rc, 1.9, &format!("RC {rc:.0}"));
+            pen::radius(c, v, sh(b.rear), rs, 4.1, &format!("RS {rs:.0}"));
+            pen::radius(c, v, sh(b.front), b.wheel_r, 0.5, &format!("RW {:.0}", b.wheel_r));
+        }
+        if ov.on(Overlay::ANGLES) {
+            let t = b.drive.crank.rem_euclid(2.0 * std::f64::consts::PI);
+            pen::angle_arc(c, v, sh(crank), rc * 0.5, 0.0, t, &format!("{t:.2} RAD"));
+        }
+        if ov.on(Overlay::LENGTHS) {
+            pen::dimension(c, v, sh(b.rear), sh(b.front), 58.0, &format!("WB {:.0}", b.wheelbase));
+            pen::tag(c, v, sh(head), Cx::new(44.0, 34.0),
+                     &format!("{:.0} / {:.0}", b.rear.re, self.finish), pen::DIM);
+        }
+        if ov.on(Overlay::VECTORS) {
+            let tan = self.t.tangent(b.rear.re);
+            pen::arrow(c, v, sh(b.rear), sh(b.rear) + tan.scale(72.0), pen::VEC, Some("T"));
+        }
+        if ov.on(Overlay::CONTACTS) {
+            for (w, on) in [(b.rear, b.rear_grounded), (b.front, b.front_grounded)] {
+                if on {
+                    let g = self.t.at(w.re);
+                    v.disc(c, sh(g), 4.0, pen::HIT);
+                    pen::arrow(c, v, sh(g), sh(g) + self.t.normal(w.re).scale(32.0), pen::HIT, None);
+                }
+            }
+        }
+        if ov.on(Overlay::GRID) {
+            let mut gx = (self.cam / 200.0).floor() * 200.0;
+            while gx < self.cam + W as f64 {
+                let p = sh(Cx::new(gx, 0.0));
+                v.line(c, p, p + Cx::new(0.0, H as f64), 1, 0x141D26);
+                gx += 200.0;
+            }
+        }
+        if ov.on(Overlay::READOUTS) {
+            let mut r = Readout::new(v);
+            r.row(c, &format!("GEAR {:.2}   TOP SPEED {:.0}   DRIVE FORCE {:.0}",
+                              b.drive.ratio(), b.drive.top_speed(), b.drive.drive_force()), colour::SOFT);
+            r.row(c, &format!("X {:.0} / {:.0}   SLOPE {:+.2}   {}",
+                              b.rear.re, self.finish, self.t.slope(b.rear.re),
+                              if b.rear_grounded { "GRIP" } else { "AIRBORNE" }), colour::SOFT);
+        }
+    }
+}
+
+// ===========================================================================
 // the shell
 // ===========================================================================
 
@@ -672,14 +875,16 @@ fn stages() -> Vec<Box<dyn Stage>> {
         Box::new(Cut::new()),
         Box::new(Tilt::new()),
         Box::new(Flow::new()),
+        Box::new(Ride::new()),
     ]
 }
 
-const BLURB: [&str; 4] = [
+const BLURB: [&str; 5] = [
     "PULLEY.RS + RIGID.RS   -   ARC LENGTH BECOMES ROPE",
     "SOFT.RS                -   VERLET AND DISTANCE CONSTRAINTS",
     "RIGID.RS               -   IMPULSES, FRICTION AND SPIN",
     "FLUID.RS + GRID.RS     -   SPH AND A SPATIAL HASH",
+    "BIKE.RS                -   THE TWO-GEAR MACHINE, PEDALLED",
 ];
 
 fn main() {
@@ -698,8 +903,9 @@ fn main() {
         if k == 9 {
             menu(&mut c, &v, cursor);
         } else {
-            let g = &mut games[k % 4];
-            let mut inp = Input::default();
+            let g = &mut games[k % 5];
+            // the snapshot pedals, so RIDE is actually moving
+            let mut inp = Input { action: true, ..Input::default() };
             inp.resolve_axes();
             for _ in 0..(secs / DT) as usize {
                 g.update(DT, &inp);
@@ -767,10 +973,10 @@ fn main() {
         match picked {
             None => {
                 if pressed.contains(&Key::Down) {
-                    cursor = (cursor + 1) % 4;
+                    cursor = (cursor + 1) % 5;
                 }
                 if pressed.contains(&Key::Up) {
-                    cursor = (cursor + 3) % 4;
+                    cursor = (cursor + 4) % 5;
                 }
                 if pressed.contains(&Key::Enter) || pressed.contains(&Key::Space) {
                     games[cursor].reset();
@@ -840,9 +1046,9 @@ fn menu(c: &mut Canvas, v: &View, cursor: usize) {
     c.text(90, 70, "RECURSION", colour::INK, 6);
     c.text(92, 124, "FOUR GAMES OVER THE SAME PHYSICS", colour::FAINT, 2);
 
-    let names = ["CRANE", "CUT", "TILT", "FLOW"];
+    let names = ["CRANE", "CUT", "TILT", "FLOW", "RIDE"];
     for (k, n) in names.iter().enumerate() {
-        let y = 230 + k as i32 * 74;
+        let y = 210 + k as i32 * 66;
         let on = k == cursor;
         if on {
             c.fill_rect(76, y - 14, 720, 58, 0x121C25);

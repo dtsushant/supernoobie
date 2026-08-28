@@ -5,7 +5,7 @@ motion comes out of an ODE. Zero dependencies, so `cargo test` is the whole
 toolchain.
 
 ```bash
-cargo test                                     # 155 tests - the mathematics, verified
+cargo test                                     # 171 tests - the mathematics, verified
 cargo run                                      # tables + pulley.svg, pulley_sim.svg
 cargo run --example play_complex               # complex-number scratchpad
 
@@ -43,7 +43,7 @@ behind a feature flag.
 cargo run --release --features window --bin recursion
 ```
 
-Four stages over the physics files, sharing one shell (`src/game.rs`):
+Five stages over the physics files, sharing one shell (`src/game.rs`):
 
 | stage | physics | the idea it makes visible |
 |---|---|---|
@@ -51,6 +51,7 @@ Four stages over the physics files, sharing one shell (`src/game.rs`):
 | **CUT** | `soft.rs` | Verlet, and distance constraints you can sever |
 | **TILT** | `rigid.rs` | gravity as `g * e^(i*tilt)` — one multiplication |
 | **FLOW** | `fluid.rs` + `grid.rs` | SPH, and the spatial hash it needs |
+| **RIDE** | `bike.rs` | a stickman on a bicycle — the two-gear machine, pedalled |
 
 ### The overlay is the point
 
@@ -69,6 +70,45 @@ exactly this job.
 
 With all eight off it is a game. With all eight on it is a diagram you can
 play. Neither is the real view; they are the same numbers drawn twice.
+
+### RIDE — `src/bike.rs`
+
+A bicycle **is** the machine from `pulley.rs`. Two gears at a fixed separation
+joined by a loop over their common tangents: the chain is the rope, the
+chainring and sprocket are gears A and B, and the same
+`alpha = acos((rc - rs)/d)` draws it.
+
+```text
+w_wheel = w_crank * (r_chainring / r_sprocket)     the chain does not stretch
+s       = r_wheel * theta_wheel                    arc length, again
+F       = tau * r_sprocket / (r_chainring * r_wheel)
+```
+
+Follow the force rather than the speed and the point of gears falls out: a
+bigger chainring goes faster and pushes less hard, and **`speed x force` does
+not depend on the chainring at all**. A gear chooses how to spend the power; it
+cannot make any. There is a test that multiplies the two and demands the
+chainring cancel.
+
+The hill is a sum of sines — the "organic motion" trick, deterministic and
+never repeating — so its slope is *differentiated* rather than sampled, and the
+surface normal is that tangent times `i`.
+
+The rider has no walk cycle. The feet are bolted to the pedals at
+`crank + r e^(i theta)`, and the knees come from **two-bone IK**, which is two
+circles intersecting. The animation *is* the gear ratio.
+
+**Two modelling bugs worth keeping:**
+
+* A circle pushed out of curved ground is not necessarily clear of it — the
+  surface curves away and a *different* point becomes nearest. Resolving has
+  to iterate, and a wheel in a valley touches at two points at once.
+* Three distance constraints fix a frame's **shape** and nothing else. They do
+  not say which end is the front. Left alone the bike tumbled end over end and
+  rode backwards *and* upside down, with every constraint perfectly satisfied
+  and the solver reporting no error. The fix is what every side-scrolling bike
+  game does: a restoring torque toward the hill, applied as a rotation by
+  `arg(conj(heading) * target)`.
 
 CRANE is the one to look at first: turn on **1** and **2** and the readout
 shows `ROPE 180 / THETA 6.92 RAD / R*THETA 180`. The arc-length identity from
