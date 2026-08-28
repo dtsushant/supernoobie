@@ -5,7 +5,7 @@ motion comes out of an ODE. Zero dependencies, so `cargo test` is the whole
 toolchain.
 
 ```bash
-cargo test                                     # 143 tests - the mathematics, verified
+cargo test                                     # 149 tests - the mathematics, verified
 cargo run                                      # tables + pulley.svg, pulley_sim.svg
 cargo run --example play_complex               # complex-number scratchpad
 
@@ -127,6 +127,25 @@ depending on submission order at all — there is a test that renders the same
 two triangles in both orders and demands identical buffers.
 
 **C — backface culling.** Roughly half of every closed mesh faces away.
+
+**H — shadows.** A surface is in shadow when something is between it and the
+light, and the cheap way to know is to **render the scene from the light,
+keeping only depth**. That buffer is a map of how far the light reaches in each
+direction; shading then transforms each point into the light frame and compares.
+
+*Shadow acne* is the classic artefact: a surface, compared against a shadow map
+of finite resolution, disagrees with its own depth by a fraction of a texel and
+breaks out in stripes. The cure is a **bias** — but too much bias and shadows
+detach from their casters. Both failures are tests: one asserts a flat floor
+shadows itself at zero bias and stops at a sane one, the other that a huge bias
+peter-pans the shadow away.
+
+**M — planar reflections.** Rather than tracing rays, **reflect the camera
+through the mirror plane and render normally**: `p' = p - 2(n·p - d)n`.
+Reflection flips handedness, so winding reverses and culling must be inverted
+for that pass. A frame is then four passes — depth-from-light, reflection,
+translucent floor, opaque scene. Curved mirrors do not submit to this at all;
+that is where ray tracing starts.
 
 ### Two sign bugs, both found by looking, both now pinned
 

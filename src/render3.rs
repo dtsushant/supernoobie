@@ -81,6 +81,42 @@
 //! **Blinn-Phong** adds a highlight, using the half-vector between the light
 //! and the eye: `max(0, N . H)^shininess`. Not physically derived, but it has
 //! been good enough since 1977.
+//!
+//! ## 6. Shadows — render the scene twice
+//!
+//! A surface is in shadow when something else is between it and the light.
+//! Answering that per pixel sounds expensive; the trick that makes it cheap:
+//!
+//! > **Render the scene from the light's position, keeping only depth. That
+//! > depth buffer is a map of how far the light reaches in each direction.**
+//!
+//! Then when shading a pixel, transform it into the light's frame and compare.
+//! If the recorded depth is *nearer* than this point, something already
+//! blocked the light. Two passes over the same geometry, and the second reuses
+//! the machinery of the first with the colour writes turned off.
+//!
+//! **Shadow acne** is the classic artefact. A surface's own depth, compared
+//! against a shadow map of finite resolution, disagrees with itself by a
+//! fraction of a texel — so half its pixels decide they are shadowing
+//! themselves and the surface breaks out in stripes. The fix is a **bias**:
+//! demand the blocker be closer by some margin before believing it. Too little
+//! and you get acne; too much and shadows detach from their casters
+//! ("peter-panning"). There is a test for each failure.
+//!
+//! ## 7. Reflections — render the scene again, mirrored
+//!
+//! A flat mirror shows the world reflected through its plane. Rather than
+//! tracing rays, exploit that: **reflect the camera through the plane and
+//! render normally.** What that virtual camera sees is what the mirror shows.
+//!
+//! ```text
+//! p' = p - 2 (n . p - d) n
+//! ```
+//!
+//! Reflection **flips handedness**, so every triangle's winding reverses and
+//! the mirrored pass must invert its backface culling, or the reflection comes
+//! out inside-out. Curved mirrors do not submit to this trick at all — that is
+//! where you have to start tracing rays.
 
 use crate::raster::Canvas;
 use crate::vec3::V3;
@@ -264,6 +300,10 @@ pub struct Renderer {
     pub perspective_correct: bool,
     /// Turn OFF to see why the painter's algorithm is not enough.
     pub depth_test: bool,
+    /// Coverage of the next triangles, 0..=1. Below 1 the fragments blend
+    /// over what is already there instead of replacing it — which is what
+    /// makes a mirror floor show the reflection underneath it.
+    pub alpha: f64,
     pub drawn: usize,
     pub culled: usize,
 }
@@ -277,6 +317,7 @@ impl Renderer {
             cull: true,
             perspective_correct: true,
             depth_test: true,
+            alpha: 1.0,
             drawn: 0,
             culled: 0,
         }
@@ -288,7 +329,7 @@ impl Renderer {
         self.culled = 0;
     }
 
-    /// Draw one world-space triangle.
+    /// Draw one world-space triangle, unshadowed.
     pub fn triangle(
         &mut self,
         c: &mut Canvas,
@@ -298,6 +339,22 @@ impl Renderer {
         light: &Light,
         checker: bool,
     ) {
+        self.triangle_lit(c, cam, tri, base, light, checker, None)
+    }
+
+    /// Draw one world-space triangle, testing each fragment against a shadow
+    /// map. Pass `None` for no shadows.
+    #[allow(clippy::too_many_arguments)]
+    pub fn triangle_lit(
+        &mut self,
+        c: &mut Canvas,
+        cam: &Camera,
+        tri: [Vert; 3],
+        base: u32,
+        light: &Light,
+        checker: bool,
+        shadow: Option<&ShadowMap>,
+    ) {
         // to view space, then clip
         let view = [
             Vert { pos: cam.to_view(tri[0].pos), ..tri[0] },
@@ -305,7 +362,7 @@ impl Renderer {
             Vert { pos: cam.to_view(tri[2].pos), ..tri[2] },
         ];
         for piece in clip_near(view, cam.near) {
-            self.raster(c, cam, piece, tri, base, light, checker);
+            self.raster(c, cam, piece, tri, base, light, checker, shadow);
         }
     }
 
@@ -319,6 +376,7 @@ impl Renderer {
         base: u32,
         light: &Light,
         checker: bool,
+        shadow: Option<&ShadowMap>,
     ) {
         let (wf, hf) = (self.w as f64, self.h as f64);
         let mut s = [(0.0, 0.0, 0.0); 3];
@@ -404,9 +462,148 @@ impl Renderer {
                 if self.depth_test {
                     self.depth[idx] = z as f32;
                 }
-                c.px(x, y, light.shade(col, n, eye_dir_of(p)));
+                // In shadow only the ambient term survives: the direct light
+                // is blocked, so diffuse and specular both go.
+                let lit = match shadow {
+                    Some(sm) if sm.occluded(p) => {
+                        let amb = Light { diffuse: 0.0, specular: 0.0, ..*light };
+                        amb.shade(col, n, eye_dir_of(p))
+                    }
+                    _ => light.shade(col, n, eye_dir_of(p)),
+                };
+                if self.alpha >= 1.0 {
+                    c.px(x, y, lit);
+                } else {
+                    c.px_blend(x, y, lit, (self.alpha * 255.0) as u32);
+                }
             }
         }
+    }
+}
+
+/// The light's view of the scene: another [`Camera`], plus a depth buffer.
+/// The shadow pass is the ordinary render pass with colour writes removed.
+pub struct ShadowMap {
+    pub cam: Camera,
+    pub depth: Vec<f32>,
+    pub size: usize,
+    /// How much closer a blocker must be before we believe it. Too small gives
+    /// acne; too large detaches shadows from their casters.
+    pub bias: f32,
+}
+
+impl ShadowMap {
+    /// Point a camera back along the light direction, far enough to see a
+    /// sphere of `radius` around `centre`.
+    pub fn new(size: usize, light_dir: V3, centre: V3, radius: f64) -> Self {
+        let d = light_dir.unit();
+        let up = if d.y.abs() > 0.95 { V3::Z } else { V3::Y };
+        let back = radius * 2.5;
+        ShadowMap {
+            cam: Camera {
+                eye: centre - d.scale(back),
+                target: centre,
+                up,
+                fov_y: 2.0 * (radius / back).atan() * 1.4,
+                near: radius * 0.4,
+            },
+            depth: vec![f32::INFINITY; size * size],
+            size,
+            bias: 0.08,
+        }
+    }
+
+    pub fn begin(&mut self) {
+        self.depth.fill(f32::INFINITY);
+    }
+
+    /// Record one triangle's depth. No culling: a back face still blocks
+    /// light, and skipping them is a common source of missing shadows.
+    pub fn cast(&mut self, tri: [Vert; 3]) {
+        let view = [
+            Vert { pos: self.cam.to_view(tri[0].pos), ..tri[0] },
+            Vert { pos: self.cam.to_view(tri[1].pos), ..tri[1] },
+            Vert { pos: self.cam.to_view(tri[2].pos), ..tri[2] },
+        ];
+        let n = self.size as f64;
+        for piece in clip_near(view, self.cam.near) {
+            let mut s = [(0.0, 0.0, 0.0); 3];
+            let mut ok = true;
+            for k in 0..3 {
+                match self.cam.project(piece[k].pos, n, n) {
+                    Some(p) => s[k] = p,
+                    None => ok = false,
+                }
+            }
+            if !ok {
+                continue;
+            }
+            let area = edge(s[0].0, s[0].1, s[1].0, s[1].1, s[2].0, s[2].1);
+            if area.abs() < 1e-9 {
+                continue;
+            }
+            let x0 = s.iter().map(|p| p.0).fold(f64::MAX, f64::min).floor().max(0.0) as i32;
+            let x1 = s.iter().map(|p| p.0).fold(f64::MIN, f64::max).ceil().min(n - 1.0) as i32;
+            let y0 = s.iter().map(|p| p.1).fold(f64::MAX, f64::min).floor().max(0.0) as i32;
+            let y1 = s.iter().map(|p| p.1).fold(f64::MIN, f64::max).ceil().min(n - 1.0) as i32;
+            let iz = [1.0 / s[0].2, 1.0 / s[1].2, 1.0 / s[2].2];
+
+            for y in y0..=y1 {
+                for x in x0..=x1 {
+                    let (px, py) = (x as f64 + 0.5, y as f64 + 0.5);
+                    let w0 = edge(s[1].0, s[1].1, s[2].0, s[2].1, px, py) / area;
+                    let w1 = edge(s[2].0, s[2].1, s[0].0, s[0].1, px, py) / area;
+                    let w2 = edge(s[0].0, s[0].1, s[1].0, s[1].1, px, py) / area;
+                    if w0 < 0.0 || w1 < 0.0 || w2 < 0.0 {
+                        continue;
+                    }
+                    let z = 1.0 / (w0 * iz[0] + w1 * iz[1] + w2 * iz[2]);
+                    let idx = y as usize * self.size + x as usize;
+                    if (z as f32) < self.depth[idx] {
+                        self.depth[idx] = z as f32;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Is this world point in shadow? Anything outside the map counts as lit —
+    /// the usual choice, since a missing shadow beats a black band.
+    pub fn occluded(&self, p: V3) -> bool {
+        let v = self.cam.to_view(p);
+        let n = self.size as f64;
+        let Some((sx, sy, z)) = self.cam.project(v, n, n) else {
+            return false;
+        };
+        if sx < 0.0 || sy < 0.0 || sx >= n || sy >= n {
+            return false;
+        }
+        let stored = self.depth[sy as usize * self.size + sx as usize];
+        stored.is_finite() && stored + self.bias < z as f32
+    }
+}
+
+/// Reflect a point through the plane `n . p = d`, with `n` a unit normal.
+pub fn reflect_point(p: V3, n: V3, d: f64) -> V3 {
+    p - n.scale(2.0 * (n.dot(p) - d))
+}
+
+/// Reflect a direction — the same formula without the plane offset.
+pub fn reflect_dir(v: V3, n: V3) -> V3 {
+    v - n.scale(2.0 * n.dot(v))
+}
+
+/// A camera that sees what a flat mirror shows.
+///
+/// Reflection flips handedness, so the mirrored pass must invert its backface
+/// culling or the reflection renders inside-out.
+pub fn mirror_camera(cam: &Camera, n: V3, d: f64) -> Camera {
+    let n = n.unit();
+    Camera {
+        eye: reflect_point(cam.eye, n, d),
+        target: reflect_point(cam.target, n, d),
+        up: reflect_dir(cam.up, n),
+        ..*cam
     }
 }
 
@@ -498,6 +695,9 @@ mod tests {
 
     fn close(a: f64, b: f64, tol: f64) -> bool {
         (a - b).abs() < tol
+    }
+    fn close_v(a: V3, b: V3, tol: f64) -> bool {
+        (a - b).norm() < tol
     }
 
     /// The edge function is positive on one side and negative on the other,
@@ -761,6 +961,111 @@ mod tests {
         assert!((0.25..0.75).contains(&ratio), "culled {ratio:.2} of the mesh");
         // and the sphere is still visibly there
         assert!(c.buf.iter().filter(|&&p| p != 0).count() > 2000);
+    }
+
+    /// Reflecting through a plane is an involution: do it twice and you are
+    /// back where you started, and points on the plane never move.
+    #[test]
+    fn reflection_is_its_own_inverse() {
+        let (n, d) = (V3::Y, 2.0);
+        let p = V3::new(1.0, 7.0, -3.0);
+        assert!(close_v(reflect_point(reflect_point(p, n, d), n, d), p, 1e-12));
+        // a point ON the plane is fixed
+        assert!(close_v(reflect_point(V3::new(4.0, 2.0, 5.0), n, d), V3::new(4.0, 2.0, 5.0), 1e-12));
+        // and one 3 above lands 3 below
+        assert!(close_v(reflect_point(V3::new(0.0, 5.0, 0.0), n, d), V3::new(0.0, -1.0, 0.0), 1e-12));
+    }
+
+    /// Reflection preserves distances but FLIPS handedness — which is why the
+    /// mirrored pass has to invert its backface culling.
+    #[test]
+    fn reflection_preserves_length_but_flips_handedness() {
+        let n = V3::new(0.3, 1.0, -0.2).unit();
+        let (a, b) = (V3::new(1.0, 2.0, 3.0), V3::new(-2.0, 0.5, 1.0));
+        let (ra, rb) = (reflect_dir(a, n), reflect_dir(b, n));
+        assert!(close(ra.norm(), a.norm(), 1e-12));
+        assert!(close(ra.dot(rb), a.dot(b), 1e-12));
+        // the cross product comes back NEGATED - the signature of a mirror
+        assert!(close_v(ra.cross(rb), -reflect_dir(a.cross(b), n), 1e-12));
+    }
+
+    /// The mirror camera stands as far behind the plane as the real one does
+    /// in front, and looks back at it.
+    #[test]
+    fn the_mirror_camera_is_the_camera_reflected() {
+        let cam = Camera { eye: V3::new(0.0, 3.0, -8.0), target: V3::ZERO, up: V3::Y, ..Camera::default() };
+        let m = mirror_camera(&cam, V3::Y, 0.0);
+        assert!(close(m.eye.y, -3.0, 1e-12), "should be below the floor");
+        assert!(close(m.eye.x, cam.eye.x, 1e-12) && close(m.eye.z, cam.eye.z, 1e-12));
+    }
+
+    /// ★ A shadow map is a depth render from the light. Something directly
+    /// under a blocker must be occluded; something well to the side must not.
+    #[test]
+    fn a_blocker_casts_a_shadow_and_only_where_it_should() {
+        let light = V3::new(0.0, -1.0, 0.0); // straight down
+        let mut sm = ShadowMap::new(256, light, V3::ZERO, 6.0);
+        sm.begin();
+        // a small quad floating at y = 2, directly over the origin
+        let n = V3::Y;
+        let q = |x: f64, z: f64| Vert::new(V3::new(x, 2.0, z), n, (0.0, 0.0));
+        sm.cast([q(-1.0, -1.0), q(1.0, -1.0), q(1.0, 1.0)]);
+        sm.cast([q(-1.0, -1.0), q(1.0, 1.0), q(-1.0, 1.0)]);
+
+        assert!(sm.occluded(V3::new(0.0, 0.0, 0.0)), "under the blocker should be shadowed");
+        assert!(sm.occluded(V3::new(0.6, 0.0, -0.6)), "still under it");
+        assert!(!sm.occluded(V3::new(4.0, 0.0, 0.0)), "well clear should be lit");
+        assert!(!sm.occluded(V3::new(0.0, 3.0, 0.0)), "ABOVE the blocker is lit");
+    }
+
+    /// ★ Shadow acne and its cure. With a bias of zero a flat surface shadows
+    /// ITSELF; with a sane bias it does not.
+    #[test]
+    fn zero_bias_causes_self_shadowing_and_bias_fixes_it() {
+        let light = V3::new(-0.3, -1.0, -0.2);
+        let floor = Mesh::plane(20.0, 8);
+
+        let build = |bias: f32| {
+            let mut sm = ShadowMap::new(256, light, V3::ZERO, 12.0);
+            sm.bias = bias;
+            sm.begin();
+            for t in &floor.tris {
+                sm.cast(*t);
+            }
+            // sample the floor itself: none of it should be in its own shadow
+            let mut acne = 0;
+            for i in -8..=8 {
+                for j in -8..=8 {
+                    let p = V3::new(i as f64 * 0.7, 0.0, j as f64 * 0.7);
+                    if sm.occluded(p) {
+                        acne += 1;
+                    }
+                }
+            }
+            acne
+        };
+
+        assert!(build(0.0) > 0, "with no bias the floor should shadow itself");
+        assert_eq!(build(0.08), 0, "a sane bias should clear the acne entirely");
+    }
+
+    /// Too MUCH bias is the opposite failure: the shadow lifts away from its
+    /// caster and stops touching it.
+    #[test]
+    fn excessive_bias_detaches_the_shadow() {
+        let light = V3::new(0.0, -1.0, 0.0);
+        let make = |bias: f32| {
+            let mut sm = ShadowMap::new(256, light, V3::ZERO, 6.0);
+            sm.bias = bias;
+            sm.begin();
+            let n = V3::Y;
+            let q = |x: f64, z: f64| Vert::new(V3::new(x, 1.0, z), n, (0.0, 0.0));
+            sm.cast([q(-1.0, -1.0), q(1.0, -1.0), q(1.0, 1.0)]);
+            sm.cast([q(-1.0, -1.0), q(1.0, 1.0), q(-1.0, 1.0)]);
+            sm.occluded(V3::new(0.0, 0.6, 0.0)) // just under the blocker
+        };
+        assert!(make(0.05), "a small bias keeps the shadow attached");
+        assert!(!make(3.0), "a huge bias should peter-pan the shadow away");
     }
 
     /// Something must actually appear on screen - the cheapest guard against
