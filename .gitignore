@@ -12,6 +12,7 @@ fluid*.png
 spin*.png
 render*.png
 pca*.png
+game*.png
 
 # Editors
 /.idea/

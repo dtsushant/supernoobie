@@ -66,5 +66,10 @@ name = "pca"
 path = "src/bin/pca.rs"
 required-features = ["window"]
 
+[[bin]]
+name = "recursion"
+path = "src/bin/recursion.rs"
+required-features = ["window"]
+
 [profile.release]
 opt-level = 3

@@ -14,6 +14,7 @@ pub mod complex;
 pub mod dynamics;
 pub mod eigen;
 pub mod fluid;
+pub mod game;
 pub mod grid;
 pub mod pulley;
 pub mod quat;

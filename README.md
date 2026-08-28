@@ -5,10 +5,11 @@ motion comes out of an ODE. Zero dependencies, so `cargo test` is the whole
 toolchain.
 
 ```bash
-cargo test                                     # 149 tests - the mathematics, verified
+cargo test                                     # 155 tests - the mathematics, verified
 cargo run                                      # tables + pulley.svg, pulley_sim.svg
 cargo run --example play_complex               # complex-number scratchpad
 
+cargo run --release --features window --bin recursion # THE GAME - four stages
 cargo run --release --features window --bin play     # the pulley, crank it
 cargo run --release --features window --bin bodies   # rigid bodies
 cargo run --release --features window --bin cloth    # cloth, rope, soft bodies
@@ -35,6 +36,43 @@ behind a feature flag.
 | `src/svg.rs` | drawing only | skip while learning |
 | `src/main.rs` | the CLI report | last |
 | `src/bin/serve.rs` | Axum + Tokio + HTMX console | when you want to poke it |
+
+## RECURSION — the game
+
+```
+cargo run --release --features window --bin recursion
+```
+
+Four stages over the physics files, sharing one shell (`src/game.rs`):
+
+| stage | physics | the idea it makes visible |
+|---|---|---|
+| **CRANE** | `pulley.rs` + `rigid.rs` | rope paid out is `r * theta` — watch arc length become rope |
+| **CUT** | `soft.rs` | Verlet, and distance constraints you can sever |
+| **TILT** | `rigid.rs` | gravity as `g * e^(i*tilt)` — one multiplication |
+| **FLOW** | `fluid.rs` + `grid.rs` | SPH, and the spatial hash it needs |
+
+### The overlay is the point
+
+Dressing a simulation up as a game risks making the mathematics invisible: a
+rope stops being a chain of distance constraints and becomes a squiggle. So
+each stage annotates itself, and each *kind* of annotation is its own toggle:
+
+```
+1 LENGTHS   2 ANGLES   3 RADII   4 VECTORS
+5 CONTACTS  6 READOUTS 7 GRID    8 FORMULAS       0 ALL / NONE
+```
+
+Drawn in the notation of an engineering drawing — dimension lines with end
+ticks, angle arcs, radius leaders — because that notation was built for
+exactly this job.
+
+With all eight off it is a game. With all eight on it is a diagram you can
+play. Neither is the real view; they are the same numbers drawn twice.
+
+CRANE is the one to look at first: turn on **1** and **2** and the readout
+shows `ROPE 180 / THETA 6.92 RAD / R*THETA 180`. The arc-length identity from
+`pulley.rs`, agreeing with itself, live, while you use it to stack blocks.
 
 ## Eigenvectors and PCA — `src/eigen.rs`
 
