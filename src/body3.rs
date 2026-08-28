@@ -198,9 +198,9 @@ mod tests {
     #[test]
     fn box_inertia_matches_the_textbook() {
         let b = Body3::box_body(V3::new(2.0, 4.0, 6.0), 12.0);
-        assert!(close(b.inertia.x, (16.0 + 36.0), 1e-9)); // m/12 = 1
-        assert!(close(b.inertia.y, (4.0 + 36.0), 1e-9));
-        assert!(close(b.inertia.z, (4.0 + 16.0), 1e-9));
+        assert!(close(b.inertia.x, 16.0 + 36.0, 1e-9)); // m/12 = 1
+        assert!(close(b.inertia.y, 4.0 + 36.0, 1e-9));
+        assert!(close(b.inertia.z, 4.0 + 16.0, 1e-9));
         // longest side (z=6) -> smallest moment about... z? no: about the
         // axis ALONG which the body is longest, it is easiest to spin
         assert!(b.inertia.z < b.inertia.y && b.inertia.y < b.inertia.x);

@@ -5,7 +5,7 @@ motion comes out of an ODE. Zero dependencies, so `cargo test` is the whole
 toolchain.
 
 ```bash
-cargo test                                     # 129 tests - the mathematics, verified
+cargo test                                     # 143 tests - the mathematics, verified
 cargo run                                      # tables + pulley.svg, pulley_sim.svg
 cargo run --example play_complex               # complex-number scratchpad
 
@@ -15,6 +15,7 @@ cargo run --release --features window --bin cloth    # cloth, rope, soft bodies
 cargo run --release --features window --bin fluid    # SPH fluid
 cargo run --release --features window --bin spin3d   # 3D rotation, quaternions
 cargo run --release --features window --bin render   # lit, depth-buffered 3D
+cargo run --release --features window --bin pca      # eigenvectors and PCA
 cargo run --features serve --bin serve         # browser console on :3000
 ```
 
@@ -34,6 +35,49 @@ behind a feature flag.
 | `src/svg.rs` | drawing only | skip while learning |
 | `src/main.rs` | the CLI report | last |
 | `src/bin/serve.rs` | Axum + Tokio + HTMX console | when you want to poke it |
+
+## Eigenvectors and PCA — `src/eigen.rs`
+
+```
+cargo run --release --features window --bin pca
+```
+
+A matrix moves every vector somewhere else, usually pointing a different way.
+A few special directions come out pointing exactly as they went in, merely
+stretched: `A v = lambda v`. Those are the transformation's own natural axes.
+
+**You have met the eigenvalue rule three times already.** `A^n v = lambda^n v`,
+so `|lambda|` decides the long run — under 1 decays, over 1 explodes, exactly 1
+persists. That is the same `|z|` from `complex.rs`, the same `lambda` from the
+damped oscillator in `dynamics.rs`, the same criterion that decides whether
+explicit Euler gains energy. And it is not an analogy: write the damped
+oscillator as a 2x2 system and its `lambda` *is* an eigenvalue. **Complex
+eigenvalues mean rotation.**
+
+**Symmetric matrices are the good case** — real eigenvalues, perpendicular
+eigenvectors (the spectral theorem). And the two symmetric matrices worth
+knowing are both already in this crate:
+
+* the **inertia tensor** from `body3.rs` — eigenvectors are the principal axes
+  Euler's equations are written in, eigenvalues are the moments of inertia;
+* the **covariance matrix** of a point cloud — eigenvectors are the directions
+  the data spreads along.
+
+Same theorem. One tells a tumbling box which way it can spin cleanly; the other
+tells a dataset which of its features are really one feature. There is a test
+that decomposes a rotated inertia tensor and recovers both.
+
+PCA is then three lines: centre, covariance, eigen-decompose. Two algorithms
+are implemented — **power iteration** (multiply and renormalise; the dominant
+eigenvalue wins by `(l1/l2)^n`, which is the C1 spiral in a space of
+directions) and **Jacobi rotations** (zero the largest off-diagonal entry,
+repeat — Gauss-Seidel again, exactly as in `rigid.rs` and `soft.rs`).
+
+**The graphics payoff, measured:** on a tilted slab the oriented bounding box
+built from the eigenvectors is **7x smaller** than the axis-aligned one, and a
+single axis explains 91% of the variance. The demo also shows the honest
+failure case — a ring, whose structure is real but is *not a direction*, so
+PCA has nothing useful to say about it.
 
 ## The software renderer — `src/render3.rs`
 
