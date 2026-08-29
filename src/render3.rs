@@ -10,7 +10,7 @@
 //! ```text
 //! model space  --(place the object)-->  world space
 //!              --(move the camera)---->  view space      z = depth ahead
-//!              --(clip the near plane)->  clipped
+//!              okm` --(clip the near plane)->  clipped
 //!              --(divide by z)-------->  screen space
 //!              --(fill)--------------->  pixels
 //! ```

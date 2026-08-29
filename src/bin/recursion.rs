@@ -17,6 +17,7 @@ use recursion1::raster::{colour, Canvas};
 use recursion1::rigid::{Body, Wall, World};
 use recursion1::soft::Fabric;
 use std::time::Instant;
+use recursion1::playground::Playground;
 
 const W: usize = 1180;
 const H: usize = 760;
@@ -876,15 +877,17 @@ fn stages() -> Vec<Box<dyn Stage>> {
         Box::new(Tilt::new()),
         Box::new(Flow::new()),
         Box::new(Ride::new()),
+        Box::new(Playground::new("PLAYGROUND".parse().unwrap())),
     ]
 }
 
-const BLURB: [&str; 5] = [
+const BLURB: [&str; 6] = [
     "PULLEY.RS + RIGID.RS   -   ARC LENGTH BECOMES ROPE",
     "SOFT.RS                -   VERLET AND DISTANCE CONSTRAINTS",
     "RIGID.RS               -   IMPULSES, FRICTION AND SPIN",
     "FLUID.RS + GRID.RS     -   SPH AND A SPATIAL HASH",
     "BIKE.RS                -   THE TWO-GEAR MACHINE, PEDALLED",
+    "PLAYGROUND.rs        -    I DO MY LEARNING HERE",
 ];
 
 fn main() {
@@ -903,7 +906,8 @@ fn main() {
         if k == 9 {
             menu(&mut c, &v, cursor);
         } else {
-            let g = &mut games[k % 5];
+            let n = games.len();
+            let g = &mut games[k % n];
             // the snapshot pedals, so RIDE is actually moving
             let mut inp = Input { action: true, ..Input::default() };
             inp.resolve_axes();
@@ -951,7 +955,6 @@ fn main() {
         };
         inp.resolve_axes();
         was_down = inp.mouse_down;
-
         for (k, bit) in [
             (Key::Key1, Overlay::LENGTHS),
             (Key::Key2, Overlay::ANGLES),
@@ -969,14 +972,13 @@ fn main() {
         if pressed.contains(&Key::Key0) {
             ov = if ov.count() > 0 { Overlay::none() } else { Overlay::all_on() };
         }
-
         match picked {
             None => {
                 if pressed.contains(&Key::Down) {
-                    cursor = (cursor + 1) % 5;
+                    cursor = (cursor + 1) % BLURB.len();
                 }
                 if pressed.contains(&Key::Up) {
-                    cursor = (cursor + 4) % 5;
+                    cursor = (cursor + BLURB.len() - 1) % BLURB.len();
                 }
                 if pressed.contains(&Key::Enter) || pressed.contains(&Key::Space) {
                     games[cursor].reset();
@@ -987,6 +989,7 @@ fn main() {
                     break;
                 }
                 canvas.clear(colour::BG);
+                println!("the value being printed is {:?}", v);
                 menu(&mut canvas, &v, cursor);
             }
             Some(i) => {
@@ -1045,9 +1048,10 @@ fn formulas(c: &mut Canvas, v: &View, lines: &[&str]) {
 fn menu(c: &mut Canvas, v: &View, cursor: usize) {
     c.text(90, 70, "RECURSION", colour::INK, 6);
     c.text(92, 124, "FOUR GAMES OVER THE SAME PHYSICS", colour::FAINT, 2);
-
-    let names = ["CRANE", "CUT", "TILT", "FLOW", "RIDE"];
+    println!("loading the menu ...");
+    let names = ["CRANE", "CUT", "TILT", "FLOW", "RIDE","PLAYGROUND"];
     for (k, n) in names.iter().enumerate() {
+        println!("here the k is {k} and the name is {n} and the cursor is {cursor}");
         let y = 210 + k as i32 * 66;
         let on = k == cursor;
         if on {

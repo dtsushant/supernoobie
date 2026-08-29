@@ -25,5 +25,7 @@ pub mod render3;
 pub mod rigid;
 pub mod soft;
 pub mod svg;
+#[path = "myp/playground.rs"]
+pub mod playground;
 
 
