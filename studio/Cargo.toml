@@ -1,0 +1,11 @@
+[package]
+name = "studio"
+version = "0.1.0"
+edition = "2021"
+description = "An animation studio built on plotkit. Pure maths in, pictures out."
+
+[dependencies]
+# The rendering library, used exactly as any other project would use it.
+plotkit = { path = "../plotkit" }
+# A window and a keyboard. Nothing else.
+minifb = "0.28"

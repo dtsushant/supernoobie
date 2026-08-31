@@ -6,6 +6,8 @@
 //! beyond the basics.
 //!
 //! ```text
+//!   shape     geometry as VALUES you can .map()
+//!   frame     a layer of styled shapes;  animation is f(t) -> Frame
 //!   expr      text -> values and drawing commands
 //!     |
 //!   script    commands -> plot calls
@@ -53,12 +55,16 @@
 
 pub mod complex;
 pub mod expr;
+pub mod frame;
 pub mod pen;
 pub mod plot;
 pub mod raster;
 pub mod script;
+pub mod shape;
 pub mod view;
 
 pub use complex::Cx;
 pub use raster::{colour, Canvas};
+pub use frame::{Frame, Style};
+pub use shape::Shape;
 pub use view::View;
