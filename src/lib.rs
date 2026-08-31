@@ -9,9 +9,12 @@
 //!
 //! Reading order: `complex` -> `pulley` -> `dynamics`.
 
+//! The drawing layer now lives in its own crate, [`plotkit`], and is
+//! re-exported here so `recursion1::complex::Cx` and friends keep working.
+pub use plotkit::{complex, expr, plot, raster, script, view};
+
 pub mod bike;
 pub mod body3;
-pub mod complex;
 pub mod dynamics;
 pub mod eigen;
 pub mod fluid;
@@ -20,7 +23,6 @@ pub mod grid;
 pub mod pulley;
 pub mod quat;
 pub mod vec3;
-pub mod raster;
 pub mod render3;
 pub mod rigid;
 pub mod soft;

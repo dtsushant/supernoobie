@@ -8,9 +8,13 @@ description = "Pulley system on the complex plane - geometry, dynamics, a softwa
 # dependencies and never will. Everything below is optional and feature-gated,
 # so `cargo test` always runs against pure std.
 [dependencies]
+plotkit = { path = "plotkit" }
 axum = { version = "0.8", optional = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net"], optional = true }
 minifb = { version = "0.28", optional = true }
+
+[workspace]
+members = ["plotkit"]
 
 [features]
 # live browser console, rendered server-side

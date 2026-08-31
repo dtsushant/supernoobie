@@ -5,7 +5,7 @@ motion comes out of an ODE. Zero dependencies, so `cargo test` is the whole
 toolchain.
 
 ```bash
-cargo test                                     # 171 tests - the mathematics, verified
+cargo test --workspace                                     # 204 tests across the workspace
 cargo run                                      # tables + pulley.svg, pulley_sim.svg
 cargo run --example play_complex               # complex-number scratchpad
 
@@ -23,19 +23,77 @@ cargo run --features serve --bin serve         # browser console on :3000
 Every windowed binary also takes `--snapshot N [seconds]`, which renders one
 frame to PNG and exits — no display required.
 
-Nothing to install: the maths core is `std`-only, and the two web crates are
-behind a feature flag.
+Nothing to install: `plotkit` and the maths core are `std`-only, and the three
+optional crates are behind feature flags.
 
 ## Reading order
 
 | File | What it holds | Read it |
 |---|---|---|
-| `src/complex.rs` | the number type: `i`, Euler, multiply, divide, `arg` | **first** |
+| `plotkit/src/complex.rs` | the number type: `i`, Euler, multiply, divide, `arg` | **first** |
 | `src/pulley.rs` | iteration 1 — geometry and the rope constraint | second |
 | `src/dynamics.rs` | iteration 2 — the equation of motion and four integrators | third |
 | `src/svg.rs` | drawing only | skip while learning |
 | `src/main.rs` | the CLI report | last |
 | `src/bin/serve.rs` | Axum + Tokio + HTMX console | when you want to poke it |
+
+## plotkit — the drawing layer, as its own crate
+
+`plotkit/` is a standalone, **dependency-free** crate: complex numbers, a
+framebuffer, a world-to-screen view, an engineering-drawing pen, plotting, and
+a small expression language. Nothing about physics, windowing or this project.
+
+```text
+  expr      text -> values and drawing commands
+  script    commands -> plot calls
+  plot      curves, graph paper, implicit equations    (world coordinates)
+  pen       dimensions, angle arcs, radii, arrows      (world coordinates)
+  view      world -> screen.  origin anywhere, y counts UP
+  raster    pixels. origin top-left, y counts DOWN
+```
+
+**`view` is the layer that matters.** Above it everything speaks in world units
+— "a circle of radius 1 at the origin". Below it is a `Vec<u32>`.
+`View::new` puts the origin bottom-left at one pixel per unit (what the games
+want); `View::centred` puts it in the middle at however many pixels per unit
+you ask for (what mathematics wants — a unit circle at one pixel per unit is
+one pixel across).
+
+### The script language
+
+`scripts/playground.rec` is read at startup and **reloaded whenever you save
+it**. Every value is a complex number, so a point, an offset and a scalar are
+the same kind of thing:
+
+```
+cx1 = 0 + 0i
+cx2 = 1 + 2i
+polygon(cx1, cx2)        # two points make a straight line
+
+circle(0, 1)             # a command
+param(exp(i*t), 0, tau)  # the same circle, parameterised
+implicit(x*x + y*y, 1)   # the same circle, marched from x^2+y^2=1
+
+plot(sin(x))
+ngon(-3 - 2i, 0.9, 6)
+```
+
+Implicit multiplication works as in Desmos (`2i`, `3x`, `2(1+i)`). Built-ins:
+`i pi tau e`; functions `exp ln sin cos tan sqrt abs arg conj re im polar pow`;
+commands `point line polygon circle ngon plot param implicit color`.
+
+Errors are **per line and never fatal** — a script being typed is broken most
+of the time, and blanking the screen on every keystroke would make it useless.
+
+### Two bugs the language turned up
+
+* **Unary minus binds looser than `^`.** `-2^2` is `-(2^2) = -4`, not
+  `(-2)^2 = 4`. Getting that wrong is easy and silent.
+* **Negative zero flips a branch cut.** `-1` evaluates to
+  `re: -1.0, im: -0.0`, and `(-0.0).atan2(-1.0)` is `-pi` rather than `+pi` —
+  so `sqrt(-1)` came out as `-i`. IEEE says the sign of zero is meaningful
+  there and that result is *correct*; someone typing `sqrt(-1)` still means
+  the principal root, so `-0.0` is normalised away first.
 
 ## RECURSION — the game
 

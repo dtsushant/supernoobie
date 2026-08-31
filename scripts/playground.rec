@@ -1,0 +1,69 @@
+# ---------------------------------------------------------------------------
+#  PLAYGROUND — edit this file and save. The window redraws by itself.
+#
+#  Every value is a complex number, so a point and an offset and a plain
+#  number are all the same kind of thing:
+#
+#      a + b     translate            a * b     scale AND rotate
+#      2z        twice as far out     z * i     a quarter turn
+#      a*z + b   any affine map, written exactly like that
+#
+#  Built in:  i  pi  tau  e
+#  Functions: exp ln sin cos tan sqrt abs arg conj re im polar pow
+#  Commands:  point line polygon circle ngon plot param implicit color
+# ---------------------------------------------------------------------------
+
+
+# --- the thing you asked for -----------------------------------------------
+# Two points, and a polygon through them. Two points make a straight line.
+
+cx1 = 0 + 0i
+cx2 = 1 + 2i
+polygon(cx1, cx2)
+
+
+# --- the unit circle, three ways -------------------------------------------
+
+# 1. as a command
+circle(0, 1)
+
+# 2. as a parameterisation — z = e^(it). This is what a circle IS.
+param(exp(i*t), 0, tau)
+
+# 3. as the implicit equation x^2 + y^2 = 1, marched over a grid.
+#    Shifted left so you can see it is the same shape, made of little
+#    straight pieces because that is what marching squares produces.
+implicit((x+3)*(x+3) + y*y, 1)
+
+
+# --- waves ------------------------------------------------------------------
+# sin is the height of the point going round the circle, dragged sideways.
+
+plot(sin(x))
+
+
+# --- polygons are roots of unity, scaled and moved --------------------------
+
+ngon(-3 - 2i, 0.9, 6)
+ngon(-1 - 2i, 0.9, 3)
+ngon(1 - 2i, 0.9, 5)
+
+
+# --- things worth trying ----------------------------------------------------
+# Uncomment a line, save, and watch.
+
+# a spiral: modulus grows while the angle turns
+# param(polar(exp(0.15t), t), 0, 6tau)
+
+# a rose: r = cos(k theta)
+# param(polar(cos(5t), t), 0, tau)
+
+# a lemniscate — a figure of eight with no easy parameterisation
+# implicit((x*x + y*y)*(x*x + y*y) - 2(x*x - y*y), 0)
+
+# an affine map applied to a square: rotate by 0.4 rad and scale by 1.3
+# m = polar(1.3, 0.4)
+# polygon(m*(0+0i), m*(1+0i), m*(1+1i), m*(0+1i))
+
+# the fifth roots of unity, as points
+# point(exp(i*tau/5), exp(2i*tau/5), exp(3i*tau/5), exp(4i*tau/5), 1)

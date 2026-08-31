@@ -1,0 +1,11 @@
+[package]
+name = "plotkit"
+version = "0.1.0"
+edition = "2021"
+description = "Draw mathematics on a CPU framebuffer: complex numbers, a world-to-screen view, an annotation pen, and a tiny expression language."
+license = "Apache-2.0"
+keywords = ["plotting", "graphics", "complex", "rasteriser", "no-gpu"]
+categories = ["graphics", "mathematics", "visualization"]
+
+# None, and that is the point.
+[dependencies]
