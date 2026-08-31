@@ -1,0 +1,12 @@
+[package]
+name = "shapes"
+version = "0.1.0"
+edition = "2021"
+description = "Reusable drawable things — digits, faces, tallies, waves — each carrying the recipe for how it is built."
+
+[dependencies]
+plotkit = { path = "../plotkit" }
+
+[[bin]]
+name = "shape"
+path = "src/bin/shape.rs"

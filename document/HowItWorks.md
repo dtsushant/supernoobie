@@ -281,8 +281,10 @@ screen.
 | | |
 |---|---|
 | `plotkit/` | the library. zero dependencies. `Cx`, `View`, `Shape`, `Frame`, `plot`, `pen`, `raster`, `expr`, `script` |
-| `studio/` | the animation studio. depends on `plotkit` + a window, and nothing else — which is the proof that `plotkit` stands alone |
-| `studio/src/bin/waves.rs` | two sines and their sum, with the phasors that explain it |
+| `shapes/` | things to draw — digits, faces, tallies, glyphs, waves. depends on `plotkit` only, so it has no window and can draw in a terminal. **[Shapes.md](Shapes.md) is the cookbook** |
+| `studio/` | the applications. depends on `shapes` + a window, and holds no geometry at all |
+| `shapes/src/bin/shape.rs` | `cargo run -p shapes -- seven --steps` — any shape drawn in the terminal, one construction line at a time |
+| `studio/src/bin/waves.rs` | any number of sines and their sum, with the phasors that explain it |
 | `studio/src/main.rs` | the maths game — digits drawn as sums of sine waves |
 | `scripts/playground.rec` | the typed-text front door. hot-reloads on save |
 | `src/` | the physics ladder — rigid bodies, cloth, fluid, quaternions, rasteriser |

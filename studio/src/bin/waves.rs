@@ -1,422 +1,346 @@
-//! # waves — two sine waves, and what happens when you add them
+//! # waves — adding sine waves, however many of them
 //!
 //! Run:  `cargo run -p studio --release --bin waves`
 //!
-//! Three strips on the right: wave one, wave two, and their sum. A column of
-//! rotating arrows on the left. The connector between an arrow and its wave is
-//! always exactly horizontal, and that is not a coincidence — it is the whole
-//! point:
+//! One strip per wave, and one more for their sum. Beside each strip, the
+//! rotating arrow the wave is the shadow of. The connector between an arrow
+//! and its wave is always exactly level, because `a sin(kx+φ)` **is**
+//! `Im(a e^{i(kx+φ)})` — the height and the imaginary part are the same number.
 //!
-//! ```text
-//!     a sin(kx + φ)  =  Im( a e^{i(kx+φ)} )
-//! ```
+//! The arrows for the sum are laid tip to tail. That picture is not an
+//! illustration of the addition; it *is* the addition, because taking the
+//! shadow is linear: `Im(A) + Im(B) = Im(A+B)`.
 //!
-//! The wave *is* the shadow of the arrow. Once you believe that, addition
-//! becomes easy, because arrows add head-to-tail and shadows add with them:
+//! ## What to look for
 //!
-//! ```text
-//!     Im(A) + Im(B) = Im(A + B)
-//! ```
-//!
-//! ## The theorem this file exists to show
-//!
-//! When the two frequencies **agree**, pull the common rotation `e^{ikx}` out:
-//!
-//! ```text
-//!     a₁ sin(kx+φ₁) + a₂ sin(kx+φ₂)
-//!       = Im( a₁e^{iφ₁} e^{ikx} ) + Im( a₂e^{iφ₂} e^{ikx} )
-//!       = Im( (a₁e^{iφ₁} + a₂e^{iφ₂}) · e^{ikx} )
-//!       = Im( A e^{ikx} )                            where A = a₁e^{iφ₁} + a₂e^{iφ₂}
-//!       = |A| sin(kx + arg A)
-//! ```
-//!
-//! **A sine plus a sine of the same frequency is another sine of that same
-//! frequency.** Its amplitude is `|A|` and its phase is `arg A`, and `A` is one
-//! complex addition. Every "sum-to-product" identity in a trigonometry
-//! textbook is this one line, written out in real numbers so it looks hard.
-//!
-//! Press `2` and watch it cancel to nothing — `e^{iπ} = −1`, so the arrows are
-//! back to back and `A = 0`. Press `3`: `sin + cos = √2 sin(x + π/4)`, and the
-//! √2 is visibly the diagonal of a unit square.
-//!
-//! When the frequencies **differ**, the step above is illegal — there is no
-//! common `e^{ikx}` to pull out — and the sum is genuinely a new shape. Press
-//! `4`, `5`, `6`. That failure is not a defect; it is where Fourier series
-//! live, and it is what draws the digits in `studio/src/main.rs`.
+//! Press `1`–`7`. When every frequency agrees the sum is still one sine wave
+//! and the readout names it — `|A| sin(kx + arg A)`, where `A` is the sum of
+//! the phasors and nothing more. When the frequencies differ the readout
+//! refuses, because no single sine is the answer, and that refusal is where
+//! Fourier series start. Preset `6` is the first three terms of a square wave;
+//! keep adding odd harmonics with `=` and it squares off.
 //!
 //! ## Controls
 //!
 //! ```text
-//!   1..6   presets      W/S  amplitude 1      Space  pause
-//!   ← →    frequency 2  A/D  phase 2          R      reset
-//!   ↑ ↓    amplitude 2  G    grid on/off      Esc    quit
+//!   1..7   presets              Tab  choose which wave you are editing
+//!   ↑ ↓    its amplitude        =    add a wave      Space  pause
+//!   ← →    its frequency        -    drop one        G      graph paper
+//!   A D    its phase            R    reset           Esc    quit
 //! ```
+//!
+//! The mathematics is in [`shapes::wave`]; this file only decides where on the
+//! page things go. Nothing here counts the waves — [`Layout`] adds up how much
+//! room they need — which is why a third wave is a key press rather than an
+//! edit in seven places.
 
 use minifb::{Key, KeyRepeat, Window, WindowOptions};
 use plotkit::{plot, raster::Canvas, Cx, Frame, Shape, View};
+use shapes::wave::{chain, combine, total, Wave};
 use std::f64::consts::PI;
-
-// ===========================================================================
-//  THE MATHEMATICS
-//
-//  No canvas, no view, no colours below this line. Everything here could be
-//  worked out on paper, and the tests at the bottom check that it was.
-// ===========================================================================
-
-/// A sinusoid `a·sin(kx + φ)`.
-///
-/// Three numbers: how tall, how fast, and where it starts.
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct Wave {
-    a: f64,
-    k: f64,
-    phi: f64,
-}
-
-impl Wave {
-    const fn new(a: f64, k: f64, phi: f64) -> Wave {
-        Wave { a, k, phi }
-    }
-
-    /// The height of the wave at `x`.
-    fn at(self, x: f64) -> f64 {
-        self.a * (self.k * x + self.phi).sin()
-    }
-
-    /// The rotating arrow the wave is the shadow of.
-    ///
-    /// Length `a`, turning at `k` radians per unit of `x`, starting at angle
-    /// `φ`. By construction `arrow(x).im == at(x)`, which is the identity the
-    /// whole picture rests on.
-    fn arrow(self, x: f64) -> Cx {
-        Cx::polar(self.a, self.k * x + self.phi)
-    }
-
-    /// The arrow at `x = 0` — amplitude and phase in one complex number.
-    ///
-    /// Engineers call this the *phasor*. It is the wave with the boring part
-    /// (the spinning) factored out.
-    fn phasor(self) -> Cx {
-        Cx::polar(self.a, self.phi)
-    }
-}
-
-/// Add two waves **of the same frequency** and get the single wave that
-/// results — by adding their phasors.
-///
-/// Returns `None` when the frequencies differ, because then no single sine
-/// wave is the answer and pretending otherwise would be a lie. That refusal is
-/// half the lesson.
-fn combine(u: Wave, w: Wave) -> Option<Wave> {
-    if (u.k - w.k).abs() > 1e-9 {
-        return None;
-    }
-    let a = u.phasor() + w.phasor(); // <- the entire computation
-    Some(Wave::new(a.abs(), u.k, a.arg()))
-}
-
-/// Named starting points, each chosen to make one thing obvious.
-const PRESETS: [(&str, Wave, Wave); 6] = [
-    // Same arrow twice: they point together, so the sum is twice as tall.
-    ("same frequency, in phase -> amplitudes just add", Wave::new(1.0, 1.0, 0.0), Wave::new(1.0, 1.0, 0.0)),
-    // e^{i pi} = -1. Back to back. A = 0. The sum is a flat line.
-    ("same frequency, half a turn apart -> total cancellation", Wave::new(1.0, 1.0, 0.0), Wave::new(1.0, 1.0, PI)),
-    // sin + cos. A = 1 + i, so |A| = sqrt(2) and arg A = pi/4.
-    ("sin + cos = sqrt(2) sin(x + pi/4) -- read it off the arrows", Wave::new(1.0, 1.0, 0.0), Wave::new(1.0, 1.0, PI / 2.0)),
-    // Different k. No common e^{ikx}. The sum is not a sine any more.
-    ("an octave up -> the sum is a NEW shape, not a sine", Wave::new(1.0, 1.0, 0.0), Wave::new(0.6, 2.0, 0.0)),
-    // Nearly equal k: the two drift in and out of step. Beats.
-    ("nearly equal -> beats, as they drift in and out of step", Wave::new(1.0, 1.0, 0.0), Wave::new(1.0, 1.15, 0.0)),
-    // sin(x) + sin(3x)/3. Keep going with 5, 7, 9... and you get a square wave.
-    ("sin(x) + sin(3x)/3 -> the first two terms of a square wave", Wave::new(1.0, 1.0, 0.0), Wave::new(1.0 / 3.0, 3.0, 0.0)),
-];
 
 // ===========================================================================
 //  THE SCENE
 //
-//  Where the numbers get placed on the page. Still no pixels — every position
-//  here is in the same units the mathematics uses.
+//  Where things go on the page. Every number here is in the units the
+//  mathematics uses; not one of them is a pixel.
 // ===========================================================================
 
-const X0: f64 = -3.0; // left edge of the wave strips
-const X1: f64 = 10.3; // right edge
-const COL: f64 = -7.3; // centre of the arrow column
-const B1: f64 = 4.8; // baseline of wave one
-const B2: f64 = 1.9; // baseline of wave two
-const BS: f64 = -2.6; // baseline of the sum
+const W: usize = 1100;
+const H: usize = 700;
+const MAX_WAVES: usize = 5;
 
-const C1: u32 = 0x4FBCD4;
-const C2: u32 = 0xE0A44A;
-const CS: u32 = 0x6FCF97;
+const IN: [u32; MAX_WAVES] = [0x4FBCD4, 0xE0A44A, 0xE585AC, 0x9B7BD4, 0xE0704A];
+const SUM: u32 = 0x6FCF97;
 const DIM: u32 = 0x33414F;
 const INK: u32 = 0x9AA7B4;
 
+/// Where every strip sits, worked out from the waves themselves.
+struct Layout {
+    /// One baseline per wave, top to bottom.
+    bases: Vec<f64>,
+    /// The baseline of the sum, which needs room for every amplitude at once.
+    sum: f64,
+    /// Centre of the column of arrows, and the ends of the strips.
+    col: f64,
+    x0: f64,
+    x1: f64,
+    view: View,
+}
+
+impl Layout {
+    fn of(ws: &[Wave]) -> Layout {
+        const PAD: f64 = 0.55;
+        let tall: Vec<f64> = ws.iter().map(|w| 2.0 * w.a.max(0.25)).collect();
+        let reach: f64 = ws.iter().map(|w| w.a).sum::<f64>().max(0.25);
+        let total_h: f64 = tall.iter().sum::<f64>() + 2.0 * reach + PAD * (ws.len() as f64 + 1.0);
+
+        // Leave room under the picture for the readout, then fit what is left.
+        // Adding a wave zooms out rather than overflowing, which is honest:
+        // the picture gets smaller because there is more of it.
+        let hud = 46.0 + 20.0 * (ws.len() as f64 + 1.0);
+        let usable = H as f64 - hud;
+        let scale = usable / total_h;
+
+        // Stack downwards from the top of the usable band.
+        let mut y = total_h / 2.0;
+        let mut bases = Vec::new();
+        for t in &tall {
+            y -= PAD + t / 2.0;
+            bases.push(y);
+            y -= t / 2.0;
+        }
+        y -= PAD + reach;
+
+        // The arrow column is as wide as the sum arrows can reach; the strips
+        // take whatever is left.
+        let half = W as f64 / (2.0 * scale);
+        let col = -half + reach + 0.4;
+        Layout {
+            bases,
+            sum: y,
+            col,
+            x0: col + reach + 0.6,
+            x1: half - 0.3,
+            view: View::centred(W, H, scale).with_origin(W as f64 / 2.0, usable / 2.0),
+        }
+    }
+
+    fn x_at(&self, u: f64) -> f64 {
+        self.x0 + (self.x1 - self.x0) * u
+    }
+}
+
 struct State {
-    w1: Wave,
-    w2: Wave,
+    ws: Vec<Wave>,
+    /// Which wave the arrow keys are editing.
+    sel: usize,
     preset: usize,
     grid: bool,
     running: bool,
-    t: f64,
+    /// How far along the strips the marker is, as a fraction.
+    u: f64,
 }
 
-/// One strip: a baseline, a circle of radius `a`, the wave, and the arrow and
-/// dot at the current `x = t`.
-fn strip(f: &mut Frame, w: Wave, base: f64, t: f64, col: u32) {
-    let c = Cx::new(COL, base);
+/// One strip: baseline, the circle the arrow sweeps, the wave, the arrow, and
+/// the level connector between the arrow tip and the point on the wave.
+fn strip(f: &mut Frame, l: &Layout, w: Wave, base: f64, x: f64, col: u32, thick: bool) {
+    let c = Cx::new(l.col, base);
+    let (x0, x1) = (l.x0, l.x1);
 
-    f.add(Shape::path(vec![Cx::new(X0, base), Cx::new(X1, base)])).color(DIM).width(1);
+    f.add(Shape::path(vec![Cx::new(x0, base), Cx::new(x1, base)])).color(DIM).width(1);
     f.add(Shape::circle(c, w.a.max(1e-3))).color(DIM).width(1);
+    f.add(Shape::param(move |t| Cx::new(t, base + w.at(t)), x0, x1, 800)).color(col).width(if thick { 3 } else { 2 });
 
-    // y = a sin(kx + phi), sampled along the strip only.
-    f.add(Shape::param(move |x| Cx::new(x, base + w.at(x)), X0, X1, 700)).color(col).width(2);
-
-    // The arrow, and the dot on the wave it casts.
-    let tip = c + w.arrow(t);
+    let tip = c + w.arrow(x);
     f.add(Shape::path(vec![c, tip])).color(col).width(2);
     f.add(Shape::point(tip)).color(col).dot(4.0);
-    f.add(Shape::point(Cx::new(t, base + w.at(t)))).color(col).dot(5.0);
+    f.add(Shape::point(Cx::new(x, base + w.at(x)))).color(col).dot(5.0);
+    dashes(f, tip, Cx::new(x, tip.im), col);
 }
 
-fn scene(st: &State) -> Frame {
-    let (w1, w2, t) = (st.w1, st.w2, st.t);
+fn scene(st: &State, l: &Layout) -> Frame {
     let mut f = Frame::new();
+    let x = l.x_at(st.u);
 
-    strip(&mut f, w1, B1, t, C1);
-    strip(&mut f, w2, B2, t, C2);
-
-    // --- the sum ----------------------------------------------------------
-    let c = Cx::new(COL, BS);
-    f.add(Shape::path(vec![Cx::new(X0, BS), Cx::new(X1, BS)])).color(DIM).width(1);
-
-    // The path the summed tip traces. A circle when the frequencies agree,
-    // something more interesting when they do not.
-    f.add(Shape::param(move |x| c + w1.arrow(x) + w2.arrow(x), X0, X1, 900)).color(DIM).width(1);
-
-    f.add(Shape::param(move |x| Cx::new(x, BS + w1.at(x) + w2.at(x)), X0, X1, 900)).color(CS).width(2);
-
-    // Head to tail: this is the addition, drawn.
-    let a1 = c + w1.arrow(t);
-    let a2 = a1 + w2.arrow(t);
-    f.add(Shape::path(vec![c, a1])).color(C1).width(2);
-    f.add(Shape::path(vec![a1, a2])).color(C2).width(2);
-    f.add(Shape::path(vec![c, a2])).color(CS).width(3);
-    f.add(Shape::point(a2)).color(CS).dot(4.0);
-    f.add(Shape::point(Cx::new(t, BS + w1.at(t) + w2.at(t)))).color(CS).dot(5.0);
-
-    // The horizontal connectors. Each one is level because the wave's height
-    // and the arrow tip's imaginary part are the same number.
-    for (base, tip, col) in [(B1, Cx::new(COL, B1) + w1.arrow(t), C1), (B2, Cx::new(COL, B2) + w2.arrow(t), C2), (BS, a2, CS)] {
-        let _ = base;
-        dashes(&mut f, tip, Cx::new(t, tip.im), col);
+    for (k, w) in st.ws.iter().enumerate() {
+        strip(&mut f, l, *w, l.bases[k], x, IN[k % IN.len()], k == st.sel);
+        f.label(Cx::new(l.col, l.bases[k] + w.a.max(0.25) + 0.3), format!("wave {}", k + 1), IN[k % IN.len()], 2);
     }
 
-    f.label(Cx::new(COL, B1 + 1.15), "wave 1", C1, 2);
-    f.label(Cx::new(COL, B2 + 1.45), "wave 2", C2, 2);
-    f.label(Cx::new(COL, BS + 2.75), "wave 1 + wave 2", CS, 2);
+    // --- the sum ----------------------------------------------------------
+    let c = Cx::new(l.col, l.sum);
+    let (x0, x1, base) = (l.x0, l.x1, l.sum);
+
+    f.add(Shape::path(vec![Cx::new(x0, base), Cx::new(x1, base)])).color(DIM).width(1);
+
+    // The path the summed tip traces: a circle when the frequencies agree,
+    // something more interesting when they do not.
+    let trace = st.ws.clone();
+    f.add(Shape::param(move |t| c + *chain(&trace, t).last().expect("a chain always ends somewhere"), x0, x1, 900))
+        .color(DIM)
+        .width(1);
+
+    let curve = st.ws.clone();
+    f.add(Shape::param(move |t| Cx::new(t, base + total(&curve, t)), x0, x1, 900)).color(SUM).width(2);
+
+    // Head to tail. One segment per wave, however many there are.
+    let links = chain(&st.ws, x);
+    for (k, seg) in links.windows(2).enumerate() {
+        f.add(Shape::path(vec![c + seg[0], c + seg[1]])).color(IN[k % IN.len()]).width(2);
+    }
+    let end = c + *links.last().expect("a chain always ends somewhere");
+    f.add(Shape::path(vec![c, end])).color(SUM).width(3);
+    f.add(Shape::point(end)).color(SUM).dot(4.0);
+    f.add(Shape::point(Cx::new(x, base + total(&st.ws, x)))).color(SUM).dot(5.0);
+    dashes(&mut f, end, Cx::new(x, end.im), SUM);
+
+    let reach: f64 = st.ws.iter().map(|w| w.a).sum::<f64>().max(0.25);
+    f.label(Cx::new(l.col, base + reach + 0.3), "sum", SUM, 2);
     f
 }
 
-/// A dotted line, because a solid one would read as part of the mathematics.
+/// A dotted line — a solid one would read as part of the mathematics.
 fn dashes(f: &mut Frame, a: Cx, b: Cx, col: u32) {
     let n = 26;
-    for k in 0..n {
-        if k % 2 == 1 {
-            continue;
-        }
+    for k in (0..n).step_by(2) {
         let (u, v) = (k as f64 / n as f64, (k + 1) as f64 / n as f64);
         f.add(Shape::path(vec![a + (b - a).scale(u), a + (b - a).scale(v)])).color(col).width(1);
     }
 }
 
 // ===========================================================================
-//  THE WINDOW
+//  THE PRESETS
 //
-//  The boring part. Twenty lines that turn `scene()` into something you can
-//  look at. This is the only code in the file that knows a screen exists.
+//  Each one chosen to make exactly one thing obvious.
 // ===========================================================================
 
-const W: usize = 1100;
-const H: usize = 700;
+// Same arrow twice: they point together, so the amplitudes add.
+const TOGETHER: [Wave; 2] = [Wave::new(1.0, 1.0, 0.0), Wave::new(1.0, 1.0, 0.0)];
+// e^{iπ} = −1. Back to back. The sum is a flat line.
+const AGAINST: [Wave; 2] = [Wave::new(1.0, 1.0, 0.0), Wave::new(1.0, 1.0, PI)];
+// sin + cos. A = 1 + i, so |A| = √2 and arg A = π/4.
+const QUARTER: [Wave; 2] = [Wave::new(1.0, 1.0, 0.0), Wave::new(1.0, 1.0, PI / 2.0)];
+// Different k. No common e^{ikx} to pull out, so not a sine any more.
+const OCTAVE: [Wave; 2] = [Wave::new(1.0, 1.0, 0.0), Wave::new(0.6, 2.0, 0.0)];
+// Nearly equal: the two drift in and out of step. Beats.
+const BEATS: [Wave; 2] = [Wave::new(1.0, 1.0, 0.0), Wave::new(1.0, 1.15, 0.0)];
+// Odd harmonics at 1/n. Keep going with 7, 9, 11 and it squares off.
+const SQUARE: [Wave; 3] = [Wave::new(1.0, 1.0, 0.0), Wave::new(1.0 / 3.0, 3.0, 0.0), Wave::new(0.2, 5.0, 0.0)];
+// Three arrows a third of a turn apart — the cube roots of unity, which sum to
+// zero. Nothing about the two-wave cancellation was special.
+const THIRDS: [Wave; 3] = [
+    Wave::new(1.0, 1.0, 0.0),
+    Wave::new(1.0, 1.0, 2.0943951023931953),
+    Wave::new(1.0, 1.0, 4.1887902047863905),
+];
+
+const PRESETS: [(&str, &[Wave]); 7] = [
+    ("same frequency, in phase -> the amplitudes just add", &TOGETHER),
+    ("same frequency, half a turn apart -> total cancellation", &AGAINST),
+    ("sin + cos = sqrt(2) sin(x + pi/4) -- read it off the arrows", &QUARTER),
+    ("an octave up -> the sum is a NEW shape, not a sine", &OCTAVE),
+    ("nearly equal -> beats, as they drift in and out of step", &BEATS),
+    ("sin(x) + sin(3x)/3 + sin(5x)/5 -> a square wave, three terms in", &SQUARE),
+    ("three arrows 120 degrees apart -> the cube roots of unity, summing to zero", &THIRDS),
+];
+
+// ===========================================================================
+//  THE WINDOW
+// ===========================================================================
 
 fn main() {
-    let mut st = State { w1: PRESETS[0].1, w2: PRESETS[0].2, preset: 0, grid: false, running: true, t: X0 };
+    let mut st = State { ws: PRESETS[0].1.to_vec(), sel: 0, preset: 0, grid: false, running: true, u: 0.0 };
 
-    let v = View::centred(W, H, 52.0);
     let mut c = Canvas::new(W, H);
     let mut win = Window::new("WAVES  -  adding sines", W, H, WindowOptions::default()).expect("no window");
     win.set_target_fps(60);
 
     while win.is_open() && !win.is_key_down(Key::Escape) {
-        // --- input --------------------------------------------------------
         for k in win.get_keys_pressed(KeyRepeat::No) {
             match k {
                 Key::Space => st.running = !st.running,
                 Key::G => st.grid = !st.grid,
                 Key::R => {
-                    let p = PRESETS[st.preset];
-                    st = State { w1: p.1, w2: p.2, preset: st.preset, grid: st.grid, running: true, t: X0 };
+                    let p = st.preset;
+                    load(&mut st, p);
                 }
-                Key::Key1 | Key::Key2 | Key::Key3 | Key::Key4 | Key::Key5 | Key::Key6 => {
-                    let i = match k {
-                        Key::Key1 => 0,
-                        Key::Key2 => 1,
-                        Key::Key3 => 2,
-                        Key::Key4 => 3,
-                        Key::Key5 => 4,
-                        _ => 5,
-                    };
-                    let p = PRESETS[i];
-                    st = State { w1: p.1, w2: p.2, preset: i, grid: st.grid, running: true, t: X0 };
+                Key::Tab => st.sel = (st.sel + 1) % st.ws.len(),
+                Key::Equal => {
+                    if st.ws.len() < MAX_WAVES {
+                        // The next term of a harmonic series, ready to edit.
+                        let n = st.ws.len() as f64 + 1.0;
+                        st.ws.push(Wave::new(1.0 / n, n, 0.0));
+                        st.sel = st.ws.len() - 1;
+                    }
+                }
+                Key::Minus => {
+                    if st.ws.len() > 1 {
+                        st.ws.pop();
+                        st.sel = st.sel.min(st.ws.len() - 1);
+                    }
+                }
+                Key::Key1 | Key::Key2 | Key::Key3 | Key::Key4 | Key::Key5 | Key::Key6 | Key::Key7 => {
+                    let i = [Key::Key1, Key::Key2, Key::Key3, Key::Key4, Key::Key5, Key::Key6, Key::Key7]
+                        .iter()
+                        .position(|&p| p == k)
+                        .expect("matched just above");
+                    load(&mut st, i);
                 }
                 _ => {}
             }
         }
-        let step = |d: f64| if win.is_key_down(Key::LeftShift) { d * 0.2 } else { d };
+
+        // Every adjustment lands on the selected wave, so the controls do not
+        // grow when the number of waves does.
+        let fine = if win.is_key_down(Key::LeftShift) { 0.2 } else { 1.0 };
+        let w = &mut st.ws[st.sel];
         if win.is_key_down(Key::Up) {
-            st.w2.a = (st.w2.a + step(0.012)).min(1.2);
+            w.a = (w.a + 0.012 * fine).min(1.2);
         }
         if win.is_key_down(Key::Down) {
-            st.w2.a = (st.w2.a - step(0.012)).max(0.0);
-        }
-        if win.is_key_down(Key::W) {
-            st.w1.a = (st.w1.a + step(0.012)).min(1.2);
-        }
-        if win.is_key_down(Key::S) {
-            st.w1.a = (st.w1.a - step(0.012)).max(0.0);
+            w.a = (w.a - 0.012 * fine).max(0.0);
         }
         if win.is_key_down(Key::Right) {
-            st.w2.k = (st.w2.k + step(0.01)).min(8.0);
+            w.k = (w.k + 0.01 * fine).min(9.0);
         }
         if win.is_key_down(Key::Left) {
-            st.w2.k = (st.w2.k - step(0.01)).max(0.0);
+            w.k = (w.k - 0.01 * fine).max(0.0);
         }
         if win.is_key_down(Key::D) {
-            st.w2.phi += step(0.02);
+            w.phi += 0.02 * fine;
         }
         if win.is_key_down(Key::A) {
-            st.w2.phi -= step(0.02);
-        }
-        if st.running {
-            st.t += 0.035;
-            if st.t > X1 {
-                st.t = X0;
-            }
+            w.phi -= 0.02 * fine;
         }
 
-        // --- draw ---------------------------------------------------------
+        if st.running {
+            st.u = (st.u + 0.0035) % 1.0;
+        }
+
+        let l = Layout::of(&st.ws);
         c.clear(0x0B1017);
         if st.grid {
-            plot::grid(&mut c, &v, &plot::GridStyle { labels: false, ..Default::default() });
+            plot::grid(&mut c, &l.view, &plot::GridStyle { labels: false, ..Default::default() });
         }
-        scene(&st).draw(&mut c, &v);
+        scene(&st, &l).draw(&mut c, &l.view);
         hud(&mut c, &st);
         win.update_with_buffer(&c.buf, W, H).expect("present failed");
     }
 }
 
-fn hud(c: &mut Canvas, st: &State) {
-    let f = |w: Wave| format!("{:.2} sin({:.2}x {} {:.2})", w.a, w.k, if w.phi < 0.0 { "-" } else { "+" }, w.phi.abs());
-    c.text(14, 12, PRESETS[st.preset].0, INK, 2);
-
-    c.text(14, 618, &format!("wave 1  =  {}", f(st.w1)), C1, 2);
-    c.text(14, 638, &format!("wave 2  =  {}", f(st.w2)), C2, 2);
-
-    // The readout that proves the theorem, or admits it does not apply.
-    let sum = match combine(st.w1, st.w2) {
-        Some(w) => format!("sum     =  {}      <- still one sine wave", f(w)),
-        None => "sum     =  not a sine wave. the frequencies differ, so no common e^(ikx) factors out.".to_string(),
-    };
-    c.text(14, 658, &sum, CS, 2);
-    c.text(14, 680, "1-6 presets   arrows: amp/freq of wave 2   A D phase   W S amp of wave 1   G grid   space pause   R reset", 0x5A6774, 1);
+fn load(st: &mut State, i: usize) {
+    st.ws = PRESETS[i].1.to_vec();
+    st.preset = i;
+    st.sel = 0;
+    st.u = 0.0;
+    st.running = true;
 }
 
-// ===========================================================================
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::f64::consts::TAU;
-
-    /// The identity the entire picture is built on. If this ever failed, the
-    /// horizontal connectors would slope and the drawing would be a lie.
-    #[test]
-    fn a_wave_is_the_shadow_of_its_arrow() {
-        let w = Wave::new(0.7, 2.3, 1.1);
-        for k in 0..40 {
-            let x = -4.0 + 0.31 * k as f64;
-            assert!((w.arrow(x).im - w.at(x)).abs() < 1e-12);
-        }
+fn hud(c: &mut Canvas, st: &State) {
+    let say =
+        |w: &Wave| format!("{:.2} sin({:.2}x {} {:.2})", w.a, w.k, if w.phi < 0.0 { "-" } else { "+" }, w.phi.abs());
+    // The title lives in the readout block, not at the top of the screen —
+    // the top belongs to the first wave's label, and the two collided there.
+    let top = H as i32 - 46 - 20 * (st.ws.len() as i32 + 1);
+    for (k, w) in st.ws.iter().enumerate() {
+        let mark = if k == st.sel { ">" } else { " " };
+        c.text(14, top + 20 * k as i32, &format!("{mark} wave {}  =  {}", k + 1, say(w)), IN[k % IN.len()], 2);
     }
 
-    /// Same frequency in, same frequency out — and the combined wave agrees
-    /// with the pointwise sum everywhere, not just at the sample points that
-    /// happen to be convenient.
-    #[test]
-    fn same_frequency_sines_add_to_one_sine() {
-        let u = Wave::new(1.0, 1.0, 0.0);
-        let w = Wave::new(0.6, 1.0, 0.9);
-        let s = combine(u, w).expect("same frequency");
-        for k in 0..200 {
-            let x = -6.0 + 0.07 * k as f64;
-            assert!((s.at(x) - (u.at(x) + w.at(x))).abs() < 1e-12, "disagreed at x = {x}");
-        }
-    }
-
-    /// sin + cos = sqrt(2) sin(x + pi/4). The famous one, falling out of
-    /// `1 + i` and nothing else.
-    #[test]
-    fn sin_plus_cos_is_root_two_at_a_slant() {
-        let s = combine(Wave::new(1.0, 1.0, 0.0), Wave::new(1.0, 1.0, PI / 2.0)).unwrap();
-        assert!((s.a - 2f64.sqrt()).abs() < 1e-12);
-        assert!((s.phi - PI / 4.0).abs() < 1e-12);
-    }
-
-    /// Half a turn apart is `e^{i pi} = -1`, so the phasors annihilate.
-    #[test]
-    fn opposite_phase_cancels_exactly() {
-        let s = combine(Wave::new(1.0, 1.0, 0.0), Wave::new(1.0, 1.0, PI)).unwrap();
-        assert!(s.a < 1e-15, "amplitude was {}", s.a);
-    }
-
-    /// ★ The refusal. Different frequencies have no single-sine answer, and
-    /// `combine` says so rather than inventing one.
-    #[test]
-    fn different_frequencies_have_no_single_sine_answer() {
-        assert!(combine(Wave::new(1.0, 1.0, 0.0), Wave::new(1.0, 2.0, 0.0)).is_none());
-    }
-
-    /// And here is why the refusal is honest: the sum of an octave pair is not
-    /// a sine of *any* amplitude or phase, because a sine of frequency 1 takes
-    /// each value twice per period and this sum does not.
-    #[test]
-    fn an_octave_pair_is_genuinely_a_new_shape() {
-        let (u, w) = (Wave::new(1.0, 1.0, 0.0), Wave::new(0.6, 2.0, 0.0));
-        let f = |x: f64| u.at(x) + w.at(x);
-        // A pure sine of frequency 1 is odd-symmetric about its peak. Find the
-        // peak numerically and show this sum is not symmetric about it.
-        let n = 20_000;
-        let mut peak = 0.0;
-        let mut best = f64::NEG_INFINITY;
-        for k in 0..n {
-            let x = TAU * k as f64 / n as f64;
-            if f(x) > best {
-                best = f(x);
-                peak = x;
-            }
-        }
-        let d = 0.6;
-        assert!((f(peak + d) - f(peak - d)).abs() > 1e-3, "the sum was suspiciously sine-like");
-    }
-
-    /// Adding shadows and shadowing sums are the same operation. This is what
-    /// lets the arrows be drawn head to tail.
-    #[test]
-    fn arrows_add_head_to_tail_the_way_the_waves_do() {
-        let (u, w) = (Wave::new(0.9, 1.0, 0.3), Wave::new(0.4, 2.7, -1.2));
-        for k in 0..50 {
-            let x = 0.13 * k as f64;
-            assert!(((u.arrow(x) + w.arrow(x)).im - (u.at(x) + w.at(x))).abs() < 1e-12);
-        }
-    }
+    // The readout that proves the theorem, or admits it does not apply.
+    let line = match combine(&st.ws) {
+        Some(w) => format!("  sum     =  {}      <- still one sine wave", say(&w)),
+        None => "  sum     =  not a sine wave. the frequencies differ, so no common e^(ikx) factors out.".to_string(),
+    };
+    c.text(14, top + 20 * st.ws.len() as i32, &line, SUM, 2);
+    c.text(14, top + 20 * (st.ws.len() as i32 + 1), PRESETS[st.preset].0, INK, 2);
+    c.text(
+        14,
+        H as i32 - 20,
+        "1-7 presets   TAB pick a wave   arrows amp/freq   A D phase   = add   - drop   G grid   space pause   R reset",
+        0x5A6774,
+        1,
+    );
 }
 

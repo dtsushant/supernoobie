@@ -165,6 +165,58 @@ impl Canvas {
         self.line(x + w, y, x + w, y + h, c);
     }
 
+    /// The same picture, as Unicode braille — two pixels wide and four tall
+    /// per character, so a terminal shows what the window would.
+    ///
+    /// A braille cell has eight dots in a 2×4 block and one code point per
+    /// subset of them, which is 256 characters starting at `U+2800`. That is
+    /// exactly a byte, so the cell is built by setting bits.
+    ///
+    /// Anything equal to `bg` counts as empty. With `colour`, each cell is
+    /// tinted by the first lit pixel in it using 24-bit ANSI.
+    pub fn braille(&self, bg: u32, colour: bool) -> String {
+        // Which bit each of the eight positions owns. Braille numbers its
+        // dots down the left column then down the right, which is why this
+        // table is not simply 1, 2, 4, 8 in reading order.
+        const DOT: [[u8; 2]; 4] = [[0x01, 0x08], [0x02, 0x10], [0x04, 0x20], [0x40, 0x80]];
+
+        let mut s = String::new();
+        let mut cur: Option<u32> = None;
+        for cy in (0..self.h).step_by(4) {
+            for cx in (0..self.w).step_by(2) {
+                let mut bits = 0u8;
+                let mut lit: Option<u32> = None;
+                for (dy, row) in DOT.iter().enumerate() {
+                    for (dx, bit) in row.iter().enumerate() {
+                        let (x, y) = (cx + dx as i32, cy + dy as i32);
+                        if x >= self.w || y >= self.h {
+                            continue;
+                        }
+                        let p = self.buf[(y * self.w + x) as usize];
+                        if p != bg {
+                            bits |= bit;
+                            lit.get_or_insert(p);
+                        }
+                    }
+                }
+                if colour {
+                    if let Some(want) = lit {
+                        if cur != Some(want) {
+                            s.push_str(&format!("\x1b[38;2;{};{};{}m", (want >> 16) & 255, (want >> 8) & 255, want & 255));
+                            cur = Some(want);
+                        }
+                    }
+                }
+                s.push(char::from_u32(0x2800 + bits as u32).expect("braille block"));
+            }
+            s.push('\n');
+        }
+        if colour {
+            s.push_str("\x1b[0m");
+        }
+        s
+    }
+
     /// Draw text with the 5x7 font.
     ///
     /// The table covers ASCII 32..95, so lowercase is folded to uppercase and
