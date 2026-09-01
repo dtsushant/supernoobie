@@ -255,6 +255,29 @@ assert_eq!(s.state().moves, 1);
 
 ---
 
+## The four programs
+
+`studio` holds several binaries, so name the one you want — except the game,
+which is the default:
+
+```bash
+cargo run -p studio --release                    # the maths game
+cargo run -p studio --release --bin sketch       # a blank page to edit
+cargo run -p studio --release --bin stage        # grouping and motion
+cargo run -p studio --release --bin waves        # adding sine waves
+
+cargo run -p shapes  --release -- seven --steps  # any shape, in the terminal
+```
+
+and to tape a run of the game:
+
+```bash
+cargo run -p studio --release -- --record run.tape
+cargo run -p studio --release -- --replay run.tape
+```
+
+---
+
 ## The three crates
 
 ```

@@ -2,6 +2,9 @@
 name = "studio"
 version = "0.1.0"
 edition = "2021"
+# Four binaries live here, so `cargo run -p studio` needs to be told which
+# one is meant. The game is the one you get without asking.
+default-run = "studio"
 description = "An animation studio built on plotkit. Pure maths in, pictures out."
 
 [dependencies]

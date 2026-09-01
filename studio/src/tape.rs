@@ -16,6 +16,10 @@
 //!     cargo run -p studio --release -- --replay run.tape
 //! ```
 //!
+//! (That resolves to the game because `studio` sets `default-run`. The other
+//! binaries in the package need naming: `--bin sketch`, `--bin stage`,
+//! `--bin waves`.)
+//!
 //! ## The rule that makes it work
 //!
 //! **A state persists; an edge happens once.**
