@@ -38,14 +38,14 @@
 
 use studio::prelude::*;
 
-/// The circle you can click.
-const CENTRE: Cx = Cx::new(0.0, 0.0);
-const RADIUS: f64 = 2.0;
-
 /// Whatever the sketch needs to remember between frames.
 struct Doodle {
     /// Seconds since it started. `each_frame` keeps this up to date.
     t: f64,
+    /// A circle that knows how to be dragged. Everything about picking it up,
+    /// telling a resize from a move, and telling a tap from a drag lives in
+    /// `shapes::grab`, not here.
+    disc: Disc,
     /// Where the colour is on the hue wheel, in `[0, 1)`.
     h: f64,
     colour: u32,
@@ -55,10 +55,24 @@ struct Doodle {
 
 fn main() {
     Graph::new("sketch")
-        .with(Doodle { t: 0.0, h: 0.52, colour: hue(0.52), clicks: 0, seed: 0x2545_F491_4F6C_DD1D })
+        .with(Doodle {
+            t: 0.0,
+            disc: Disc::new(Cx::ZERO, 2.0),
+            h: 0.52,
+            colour: hue(0.52),
+            clicks: 0,
+            seed: 0x2545_F491_4F6C_DD1D,
+        })
         .each_frame(|d, t| d.t = t)
-        .on_click(|d, at| {
-            d.click(at);
+        // The pointer every frame, because a drag is a press, some movement
+        // and a release — only something watching all of it can see a drag.
+        .on_pointer(|d, at, down| {
+            d.disc.drag(at, down);
+            // A press and release that did not travel is a tap, not a drag.
+            if d.disc.tapped() {
+                d.clicks += 1;
+                d.colour = d.pick_colour();
+            }
         })
         .run(scene);
 
@@ -78,27 +92,6 @@ fn main() {
 }
 
 impl Doodle {
-    /// A click at `at`, in world coordinates. Says whether it landed.
-    ///
-    /// The hit test **is** the definition of a disc — `at` arrives in the same
-    /// coordinates the scene is written in, so there is nothing to convert:
-    ///
-    /// ```text
-    ///     |z - c| <= r
-    /// ```
-    ///
-    /// For a shape without such a tidy definition, `Shape::contains` answers
-    /// the same question by counting how many times a ray out of the point
-    /// crosses the outline.
-    fn click(&mut self, at: Cx) -> bool {
-        let hit = (at - CENTRE).abs() <= RADIUS;
-        if hit {
-            self.clicks += 1;
-            self.colour = self.pick_colour();
-        }
-        hit
-    }
-
     /// A new colour, guaranteed to look different from the current one.
     ///
     /// Two decisions, both to do with what "random colour" should mean:
@@ -139,11 +132,21 @@ fn scene(d: &Doodle) -> Frame {
     let t = d.t; // so everything below can just say `t`
     let mut f = Frame::new();
 
-    // --- the circle you can click ----------------------------------------
-    // Click inside it and it changes colour. The whole of "is that a hit?" is
-    // `|z - c| <= r`, up in main().
-    f.add(Shape::circle(CENTRE, RADIUS)).color(d.colour).width(3);
-    f.label(Cx::new(0.0, RADIUS + 0.5), format!("click me  ({} so far)", d.clicks), 0x5A6774, 2);
+    // --- the circle you can take hold of ---------------------------------
+    // Drag the rim to resize it, drag the inside to move it, tap it to change
+    // its colour. None of that logic is here: the disc knows how to be
+    // dragged, and this only says what it looks like.
+    f.add(d.disc.shape()).color(d.colour).width(3);
+    f.add(d.disc.handles()).color(if d.disc.held() { d.colour } else { 0x3B4A59 }).dot(4.0);
+
+    let hint = if d.disc.resizing() {
+        format!("resizing  (r = {:.2})", d.disc.radius)
+    } else if d.disc.held() {
+        "moving".to_string()
+    } else {
+        format!("drag the rim to resize, the middle to move, tap to recolour  ({} taps)", d.clicks)
+    };
+    f.label(d.disc.centre + Cx::new(0.0, d.disc.radius + 0.5), hint, 0x5A6774, 2);
 
     // --- a shape from the library, sitting still -------------------------
    // f.place(digit::glyph(7, 40), Cx::new(-3.0, 0.0)).color(0x4FBCD4).width(3);
@@ -219,7 +222,7 @@ mod tests {
     use super::*;
 
     fn doodle() -> Doodle {
-        Doodle { t: 0.0, h: 0.52, colour: hue(0.52), clicks: 0, seed: 7 }
+        Doodle { t: 0.0, disc: Disc::new(Cx::ZERO, 2.0), h: 0.52, colour: hue(0.52), clicks: 0, seed: 7 }
     }
 
     /// A sketch that draws nothing is almost always a mistake, and the window
@@ -232,39 +235,41 @@ mod tests {
         assert!(f.bounds(&v).is_some(), "nothing in the frame has a position");
     }
 
-    /// ★ Clicking inside changes the colour; clicking outside leaves it alone.
+    /// A tap on the circle recolours it; a tap on empty space does not.
     #[test]
-    fn only_a_click_on_the_circle_changes_anything() {
+    fn only_a_tap_on_the_circle_recolours_it() {
         let mut d = doodle();
         let before = d.colour;
+        let tap = |d: &mut Doodle, at: Cx| {
+            d.disc.drag(at, true);
+            d.disc.drag(at, false);
+            if d.disc.tapped() {
+                d.clicks += 1;
+                d.colour = d.pick_colour();
+            }
+        };
 
-        assert!(!d.click(CENTRE + Cx::new(RADIUS + 0.3, 0.0)), "just outside the rim");
+        tap(&mut d, Cx::new(9.0, 9.0));
         assert_eq!(d.colour, before, "a miss should change nothing");
         assert_eq!(d.clicks, 0);
 
-        assert!(d.click(CENTRE), "the middle is on the circle");
+        tap(&mut d, Cx::ZERO);
         assert_ne!(d.colour, before);
         assert_eq!(d.clicks, 1);
-
-        // Anywhere inside counts, not only the middle — and the rim itself is
-        // in, because the test is `<=`.
-        assert!(d.click(CENTRE + Cx::polar(RADIUS * 0.99, 2.1)));
-        assert!(d.click(CENTRE + Cx::polar(RADIUS, 0.0)));
     }
 
-    /// The one-line test and the general one must agree, or the sketch and
-    /// the library would disagree about what was clicked.
+    /// ★ Dragging is not tapping. Resizing the circle must not also fire the
+    /// recolour, or every resize would flash.
     #[test]
-    fn the_one_liner_agrees_with_shape_contains() {
-        let circle = Shape::circle(CENTRE, RADIUS);
-        let (lo, hi) = (Cx::new(-9.0, -9.0), Cx::new(9.0, 9.0));
-        for k in 0..120 {
-            let p = CENTRE + Cx::polar(0.15 * k as f64 / 4.0, 0.9 * k as f64);
-            let d = (p - CENTRE).abs();
-            if (d - RADIUS).abs() > 0.05 {
-                assert_eq!(d <= RADIUS, circle.contains(p, lo, hi, 600), "disagreed at |z-c| = {d}");
-            }
-        }
+    fn a_drag_does_not_recolour() {
+        let mut d = doodle();
+        let before = d.colour;
+        d.disc.drag(Cx::new(2.0, 0.0), true); // grab the rim
+        d.disc.drag(Cx::new(3.5, 0.0), true); // pull it out
+        d.disc.drag(Cx::new(3.5, 0.0), false);
+        assert!(!d.disc.tapped(), "that was a drag");
+        assert_eq!(d.colour, before);
+        assert!((d.disc.radius - 3.5).abs() < 1e-9, "and it did resize");
     }
 
     /// ★ A colour that came back the same, or nearly the same, or grey, would
@@ -276,7 +281,7 @@ mod tests {
         let mut seen = Vec::new();
         let mut last_h = d.h;
         for _ in 0..40 {
-            d.click(CENTRE);
+            d.colour = d.pick_colour();
             let c = d.colour;
             // How far round the wheel it moved, the short way.
             let step = (d.h - last_h).rem_euclid(1.0).min((last_h - d.h).rem_euclid(1.0));

@@ -46,6 +46,9 @@
 //! | [`face`] | a smiley and a ghost |
 //! | [`count`] | tally marks |
 //! | [`glyph`] | `+`, `=`, `?` |
+//! | [`grab`] | shapes you can take hold of — drag to move, drag the rim to resize |
+//! | [`motion`] | spin, walk, run, orbit — as values that compose |
+//! | [`troupe`] | a group that is itself one of the things it groups |
 //! | [`wave`] | `a sin(kx + φ)`, and what happens when you add them |
 
 pub mod count;
@@ -53,10 +56,16 @@ pub mod digit;
 pub mod face;
 pub mod fourier;
 pub mod glyph;
+pub mod grab;
+pub mod motion;
 pub mod recipe;
+pub mod troupe;
 pub mod wave;
 
 pub use fourier::Series;
+pub use grab::Disc;
+pub use motion::{Motion, Pose};
+pub use troupe::{Actor, Troupe};
 pub use recipe::{Recipe, Step, STEP_COLOURS};
 pub use wave::Wave;
 

@@ -77,8 +77,8 @@ use plotkit::{plot, raster::Canvas, Cx, Frame, View};
 pub mod prelude {
     pub use crate::{Graph, Keys, Sketch};
     pub use plotkit::{plot, Canvas, Cx, Frame, Shape, View};
-    pub use shapes::{count, digit, face, fourier, glyph, wave};
-    pub use shapes::{Draw, Place, Recipe, Series, Wave};
+    pub use shapes::{count, digit, face, fourier, glyph, grab, motion, troupe, wave};
+    pub use shapes::{Actor, Disc, Draw, Motion, Place, Pose, Recipe, Series, Troupe, Wave};
     pub use std::f64::consts::{PI, TAU};
 }
 
@@ -326,6 +326,8 @@ enum Binding<S> {
     Frame(Box<dyn FnMut(&mut S, f64)>),
     /// A mouse click, with where it landed in world coordinates.
     Click(Box<dyn FnMut(&mut S, Cx)>),
+    /// The pointer every frame: where it is, and whether the button is down.
+    Pointer(Box<dyn FnMut(&mut S, Cx, bool)>),
 }
 
 impl<S: 'static> Sketch<S> {
@@ -376,6 +378,28 @@ impl<S: 'static> Sketch<S> {
     /// Fires once when the button goes down, not every frame it is held.
     pub fn on_click(mut self, f: impl FnMut(&mut S, Cx) + 'static) -> Self {
         self.bindings.push(Binding::Click(Box::new(f)));
+        self
+    }
+
+    /// The pointer every frame — where it is and whether the button is down.
+    ///
+    /// [`Sketch::on_click`] is the edge; this is the whole state, which is what
+    /// dragging needs. A drag is not a click, it is a press, some movement, and
+    /// a release, and only something watching every frame can see the middle
+    /// part.
+    ///
+    /// ```no_run
+    /// # use studio::prelude::*;
+    /// # use shapes::grab::Disc;
+    /// # struct S { disc: Disc }
+    /// # fn scene(_: &S) -> Frame { Frame::new() }
+    /// Graph::new("x")
+    ///     .with(S { disc: Disc::new(Cx::ZERO, 2.0) })
+    ///     .on_pointer(|s, at, down| s.disc.drag(at, down))
+    ///     .run(scene);
+    /// ```
+    pub fn on_pointer(mut self, f: impl FnMut(&mut S, Cx, bool) + 'static) -> Self {
+        self.bindings.push(Binding::Pointer(Box::new(f)));
         self
     }
 
@@ -432,6 +456,7 @@ impl<S: 'static> Sketch<S> {
                         f(&mut self.state, keys.at());
                     }
                 }
+                Binding::Pointer(f) => f(&mut self.state, keys.at(), keys.down()),
             }
         }
     }

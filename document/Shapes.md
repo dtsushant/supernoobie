@@ -299,6 +299,115 @@ there is anything to measure.
 
 ---
 
+## `shapes::grab` — shapes you can take hold of
+
+```rust
+let mut d = Disc::new(Cx::ZERO, 2.0);
+d.drag(pointer, button_down);   // once a frame
+
+d.resizing()   // dragging the rim
+d.held()       // dragging anything
+d.tapped()     // pressed and released without travelling — a click, not a drag
+d.contains(p)  d.shape()  d.handles()
+```
+
+Drag the **rim** to resize, drag the **inside** to move. It needs only a
+position and a bool, no window, so it lives with the geometry and is testable
+without a screen.
+
+> **What you have hold of is decided when the button goes down**, and kept
+> until it comes up. Re-deciding every frame looks equivalent and is not: drag
+> the rim quickly through the middle and a frame-by-frame test hands you the
+> *inside* on the way past, so the disc stops resizing and starts following the
+> cursor. There is a test that drags straight through the centre and demands it
+> still be resizing on the far side.
+
+---
+
+## `shapes::motion` — spin, walk, run, as values
+
+A motion is a function from time to a **pose**, and a pose is `z ↦ az + b`.
+Two complex numbers: `a` turns and stretches, `b` moves. That pair is *every*
+similarity of the plane, which is why one type covers all of these without a
+special case:
+
+```rust
+Motion::still()                Motion::spin(turns_per_second)
+Motion::travel(velocity)       Motion::orbit(radius, turns_per_second)
+Motion::walk(velocity)         Motion::bob(height, per_second)
+Motion::run(velocity)          Motion::pulse(amount, per_second)
+
+m.then(other)    // both at once — ONE motion
+m.about(centre)  // do it around a point instead of the origin
+m.reversed()     m.speed(2.0)
+m.at(t)          // -> Pose        m.shape(s, t)   // -> Shape
+```
+
+**Positive is anticlockwise.** Not a coin flip: `e^{iθ} = cos θ + i sin θ`, so
+as `θ` grows the point goes from `1` towards `i` — right, then up. Clockwise is
+`spin(-rate)`.
+
+**`then` works because composing poses is multiplying the pairs:**
+
+```text
+    (a₂, b₂) ∘ (a₁, b₁)  =  (a₂a₁,  a₂b₁ + b₂)
+```
+
+That is the group law of the plane's similarities. It is why walking while
+spinning is one motion rather than two things fighting over the same shape —
+and why `walk` and `run` are *built* from `travel`, `bob` and `spin` rather
+than written afresh. A run is a walk at three times the speed, bouncing higher,
+leaning forward; that is three composed motions and no new code.
+
+`Pose::inverse()` undoes a pose, which is what lets you click something that is
+being carried by a motion.
+
+---
+
+## `shapes::troupe` — a group that is one of the things it groups
+
+```rust
+let mut t = Troupe::new()
+    .and(Disc::new(Cx::new(-2.0, 0.0), 1.0))
+    .and(Disc::new(Cx::new(2.0, 0.0), 0.7))
+    .moving(Motion::spin(0.1));
+
+t.tick(time);              // once a frame, before anything asks where it is
+t.drag(pointer, down);     // dispatched to whichever member was grabbed
+t.shape()                  // the whole group, as one shape
+t.parts()                  // each member separately, for individual colours
+```
+
+**`Troupe` implements `Actor`, and so do its members.** Same trait — so a group
+nests inside a group, and anything that takes one takes the other. That is what
+makes "a group of shapes is itself a shape" true rather than merely convenient,
+and it is the whole design:
+
+```rust
+pub trait Actor {
+    fn shape(&self) -> Shape;
+    fn hit(&self, p: Cx) -> bool;
+    fn drag(&mut self, at: Cx, down: bool);
+    fn nudge(&mut self, by: Cx);
+    fn tapped(&self) -> bool { false }
+}
+```
+
+Two rules make it behave:
+
+1. **Which member you grabbed is decided on the press** — the same rule as a
+   single shape, one level up.
+2. **A moving group hit-tests through the inverse of its pose.** Members do not
+   know they are being carried, so the pointer is taken back through the motion
+   before they are asked. Without it, everything inside a spinning group would
+   be grabbable only where it *used to be*.
+
+`cargo run -p studio --release --bin stage` is the demonstration: five discs in
+a ring, the group spinning or walking, and every disc still individually
+draggable while it moves.
+
+---
+
 ## `shapes::face` — a smiley and a ghost
 
 ```rust
@@ -482,6 +591,7 @@ time. One implementation therefore works on every kind of shape.
 | `shapes/src/bin/shape.rs` | the terminal drawer |
 | `studio/src/lib.rs` | `Graph`, `Keys`, and the prelude |
 | `studio/src/bin/sketch.rs` | **a blank page — start here** |
+| `studio/src/bin/stage.rs` | grouping and motion, in one screen |
 | `studio/src/main.rs` | the maths game |
 | `studio/src/bin/waves.rs` | adding sine waves |
 | `document/HowItWorks.md` | why the library is shaped the way it is |
