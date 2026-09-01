@@ -96,7 +96,7 @@ pub mod prelude {
     pub use crate::{Graph, Keys, Sketch};
     pub use plotkit::{plot, Anchor, Canvas, Cx, Frame, Shape, View};
     pub use shapes::{count, cyclone, digit, face, fourier, glyph, grab, motion, terrain, troupe, wave};
-    pub use shapes::{Actor, Cyclone, Disc, Draw, Field, Motion, Place, Pose, Recipe, Series, Tree, Troupe, Wave};
+    pub use shapes::{Actor, Cyclone, Disc, Field, Motion, Pose, Recipe, Series, Tree, Troupe, Wave};
     pub use std::f64::consts::{PI, TAU};
 }
 
@@ -971,7 +971,7 @@ fn key_of(c: char) -> Option<Key> {
 mod tests {
     use super::*;
     use plotkit::Shape;
-    use shapes::{face, Draw};
+    use shapes::face;
 
     fn one_smiley_at(z: Cx) -> Frame {
         let mut f = Frame::new();

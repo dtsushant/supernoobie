@@ -36,16 +36,28 @@ for k in 0..12 {
 ```
 
 > **Why `place` and not `draw`?** `Frame::draw(canvas, view)` already exists and
-> means "render this frame onto a canvas". In Rust an inherent method silently
-> beats a trait method of the same name, so a second `draw` would not have been
-> a second `draw` — it would have been a puzzle. `place` says what it does.
+> means "render this frame onto a canvas".
 
-### The two traits
+`place`, `at` and `sized` are **inherent** methods — there is no trait to
+remember to import. That was not always true, and the way it failed was nasty:
+name the types one at a time without the trait and `place` was simply not
+there, with the error blaming `Frame`.
+
+### Where things live
 
 | | |
 |---|---|
-| `Place` | `.at(z)` and `.sized(k)`. Works on a `Shape` **and** on a whole `Recipe`, construction lines included. |
-| `Draw` | `frame.place(shape, at)`. Returns the style, so `.color(…)` and `.width(…)` chain off it. |
+| `plotkit` | the drawing — `Cx`, `Shape`, `Frame`, `View`, `Canvas` |
+| `shapes` | things to draw — digits, faces, cyclones, waves, terrain |
+| `studio` | the window — `Graph`, `Sketch`, `Keys`, `Tape` |
+
+`Frame` is plotkit's because a frame is a drawing; `Graph` is studio's because
+it owns a window. Nothing is defined twice. `use studio::prelude::*;` brings
+all three in at once, or name what you want from each — both work.
+
+One name to watch: `plotkit::plot` is a **module** (graph paper, curves) while
+`Graph::plot` is a **method** (show one still). Unrelated things that happen to
+share a word.
 
 ---
 

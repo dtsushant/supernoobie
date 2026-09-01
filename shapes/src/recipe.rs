@@ -71,8 +71,19 @@ impl Recipe {
         self.steps.is_empty()
     }
 
+    /// Put the whole construction there, steps and all.
+    pub fn at(self, z: Cx) -> Recipe {
+        self.map_all(move |w| w + z)
+    }
+
+    /// Resize the whole construction, steps and all.
+    pub fn sized(self, k: f64) -> Recipe {
+        self.map_all(move |w| w.scale(k))
+    }
+
     /// Apply a map to every step, so the construction lines travel with the
-    /// thing they build. [`crate::Place`] is written in terms of this.
+    /// thing they build. [`Recipe::at`] and [`Recipe::sized`] are written in
+    /// terms of this.
     pub fn map_all(mut self, f: impl Fn(Cx) -> Cx + Send + Sync + Clone + 'static) -> Recipe {
         for s in &mut self.steps {
             s.shape = s.shape.clone().map(f.clone());

@@ -16,7 +16,7 @@
 //! know where it will end up. Putting it somewhere is then one call:
 //!
 //! ```no_run
-//! # use shapes::{Place, Draw, face, digit};
+//! # use shapes::{face, digit};
 //! # use plotkit::{Cx, Frame};
 //! # let mut f = Frame::new();
 //! f.place(face::smiley(1.0), Cx::new(-3.0, 2.0));
@@ -26,10 +26,13 @@
 //! let seven = digit::glyph(7, 40).sized(1.5).at(Cx::new(1.0, 2.0));
 //! ```
 //!
+//! All four of those are **inherent** methods — no trait to remember to
+//! import. That was not always true, and the way it failed was nasty: import
+//! the types without the trait and `place` was simply not there, with the
+//! error blaming `Frame`.
+//!
 //! (It is `place`, not `draw`, because `Frame::draw` already means "render
-//! this frame onto a canvas". An inherent method silently wins over a trait
-//! one, so a second `draw` would not have been a second `draw` — it would have
-//! been a puzzle.)
+//! this frame onto a canvas".)
 //!
 //! That is the whole reason the origin convention is worth insisting on. A
 //! shape that already knows where it lives can only be drawn there. A shape
@@ -75,59 +78,15 @@ pub use troupe::{Actor, Troupe};
 pub use recipe::{Recipe, Step, STEP_COLOURS};
 pub use wave::Wave;
 
-use plotkit::frame::StyleRef;
-use plotkit::{Cx, Frame, Shape};
-
-/// Put a shape somewhere, or change its size.
-///
-/// Both are ordinary maps — `z ↦ z + at` and `z ↦ kz` — which is why they
-/// work identically on a bare [`Shape`] and on a whole [`Recipe`] with its
-/// construction lines attached.
-pub trait Place: Sized {
-    fn at(self, z: Cx) -> Self;
-    fn sized(self, k: f64) -> Self;
-}
-
-impl Place for Shape {
-    fn at(self, z: Cx) -> Shape {
-        self.shift(z)
-    }
-    fn sized(self, k: f64) -> Shape {
-        self.scaled(k)
-    }
-}
-
-impl Place for Recipe {
-    fn at(self, z: Cx) -> Recipe {
-        self.map_all(move |w| w + z)
-    }
-    fn sized(self, k: f64) -> Recipe {
-        self.map_all(move |w| w.scale(k))
-    }
-}
-
-/// `frame.place(shape, at)` — put a shape at a coordinate in one call.
-///
-/// Returns the style, so it reads the way the picture is described:
-///
-/// ```text
-///     f.place(face::ghost(1.0), spot).color(0x9B7BD4).width(3);
-/// ```
-pub trait Draw {
-    fn place(&mut self, s: Shape, at: Cx) -> StyleRef<'_>;
-
-    /// A recipe's finished shape, placed. The construction lines are dropped;
-    /// use [`Recipe::steps`] directly to show the working.
-    fn place_recipe(&mut self, r: &Recipe, at: Cx) -> StyleRef<'_> {
-        self.place(r.shape(), at)
-    }
-}
-
-impl Draw for Frame {
-    fn place(&mut self, s: Shape, at: Cx) -> StyleRef<'_> {
-        self.add(s.at(at))
-    }
-}
+// Placing used to live here, as the traits `Place` and `Draw`. It does not any
+// more: `Shape::at`, `Shape::sized`, `Frame::place` and `Recipe::at` are
+// ordinary inherent methods now.
+//
+// The traits existed only because a crate cannot add an inherent method to a
+// type it does not own — but `place` is `add(s.at(z))`, which is pure plotkit,
+// so plotkit could always have owned it. The cost of getting that wrong was
+// paid by anyone importing the types one at a time: the method simply was not
+// there, and the error blamed `Frame` rather than the missing import.
 
 /// Look a shape up by name, for the command line. Accepts digits as numerals
 /// or words, and `tally7` for seven tally marks.
@@ -173,6 +132,7 @@ pub fn catalogue() -> Vec<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use plotkit::{Cx, Shape};
 
     fn first_point(s: &Shape) -> Cx {
         s.polylines(Cx::new(-99.0, -99.0), Cx::new(99.0, 99.0), 300)[0][0]

@@ -115,6 +115,19 @@ impl Frame {
         StyleRef { f: self, k }
     }
 
+    /// Add a shape **at a position** — `add(s.at(z))`, said the way you would
+    /// say it.
+    ///
+    /// Every shape in `shapes` is built about its own origin, so this is the
+    /// usual way to use one.
+    ///
+    /// ```text
+    /// f.place(face::smiley(1.0), Cx::new(-3.0, 2.0)).color(0x6FCF97);
+    /// ```
+    pub fn place(&mut self, s: Shape, at: Cx) -> StyleRef<'_> {
+        self.add(s.at(at))
+    }
+
     /// Text at a world position, so it moves with whatever it labels.
     ///
     /// Use this for something that names a *part of the drawing* — it should

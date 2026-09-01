@@ -129,6 +129,22 @@ impl Shape {
     pub fn shift(self, by: Cx) -> Shape {
         self.map(move |z| z + by)
     }
+
+    /// Put it there. The same as [`Shape::shift`], named for how it reads
+    /// when the shape was built about its own origin — which everything in
+    /// `shapes` is.
+    ///
+    /// Inherent, not a trait method, so it works whatever you imported. A
+    /// trait would vanish the moment somebody imported the types one at a
+    /// time and not the trait with them, and the error would blame `Frame`.
+    pub fn at(self, z: Cx) -> Shape {
+        self.shift(z)
+    }
+
+    /// Make it bigger or smaller. The same as [`Shape::scaled`].
+    pub fn sized(self, k: f64) -> Shape {
+        self.scaled(k)
+    }
     /// `k z`
     pub fn scaled(self, k: f64) -> Shape {
         self.map(move |z| z.scale(k))
