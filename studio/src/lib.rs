@@ -49,7 +49,12 @@
 //!
 //! ## Keys the graph handles for you
 //!
-//! In every mode: `Esc` quits, `G` toggles graph paper, `Home` resets the view.
+//! In every mode: `Esc` quits, `G` toggles graph paper, `Home` resets the view,
+//! and **`/` shows what the window system is actually reporting** — which
+//! buttons it sees, whether it thinks the pointer is over the window, and
+//! whether a pan is being recognised. Handy when dragging does not work,
+//! because that is three or four different faults which look identical from
+//! outside.
 //!
 //! In `plot` and `animate` only, where the scene is not reading the keyboard:
 //! `,` and `.` zoom, the arrow keys pan, `Space` pauses, and `S` saves a PNG.
@@ -179,6 +184,7 @@ impl Graph {
         let home_view = view;
         let (mut t, mut paused, mut saves) = (0.0f64, false, 0);
         let (mut was_down, mut last_pan) = (false, None::<(f64, f64)>);
+        let mut show_input = false;
 
         while win.is_open() && !win.is_key_down(Key::Escape) {
             let keys = Keys::read(&win, &view, was_down);
@@ -186,6 +192,9 @@ impl Graph {
 
             if keys.just('g') {
                 grid = !grid;
+            }
+            if keys.just('/') {
+                show_input = !show_input;
             }
             if keys.just('s') {
                 saves += 1;
@@ -208,6 +217,42 @@ impl Graph {
                 plot::grid(&mut c, &view, &plot::GridStyle::default());
             }
             scene(t, &keys).draw(&mut c, &view);
+            if show_input {
+                // What the window system is actually telling us. Pressed `/`.
+                //
+                // Worth having: which mouse buttons a backend reports varies,
+                // and "dragging does not work" is three or four different
+                // faults that look identical from the outside.
+                c.text(
+                    12,
+                    h as i32 - 40,
+                    &format!(
+                        "LEFT {}  RIGHT {}  MIDDLE {}  SHIFT {}  OVER {}  WHEEL {:+.2}",
+                        keys.down as u8,
+                        keys.right_down as u8,
+                        keys.middle_down as u8,
+                        keys.shift as u8,
+                        keys.over as u8,
+                        keys.scroll,
+                    ),
+                    0xE0A44A,
+                    2,
+                );
+                c.text(
+                    12,
+                    h as i32 - 22,
+                    &format!(
+                        "at ({:.0}, {:.0})px   panning {}   dragging {}   view x{:.1}",
+                        keys.at_px.0,
+                        keys.at_px.1,
+                        keys.panning() as u8,
+                        last_pan.is_some() as u8,
+                        view.scale,
+                    ),
+                    0xE0A44A,
+                    2,
+                );
+            }
             win.update_with_buffer(&c.buf, w, h).expect("could not present the frame");
 
             // --- pan and zoom, in every mode -----------------------------
@@ -218,11 +263,12 @@ impl Graph {
             if keys.scroll().abs() > 1e-6 {
                 zoom_about(&mut view, keys.at_px(), 1.0 + 0.14 * keys.scroll().clamp(-3.0, 3.0));
             }
-            // A pan must BEGIN over the window — a button already down when the
-            // pointer arrives is not a drag of this graph. Once begun it
-            // continues wherever the pointer goes, so dragging off the edge
-            // does not drop it.
-            if keys.panning() && (last_pan.is_some() || keys.over()) {
+            // No `over()` test here. It sounds right — "a pan should begin
+            // over the window" — but it leans on `get_mouse_pos(Discard)`
+            // returning `Some`, and a backend that always says `None` would
+            // make panning impossible for a reason that has nothing to do
+            // with the mouse buttons. Not worth the risk for the little it buys.
+            if keys.panning() {
                 if let Some((lx, ly)) = last_pan {
                     // The origin is in pixels, so moving it by the pointer's
                     // own delta makes the paper follow the hand exactly.
