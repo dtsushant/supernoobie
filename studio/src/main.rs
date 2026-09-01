@@ -31,6 +31,17 @@
 //!   Bksp   rub one out           N      a new sum
 //!   Esc    quit
 //! ```
+//!
+//! ## Recording a run
+//!
+//! ```text
+//!     cargo run -p studio --release -- --record run.tape
+//!     cargo run -p studio --release -- --replay run.tape
+//! ```
+//!
+//! The game cannot tell which it is doing — the input arrives the same way
+//! either way. See [`studio::tape`] for why the seed has to be in the file and
+//! why a press must not replay as a press per frame.
 
 use std::sync::Arc;
 use studio::prelude::*;
@@ -235,13 +246,32 @@ fn sway(t: f64) -> Cx {
 //  loop; this only says what the keys mean and hands back a frame.
 // ===========================================================================
 
-fn main() {
-    let seed = std::time::SystemTime::now()
+/// A seed from the clock — so every run asks different questions.
+///
+/// Which is exactly why a tape has to carry it: a replay that seeded itself
+/// afresh would sit there answering a completely different set of sums.
+fn seed_from_the_clock() -> u64 {
+    std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0x5EED_1234);
+        .unwrap_or(0x5EED_1234)
+}
 
-    Graph::new("STUDIO  -  numbers made of waves")
+fn main() {
+    // `--record run.tape` writes everything that happens; `--replay run.tape`
+    // plays it back. The game cannot tell which it is doing.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let replaying = args.iter().any(|a| a == "--replay");
+    let path = args
+        .iter()
+        .position(|a| a == "--record" || a == "--replay")
+        .and_then(|i| args.get(i + 1))
+        .cloned();
+
+    let reel = replaying.then(|| path.clone()).flatten().map(|p| Tape::load(&p).expect("could not read that tape"));
+    let seed = reel.as_ref().map_or_else(seed_from_the_clock, |t| t.seed);
+
+    let sketch = Graph::new("STUDIO  -  numbers made of waves")
         .size(1200, 740)
         .scale(52.0)
         .origin(0.5, 0.42)
@@ -263,8 +293,16 @@ fn main() {
         .on('n', Game::ask)
         .on('e', |g| g.show_arrows = !g.show_arrows)
         .on('-', |g| g.terms = g.terms.saturating_sub(1).max(1))
-        .on('=', |g| g.terms = (g.terms + 1).min(80))
-        .run(scene);
+        .on('=', |g| g.terms = (g.terms + 1).min(80));
+
+    match (reel, path) {
+        (Some(tape), _) => sketch.replaying(tape).run(scene),
+        (None, Some(p)) => {
+            println!("recording to {p}");
+            sketch.recording(Tape::to(&p, seed, 1.0 / 60.0).expect("could not write that tape")).run(scene)
+        }
+        (None, None) => sketch.run(scene),
+    }
 }
 
 // ===========================================================================

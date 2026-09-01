@@ -84,7 +84,10 @@ use plotkit::{plot, raster::Canvas, Cx, Frame, View};
 /// ```no_run
 /// use studio::prelude::*;
 /// ```
+pub mod tape;
+
 pub mod prelude {
+    pub use crate::tape::Tape;
     pub use crate::{Graph, Keys, Sketch};
     pub use plotkit::{plot, Anchor, Canvas, Cx, Frame, Shape, View};
     pub use shapes::{count, digit, face, fourier, glyph, grab, motion, troupe, wave};
@@ -264,7 +267,7 @@ impl Graph {
     /// Call this **after** the builders — `.size`, `.scale` and friends belong
     /// to the graph, and this hands the graph over.
     pub fn with<S>(self, state: S) -> Sketch<S> {
-        Sketch { graph: self, state, bindings: Vec::new() }
+        Sketch { graph: self, state, bindings: Vec::new(), tape: Reel::Live }
     }
 
     /// A still, written to a PNG. No window, so this works headless.
@@ -351,6 +354,14 @@ pub struct Sketch<S> {
     graph: Graph,
     state: S,
     bindings: Vec<Binding<S>>,
+    tape: Reel,
+}
+
+/// Whether a sketch is being taped, replayed, or neither.
+enum Reel {
+    Live,
+    Recording(crate::tape::Tape),
+    Replaying(crate::tape::Tape),
 }
 
 enum Binding<S> {
@@ -451,11 +462,55 @@ impl<S: 'static> Sketch<S> {
         self
     }
 
+    /// Write every input to a tape as the sketch runs.
+    ///
+    /// The seed is the one thing a replay cannot recover by watching — a
+    /// sketch that seeds itself from the clock would otherwise replay as a
+    /// different run. Pass whatever seeded it.
+    pub fn recording(mut self, tape: crate::tape::Tape) -> Self {
+        self.tape = Reel::Recording(tape);
+        self
+    }
+
+    /// Take the input from a tape instead of the keyboard.
+    ///
+    /// The sketch cannot tell the difference, which is the point: nothing in
+    /// it has to know it is being replayed.
+    pub fn replaying(mut self, tape: crate::tape::Tape) -> Self {
+        self.tape = Reel::Replaying(tape);
+        self
+    }
+
+    /// Which frame `t` is, at sixty a second.
+    ///
+    /// Frames rather than seconds because a tape has to line up exactly, and
+    /// two floats that ought to be equal often are not.
+    fn frame_at(t: f64) -> u32 {
+        (t * 60.0).round().max(0.0) as u32
+    }
+
     /// Fire everything one frame would fire, without a window.
     ///
     /// [`Sketch::run`] calls this; so can a test, which is the point — the
     /// bindings are ordinary code and do not need a screen to be checked.
     pub fn step(&mut self, t: f64, keys: &Keys) {
+        // A tape either watches the input go past or supplies it. The
+        // bindings below cannot tell which, and that is what makes a replay
+        // faithful rather than a second implementation of the same thing.
+        let frame = Self::frame_at(t);
+        let played;
+        let keys = match &mut self.tape {
+            Reel::Live => keys,
+            Reel::Recording(tape) => {
+                tape.record(frame, keys);
+                keys
+            }
+            Reel::Replaying(tape) => {
+                played = tape.at(frame);
+                &played
+            }
+        };
+
         // Frame handlers first, in registration order, then the rest — so
         // anything that updates a clock has done so before a key reads it.
         for b in &mut self.bindings {
@@ -509,8 +564,8 @@ impl<S: 'static> Sketch<S> {
     /// Open the window and go. `draw` turns the state into a picture and is
     /// the only part that sees it whole.
     pub fn run(self, mut draw: impl FnMut(&S) -> Frame + 'static) {
-        let Sketch { graph, state, bindings } = self;
-        let mut me = Sketch { graph: Graph::new(""), state, bindings };
+        let Sketch { graph, state, bindings, tape } = self;
+        let mut me = Sketch { graph: Graph::new(""), state, bindings, tape };
         graph.play(move |t, keys| {
             me.step(t, keys);
             draw(&me.state)
@@ -552,6 +607,7 @@ fn slug(s: &str) -> String {
 }
 
 /// What the keyboard is doing, without minifb in your file.
+#[derive(Clone, Debug, PartialEq)]
 pub struct Keys {
     pressed: Vec<Key>,
     held: Vec<Key>,
@@ -670,6 +726,73 @@ impl Keys {
         self.scroll
     }
 
+    /// The middle button, held.
+    pub fn middle(&self) -> bool {
+        self.middle_down
+    }
+
+    /// Was `Home` pressed this frame? The graph uses it to reset the view.
+    pub fn home_pressed(&self) -> bool {
+        self.home
+    }
+
+    /// The same input with every **edge** removed, leaving only the states.
+    ///
+    /// A held key survives, the pointer survives, the buttons stay down — but
+    /// the presses, the click, the scroll and the Home are gone, because each
+    /// of those happened at one instant. This is what lets a tape hold one
+    /// snapshot forward across the frames where nothing changed, without
+    /// replaying the press sixty times a second.
+    pub fn steady(mut self) -> Keys {
+        self.pressed.clear();
+        self.clicked = false;
+        self.scroll = 0.0;
+        self.home = false;
+        self
+    }
+
+    /// The keys pressed this frame, as tape codes.
+    pub fn pressed_codes(&self) -> String {
+        self.pressed.iter().filter_map(|k| code_of(*k)).collect()
+    }
+
+    /// The keys held, as tape codes.
+    pub fn held_codes(&self) -> String {
+        self.held.iter().filter_map(|k| code_of(*k)).collect()
+    }
+
+    /// Rebuild an input from the pieces a tape stores.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_parts(
+        pressed: &str,
+        held: &str,
+        at: Cx,
+        at_px: (f64, f64),
+        down: bool,
+        clicked: bool,
+        right_down: bool,
+        middle_down: bool,
+        shift: bool,
+        over: bool,
+        home: bool,
+        scroll: f64,
+    ) -> Keys {
+        Keys {
+            pressed: pressed.chars().filter_map(key_of).collect(),
+            held: held.chars().filter_map(key_of).collect(),
+            at,
+            at_px,
+            over,
+            down,
+            clicked,
+            right_down,
+            middle_down,
+            shift,
+            scroll,
+            home,
+        }
+    }
+
     fn read(win: &Window, view: &View, was_down: bool) -> Keys {
         // Clamp for the position so it stays usable while dragging off the
         // edge; Discard only to ask whether the pointer is over us at all.
@@ -749,6 +872,20 @@ fn digit_of(k: &Key) -> Option<u32> {
     })
 }
 
+/// Every key a tape can carry, one character each.
+///
+/// Letters and digits are themselves. The rest borrow punctuation — and
+/// **none of these may be whitespace**, because a snapshot is one line split
+/// on spaces, so a literal space or tab in the key field would tear the line
+/// in half. That is why Space is `_` and Tab is `&` here even though
+/// [`key_of`] also accepts the obvious characters.
+pub const KEY_CODES: &str = "abcdefghijklmnopqrstuvwxyz0123456789,.-=_&<>^!#~@";
+
+/// A key as its tape code — the inverse of [`key_of`] over [`KEY_CODES`].
+fn code_of(k: Key) -> Option<char> {
+    KEY_CODES.chars().find(|c| key_of(*c) == Some(k))
+}
+
 fn key_of(c: char) -> Option<Key> {
     use Key::*;
     Some(match c.to_ascii_lowercase() {
@@ -763,8 +900,18 @@ fn key_of(c: char) -> Option<Key> {
         '.' => Period,
         '-' => Minus,
         '=' => Equal,
-        '\t' => Tab,
-        '\n' => Enter,
+        '\t' | '&' => Tab,
+        '_' => Space,
+        // The arrows and the editing keys have no character of their own, so
+        // they borrow punctuation. Everything in KEY_CODES must appear here,
+        // and a test walks the whole alphabet to make sure it does.
+        '<' => Left,
+        '>' => Right,
+        '^' => Up,
+        '!' => Down,
+        '#' | '\n' => Enter,
+        '~' => Backspace,
+        '@' => Home,
         _ => return None,
     })
 }
@@ -1080,6 +1227,106 @@ mod tests {
         assert!(!Keys::none().panning());
         assert!(!Keys { down: true, ..Keys::none() }.panning(), "a plain left drag belongs to the sketch");
         assert!(!Keys { shift: true, ..Keys::none() }.panning(), "shift alone is not a drag");
+    }
+
+    /// ★ The claim the whole tape rests on: `state = f(seed, inputs)`.
+    ///
+    /// Run a sketch, tape it, run a *fresh* one off the tape, and the two must
+    /// end in exactly the same state. If they do not, then something outside
+    /// the inputs is leaking into the run — the wall clock, an unrecorded
+    /// seed, an edge fired twice — and every one of those is a bug that only
+    /// shows up minutes in.
+    #[test]
+    fn a_replay_ends_where_the_run_did() {
+        // A toy whose state depends on presses, holds, digits and the pointer,
+        // so that every kind of input has to survive the trip.
+        let build = |t: Option<crate::tape::Tape>, rec: bool| {
+            let s = Graph::new("t")
+                .with(Toy::default())
+                .each_frame(|s: &mut Toy, t| s.t = t)
+                .on('p', |s: &mut Toy| s.n += 1)
+                .on_hold('w', |s: &mut Toy| s.n += 10)
+                .on_digit(|s: &mut Toy, d| s.typed.push(char::from_digit(d, 10).expect("0..=9")))
+                .on_arrows(|s: &mut Toy, d| s.at = s.at + d);
+            match (t, rec) {
+                (Some(tape), true) => s.recording(tape),
+                (Some(tape), false) => s.replaying(tape),
+                _ => s,
+            }
+        };
+
+        // --- the run, taped -----------------------------------------------
+        let mut live = build(Some(crate::tape::Tape::new(99, 1.0 / 60.0)), true);
+        let script: Vec<(u32, Keys)> = vec![
+            (3, Keys::pressing("p")),
+            (4, Keys::holding("w")),
+            (5, Keys::holding("w")),
+            (6, Keys::pressing("4")),
+            (9, Keys { held: vec![Key::Right, Key::Up], ..Keys::none() }),
+            (10, Keys::none()),
+            (14, Keys::pressing("p7")),
+        ];
+        for f in 0..20u32 {
+            let k = script.iter().find(|(g, _)| *g == f).map(|(_, k)| k.clone()).unwrap_or_else(Keys::none);
+            live.step(f as f64 / 60.0, &k);
+        }
+        let ran = (live.state().n, live.state().typed.clone(), live.state().at);
+        assert!(ran.0 > 0 && !ran.1.is_empty(), "the run has to actually do something");
+
+        // --- the replay ----------------------------------------------------
+        let Reel::Recording(tape) = live.tape else { panic!("should be recording") };
+        assert_eq!(tape.seed, 99, "the seed rides along");
+
+        let mut again = build(Some(tape), false);
+        for f in 0..20u32 {
+            // Deliberately fed NOTHING. Everything must come off the tape.
+            again.step(f as f64 / 60.0, &Keys::none());
+        }
+        let replayed = (again.state().n, again.state().typed.clone(), again.state().at);
+
+        assert_eq!(ran, replayed, "the replay did not end where the run did");
+    }
+
+    /// ★ And the failure it guards against, stated on its own: a press that is
+    /// held forward would fire on every frame after it. One tap on a colour
+    /// swatch would replay as sixty a second.
+    #[test]
+    fn a_replayed_press_fires_exactly_once() {
+        let mut tape = crate::tape::Tape::new(1, 1.0 / 60.0);
+        tape.record(2, &Keys::pressing("p"));
+
+        let mut s = Graph::new("t").with(Toy::default()).on('p', |s: &mut Toy| s.n += 1).replaying(tape);
+        for f in 0..60u32 {
+            s.step(f as f64 / 60.0, &Keys::none());
+        }
+        assert_eq!(s.state().n, 1, "one press should stay one press");
+    }
+
+    /// A held key, by contrast, must keep firing — it is a state, not an edge.
+    #[test]
+    fn a_replayed_hold_keeps_firing() {
+        let mut tape = crate::tape::Tape::new(1, 1.0 / 60.0);
+        tape.record(0, &Keys::holding("w"));
+        tape.record(10, &Keys::none());
+
+        let mut s = Graph::new("t").with(Toy::default()).on_hold('w', |s: &mut Toy| s.n += 1).replaying(tape);
+        for f in 0..30u32 {
+            s.step(f as f64 / 60.0, &Keys::none());
+        }
+        assert_eq!(s.state().n, 10, "held for frames 0..9, then let go");
+    }
+
+    /// Time has to come from counting frames, not from a float compared for
+    /// equality — two clocks that ought to agree often do not.
+    #[test]
+    fn frames_are_counted_not_compared() {
+        assert_eq!(Sketch::<()>::frame_at(0.0), 0);
+        assert_eq!(Sketch::<()>::frame_at(1.0 / 60.0), 1);
+        assert_eq!(Sketch::<()>::frame_at(59.0 / 60.0), 59);
+        // A sixtieth of a second is not exactly representable, so this is the
+        // sum of sixty of them and lands a whisker off 1.0.
+        let drifted: f64 = (0..60).fold(0.0, |a, _| a + 1.0 / 60.0);
+        assert_eq!(Sketch::<()>::frame_at(drifted), 60);
     }
 
     #[test]

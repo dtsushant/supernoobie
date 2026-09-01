@@ -87,6 +87,48 @@ Builders, all optional: `.size(w, h)`, `.scale(k)`, `.origin(x, y)`,
 of size 1 or size 1000 and it fills the window either way, so a sketch never
 has to guess a zoom level.
 
+### Recording a run
+
+```bash
+cargo run -p studio --release -- --record run.tape
+cargo run -p studio --release -- --replay run.tape
+```
+
+```rust
+sketch.recording(Tape::to("run.tape", seed, 1.0 / 60.0)?)   // write as it goes
+sketch.replaying(Tape::load("run.tape")?)                   // feed it instead of the keyboard
+```
+
+A scene is `f(t, state) -> Frame` and `Sketch::step` funnels every input
+through one place, so the whole run is
+
+```text
+    state  =  f(seed, the list of inputs)
+```
+
+Write the list down and saving, loading, undo, replay and a scrubbable timeline
+all come out of **one** mechanism — the same trick as making a `Frame` a layer
+so animation is `f(t)`, one level up. The sketch cannot tell it is being
+replayed, which is what makes the replay faithful rather than a second
+implementation of the same thing.
+
+> **A state persists; an edge happens once.** Holding a key is a state — if the
+> tape skips a frame, the key is still down. *Pressing* it is an edge: it
+> happened at one instant. So snapshots are written only when the input
+> changes, and replaying a snapshot forward keeps the held keys and the pointer
+> while dropping the presses, clicks and scrolls. Backwards, and one tap
+> replays as sixty taps a second.
+
+Two things have to be in the file besides the inputs:
+
+- **The seed.** The game seeds itself from the clock, so a replay without it
+  would sit there answering a different set of sums.
+- **The frame rate.** Time comes from counting frames, never from the wall
+  clock, or a replay on a busier machine drifts apart from the run.
+
+The format is plain text, one snapshot per line, so a tape can be read, diffed
+and edited by hand.
+
 ### Text that stays put
 
 `Frame::label` puts text at a **world** position, so it travels with the
