@@ -18,7 +18,8 @@
 //! the phasors and nothing more. When the frequencies differ the readout
 //! refuses, because no single sine is the answer, and that refusal is where
 //! Fourier series start. Preset `6` is the first three terms of a square wave;
-//! keep adding odd harmonics with `=` and it squares off.
+//! `=` adds the next harmonic, following the pattern already on screen — so
+//! from preset `6` it adds 7, then 9, then 11, keeping the wave square.
 //!
 //! ## Controls
 //!
@@ -36,7 +37,7 @@
 
 use minifb::{Key, KeyRepeat, Window, WindowOptions};
 use plotkit::{plot, raster::Canvas, Cx, Frame, Shape, View};
-use shapes::wave::{chain, combine, total, Wave};
+use shapes::wave::{self, chain, combine, total, Wave};
 use std::f64::consts::PI;
 
 // ===========================================================================
@@ -48,9 +49,9 @@ use std::f64::consts::PI;
 
 const W: usize = 1100;
 const H: usize = 700;
-const MAX_WAVES: usize = 5;
+const MAX_WAVES: usize = 10;
 
-const IN: [u32; MAX_WAVES] = [0x4FBCD4, 0xE0A44A, 0xE585AC, 0x9B7BD4, 0xE0704A];
+const IN: [u32; MAX_WAVES] = [0x4FBCD4, 0xE0A44A, 0xE585AC, 0x9B7BD4, 0xE0704A, 0x4A9BE0, 0xD4E04A, 0xD44AE0, 0x4AE0A4, 0xE04A7B];
 const SUM: u32 = 0x6FCF97;
 const DIM: u32 = 0x33414F;
 const INK: u32 = 0x9AA7B4;
@@ -143,9 +144,13 @@ fn scene(st: &State, l: &Layout) -> Frame {
     let mut f = Frame::new();
     let x = l.x_at(st.u);
 
+    // Labels are a fixed size in pixels while the strips shrink as waves are
+    // added, so past a handful they have to get smaller or they sit on the
+    // curves they name.
+    let tag = if st.ws.len() > 5 { 1 } else { 2 };
     for (k, w) in st.ws.iter().enumerate() {
         strip(&mut f, l, *w, l.bases[k], x, IN[k % IN.len()], k == st.sel);
-        f.label(Cx::new(l.col, l.bases[k] + w.a.max(0.25) + 0.3), format!("wave {}", k + 1), IN[k % IN.len()], 2);
+        f.label(Cx::new(l.col, l.bases[k] + w.a.max(0.25) + 0.3), format!("wave {}", k + 1), IN[k % IN.len()], tag);
     }
 
     // --- the sum ----------------------------------------------------------
@@ -248,9 +253,10 @@ fn main() {
                 Key::Tab => st.sel = (st.sel + 1) % st.ws.len(),
                 Key::Equal => {
                     if st.ws.len() < MAX_WAVES {
-                        // The next term of a harmonic series, ready to edit.
-                        let n = st.ws.len() as f64 + 1.0;
-                        st.ws.push(Wave::new(1.0 / n, n, 0.0));
+                        // Continues whatever pattern is on screen rather than
+                        // counting waves — so adding to a square wave gives the
+                        // next ODD harmonic and keeps it square.
+                        st.ws.push(wave::next(&st.ws));
                         st.sel = st.ws.len() - 1;
                     }
                 }
@@ -343,4 +349,5 @@ fn hud(c: &mut Canvas, st: &State) {
         1,
     );
 }
+
 

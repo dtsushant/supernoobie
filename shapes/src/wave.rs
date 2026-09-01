@@ -82,6 +82,38 @@ pub fn chain(ws: &[Wave], x: f64) -> Vec<Cx> {
     out
 }
 
+/// The next wave to add, continuing whatever pattern is already there.
+///
+/// Two rules, and the first is the one that matters:
+///
+/// * **All the frequencies odd → the next odd one.** A square wave is built
+///   from odd harmonics only (1, 3, 5, 7…). Slipping an even one in does not
+///   just add detail, it destroys the symmetry that makes the wave square —
+///   every even harmonic is symmetric about the half-period where the square
+///   wave is antisymmetric, so it cancels the flatness the odd terms built.
+/// * Otherwise, the next whole number above the highest frequency present.
+///
+/// The amplitude is `1/k`, matching the decay every one of these series uses.
+/// That is not decoration: coefficients falling off as `1/k` are exactly what a
+/// waveform with a **jump** in it needs. Anything faster — `1/2^k`, say — sums
+/// to something smooth, which can never have a vertical edge.
+///
+/// Phase is zero. A stack with mixed phases has no pattern to continue, so
+/// guessing one would be inventing rather than following.
+pub fn next(ws: &[Wave]) -> Wave {
+    let Some(top) = ws.iter().map(|w| w.k).fold(None, |m: Option<f64>, k| Some(m.map_or(k, |a| a.max(k)))) else {
+        return Wave::new(1.0, 1.0, 0.0);
+    };
+
+    let whole = |k: f64| (k - k.round()).abs() < 1e-6;
+    let all_odd = ws.iter().all(|w| whole(w.k) && (w.k.round() as i64).rem_euclid(2) == 1);
+
+    // Always strictly above what is there, whichever rule applied — otherwise
+    // "add a wave" could produce a duplicate of one already on screen.
+    let k = if all_odd { top.round() + 2.0 } else { (top + 1.0).floor().max(top + 1e-9) };
+    Wave::new(1.0 / k.max(1.0), k, 0.0)
+}
+
 /// Add a stack of waves into the single wave that results.
 ///
 /// `None` when the frequencies are not all equal, because then no single sine
@@ -195,6 +227,64 @@ mod tests {
         }
         let d = 0.6;
         assert!((total(&ws, peak + d) - total(&ws, peak - d)).abs() > 1e-3, "suspiciously sine-like");
+    }
+
+    /// ★ Adding to a square wave has to keep it a square wave. An even
+    /// harmonic is symmetric about the half-period where a square wave is
+    /// antisymmetric, so it does not add detail — it undoes the flatness the
+    /// odd terms built.
+    #[test]
+    fn adding_to_a_square_wave_keeps_it_square() {
+        let mut ws = vec![Wave::new(1.0, 1.0, 0.0), Wave::new(1.0 / 3.0, 3.0, 0.0), Wave::new(0.2, 5.0, 0.0)];
+        for want in [7.0, 9.0, 11.0, 13.0] {
+            let n = next(&ws);
+            assert_eq!(n.k, want, "expected the next odd harmonic");
+            assert!((n.a - 1.0 / want).abs() < 1e-12, "amplitude should be 1/k");
+            ws.push(n);
+        }
+        assert!(ws.iter().all(|w| (w.k as i64) % 2 == 1), "an even harmonic crept in");
+    }
+
+    /// Once anything even is present there is no odd pattern left to continue,
+    /// so it just counts up.
+    #[test]
+    fn a_mixed_stack_just_counts_up() {
+        assert_eq!(next(&[Wave::new(1.0, 1.0, 0.0), Wave::new(0.6, 2.0, 0.0)]).k, 3.0);
+        assert_eq!(next(&[Wave::new(1.0, 4.0, 0.0)]).k, 5.0);
+    }
+
+    /// ★ The bug this replaced: counting the waves rather than reading their
+    /// frequencies. From the three-term square wave, `len + 1` is 4 — an even
+    /// harmonic, *and* an amplitude of 1/4 which is larger than the 1/5 already
+    /// on screen, so the new circle came out bigger than the one above it.
+    #[test]
+    fn the_new_wave_never_outgrows_the_one_before_it() {
+        let mut ws = vec![Wave::new(1.0, 1.0, 0.0), Wave::new(1.0 / 3.0, 3.0, 0.0), Wave::new(0.2, 5.0, 0.0)];
+        for _ in 0..6 {
+            let n = next(&ws);
+            assert!(n.a <= ws.last().expect("non-empty").a + 1e-12, "{} is bigger than {}", n.a, ws.last().unwrap().a);
+            ws.push(n);
+        }
+    }
+
+    /// However the frequencies have been dragged about, the new one is above
+    /// all of them — so "add a wave" can never duplicate one already there.
+    #[test]
+    fn the_new_frequency_is_always_the_highest() {
+        for ws in [
+            vec![Wave::new(1.0, 2.7, 0.0), Wave::new(0.5, 1.3, 0.0)],
+            vec![Wave::new(1.0, 0.0, 0.0)],
+            vec![Wave::new(1.0, 8.4, 0.0), Wave::new(1.0, 1.0, 0.0)],
+        ] {
+            let n = next(&ws);
+            assert!(ws.iter().all(|w| n.k > w.k), "{} did not clear {:?}", n.k, ws.iter().map(|w| w.k).collect::<Vec<_>>());
+            assert!(n.a > 0.0 && n.a <= 1.0, "amplitude {} is out of range", n.a);
+        }
+    }
+
+    #[test]
+    fn the_first_wave_is_the_fundamental() {
+        assert_eq!(next(&[]), Wave::new(1.0, 1.0, 0.0));
     }
 
     #[test]

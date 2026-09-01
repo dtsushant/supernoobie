@@ -230,7 +230,16 @@ w.phasor()     // Cx  — amplitude and phase in one number (the arrow at x = 0)
 wave::total(&ws, x)     // f64      — the height of a whole stack
 wave::chain(&ws, x)     // Vec<Cx>  — the arrows laid tip to tail
 wave::combine(&ws)      // Option<Wave>
+wave::next(&ws)         // Wave     — the next harmonic, continuing the pattern
 ```
+
+`next` reads the frequencies rather than counting the waves. All odd → the
+next odd one, so a square wave stays square; an even harmonic is symmetric
+about the half-period where a square wave is antisymmetric, so it would undo
+the flatness the odd terms built. Amplitude `1/k`, because coefficients
+falling off that slowly are exactly what a waveform with a **jump** needs —
+anything faster sums to something smooth, which can never have a vertical
+edge.
 
 Everything rests on one identity:
 
