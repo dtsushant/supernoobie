@@ -49,6 +49,63 @@ for k in 0..12 {
 
 ---
 
+## Running a sketch: no window code
+
+`Graph` owns the canvas, the view, the window and the loop, so none of them
+appear in your file. A whole program:
+
+```rust
+use studio::prelude::*;
+
+fn main() {
+    Graph::new("my sketch").animate(scene);
+}
+
+fn scene(t: f64) -> Frame {
+    let mut f = Frame::new();
+    f.place(face::smiley(1.0), Cx::polar(3.0, t));
+    f
+}
+```
+
+```bash
+cargo run -p studio --release --bin sketch     # a blank page to edit
+```
+
+| | |
+|---|---|
+| `Graph::plot(frame)` | one still, in a window |
+| `Graph::animate(\|t\| ...)` | a film |
+| `Graph::play(\|t, keys\| ...)` | a film that answers the keyboard |
+| `Graph::png(path, frame)` | a file — **no window**, so it works in a test |
+| `Graph::print(frame)` | the terminal, in braille — also no window |
+
+Builders, all optional: `.size(w, h)`, `.scale(k)`, `.origin(x, y)`,
+`.grid(on)`, `.background(c)`.
+
+**Without `.scale`, the graph fits itself to your first frame.** Draw something
+of size 1 or size 1000 and it fills the window either way, so a sketch never
+has to guess a zoom level.
+
+The graph keeps `Esc` and `G` for itself. In `plot` and `animate` it also takes
+`,`/`.` to zoom, the arrows to pan, `Space` to pause and `S` to save a PNG. In
+`play` it takes none of those, because a sketch reading the keyboard needs them
+more than the graph does — everything reaches you through `Keys`:
+
+```rust
+keys.just('n')     // pressed this frame — for things that happen once
+keys.held('w')     // held down — for things that happen continuously
+keys.arrows()      // a direction as a Cx: right is 1, up is i
+keys.digits()      // digits typed this frame, in order
+keys.enter()  keys.backspace()
+```
+
+`keys.arrows()` returning a `Cx` is the point of the whole library in
+miniature: a direction is a number, so `z + keys.arrows().scale(speed)` moves
+a thing about and needs no vector type to do it.
+
+---
+
 ## The three crates
 
 ```
@@ -346,6 +403,8 @@ time. One implementation therefore works on every kind of shape.
 | `plotkit/` | `Cx`, `View`, `Shape`, `Frame`, `plot`, `pen`, `raster`, `expr`, `script` |
 | `shapes/` | this document |
 | `shapes/src/bin/shape.rs` | the terminal drawer |
+| `studio/src/lib.rs` | `Graph`, `Keys`, and the prelude |
+| `studio/src/bin/sketch.rs` | **a blank page — start here** |
 | `studio/src/main.rs` | the maths game |
 | `studio/src/bin/waves.rs` | adding sine waves |
 | `document/HowItWorks.md` | why the library is shaped the way it is |

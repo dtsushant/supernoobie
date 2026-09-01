@@ -10,3 +10,11 @@ plotkit = { path = "../plotkit" }
 shapes = { path = "../shapes" }
 # A window and a keyboard. Nothing else.
 minifb = "0.28"
+
+[lib]
+name = "studio"
+path = "src/lib.rs"
+
+[[bin]]
+name = "studio"
+path = "src/main.rs"

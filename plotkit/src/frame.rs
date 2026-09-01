@@ -45,6 +45,7 @@ impl Default for Style {
     }
 }
 
+#[derive(Clone)]
 pub struct Frame {
     items: Vec<(Shape, Style)>,
     next_colour: usize,
@@ -94,6 +95,30 @@ impl Frame {
     pub fn merge(&mut self, other: Frame) {
         self.items.extend(other.items);
         self.labels.extend(other.labels);
+    }
+
+    /// The box everything in the frame fits inside, as `(bottom-left,
+    /// top-right)`, or `None` if there is nothing to measure.
+    ///
+    /// A view has to be supplied because some shapes only exist relative to
+    /// one — `Graph` is sampled across whatever is on screen, `Implicit` is
+    /// marched over it. For those the answer is the view you gave, which is
+    /// the honest result: they fill whatever they are shown in.
+    pub fn bounds(&self, v: &View) -> Option<(Cx, Cx)> {
+        let (lo, hi) = plot::bounds(v);
+        let (mut min, mut max) = (Cx::new(f64::MAX, f64::MAX), Cx::new(f64::MIN, f64::MIN));
+        let mut any = false;
+        for (shape, _) in &self.items {
+            for p in shape.polylines(lo, hi, v.w as usize).into_iter().flatten() {
+                if !p.re.is_finite() || !p.im.is_finite() {
+                    continue;
+                }
+                any = true;
+                min = Cx::new(min.re.min(p.re), min.im.min(p.im));
+                max = Cx::new(max.re.max(p.re), max.im.max(p.im));
+            }
+        }
+        any.then_some((min, max))
     }
 
     /// Render onto a canvas through a view.

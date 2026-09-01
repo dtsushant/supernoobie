@@ -32,10 +32,8 @@
 //!   Esc    quit
 //! ```
 
-use minifb::{Key, KeyRepeat, Window, WindowOptions};
-use plotkit::{raster::Canvas, Cx, Frame, Shape, View};
-use shapes::{count, digit, face, glyph, Draw, Place, Series};
 use std::sync::Arc;
+use studio::prelude::*;
 
 // ===========================================================================
 //  THE GAME
@@ -63,8 +61,9 @@ struct Game {
     b: u32,
     typed: String,
     mood: Mood,
-    /// Seconds since the mood last changed.
-    since: f64,
+    /// When the mood last changed. The graph supplies the clock, so this is a
+    /// timestamp rather than a counter nobody remembers to advance.
+    mood_at: f64,
     terms: usize,
     show_arrows: bool,
     t: f64,
@@ -80,7 +79,7 @@ impl Game {
             b: 4,
             typed: String::new(),
             mood: Mood::Asking,
-            since: 0.0,
+            mood_at: 0.0,
             terms: 40,
             show_arrows: false,
             t: 0.0,
@@ -95,12 +94,18 @@ impl Game {
         self.a + self.b
     }
 
+    /// How long the current mood has been going, for the animations that
+    /// depend on it.
+    fn since(&self) -> f64 {
+        self.t - self.mood_at
+    }
+
     fn ask(&mut self) {
         self.a = 1 + self.rng.upto(5) as u32;
         self.b = 1 + self.rng.upto(5) as u32;
         self.typed.clear();
         self.mood = Mood::Asking;
-        self.since = 0.0;
+        self.mood_at = self.t;
     }
 
     fn check(&mut self) {
@@ -109,7 +114,7 @@ impl Game {
         }
         let right = self.typed.parse::<u32>().map(|n| n == self.answer()).unwrap_or(false);
         self.mood = if right { Mood::Right } else { Mood::Wrong };
-        self.since = 0.0;
+        self.mood_at = self.t;
     }
 
     /// A digit, built from however many waves are currently switched on.
@@ -169,6 +174,12 @@ fn scene(g: &Game) -> Frame {
     f.place(count::tally(g.b), Cx::new(BX, STICKS)).color(AMBER).width(3);
     f.label(Cx::new(AX, -0.1), "this many", GREY, 2);
     f.label(Cx::new(BX, -0.1), "and this many", GREY, 2);
+    f.label(
+        Cx::new(0.0, -6.7),
+        format!("waves per digit: {}    ( - fewer   = more   E arrows   Enter check   N new   Esc quit )", g.terms),
+        GREY,
+        2,
+    );
 
     // --- the spinning arrows ----------------------------------------------
     if g.show_arrows {
@@ -181,7 +192,7 @@ fn scene(g: &Game) -> Frame {
     match g.mood {
         Mood::Asking => {}
         Mood::Right => {
-            f.place(confetti(28, (g.since * 0.55).min(1.0)), spot).color(GREEN).dot(4.0);
+            f.place(confetti(28, (g.since() * 0.55).min(1.0)), spot).color(GREEN).dot(4.0);
             f.place(face::smiley(1.1), spot + bounce(g.t)).color(GREEN).width(3);
             f.label(Cx::new(1.8, -3.9), "GOOD JOB!", GREEN, 5);
             f.label(Cx::new(1.8, -5.3), "press N for another one", GREY, 2);
@@ -189,7 +200,7 @@ fn scene(g: &Game) -> Frame {
         Mood::Wrong => {
             f.place(face::ghost(0.95), spot + sway(g.t)).color(VIOLET).width(3);
             // The o's grow as the boo goes on. Cute, and free.
-            let n = 3 + ((g.since * 4.0) as usize).min(5);
+            let n = 3 + ((g.since() * 4.0) as usize).min(5);
             f.label(Cx::new(1.8, -3.9), format!("b{}...", "o".repeat(n)), VIOLET, 5);
             f.label(Cx::new(1.8, -5.3), "not quite! backspace and try again", GREY, 2);
         }
@@ -218,13 +229,11 @@ fn sway(t: f64) -> Cx {
 }
 
 // ===========================================================================
-//  THE WINDOW
+//  RUNNING IT
 //
-//  The only part that knows there is a screen.
+//  There is no window code here. `Graph` owns the canvas, the view and the
+//  loop; this only says what the keys mean and hands back a frame.
 // ===========================================================================
-
-const W: usize = 1200;
-const H: usize = 740;
 
 fn main() {
     let seed = std::time::SystemTime::now()
@@ -233,65 +242,43 @@ fn main() {
         .unwrap_or(0x5EED_1234);
 
     let mut g = Game::new(seed);
-    let v = View::centred(W, H, 52.0).with_origin(W as f64 * 0.5, H as f64 * 0.42);
-    let mut c = Canvas::new(W, H);
-    let mut win = Window::new("STUDIO  -  numbers made of waves", W, H, WindowOptions::default()).expect("no window");
-    win.set_target_fps(60);
 
-    while win.is_open() && !win.is_key_down(Key::Escape) {
-        for k in win.get_keys_pressed(KeyRepeat::No) {
-            match k {
-                Key::Enter | Key::NumPadEnter => g.check(),
-                Key::Backspace => {
-                    g.typed.pop();
+    Graph::new("STUDIO  -  numbers made of waves")
+        .size(1200, 740)
+        .scale(52.0)
+        .origin(0.5, 0.42)
+        .grid(false)
+        .play(move |t, keys| {
+            g.t = t;
+
+            if keys.enter() {
+                g.check();
+            }
+            if keys.backspace() {
+                g.typed.pop();
+                g.mood = Mood::Asking;
+            }
+            if keys.just('n') {
+                g.ask();
+            }
+            if keys.just('e') {
+                g.show_arrows = !g.show_arrows;
+            }
+            if keys.just('-') {
+                g.terms = g.terms.saturating_sub(1).max(1);
+            }
+            if keys.just('=') {
+                g.terms = (g.terms + 1).min(80);
+            }
+            for d in keys.digits() {
+                if g.mood != Mood::Right && g.typed.len() < 2 {
+                    g.typed.push(char::from_digit(d, 10).expect("0..=9"));
                     g.mood = Mood::Asking;
                 }
-                Key::N => g.ask(),
-                Key::E => g.show_arrows = !g.show_arrows,
-                Key::Minus => g.terms = g.terms.saturating_sub(1).max(1),
-                Key::Equal => g.terms = (g.terms + 1).min(80),
-                _ => {
-                    if let Some(d) = digit_key(k) {
-                        if g.mood != Mood::Right && g.typed.len() < 2 {
-                            g.typed.push(d);
-                            g.mood = Mood::Asking;
-                        }
-                    }
-                }
             }
-        }
 
-        g.t += 1.0 / 60.0;
-        g.since += 1.0 / 60.0;
-
-        c.clear(0x0B1017);
-        scene(&g).draw(&mut c, &v);
-        c.text(
-            14,
-            H as i32 - 26,
-            &format!("waves per digit: {}    ( - fewer   = more   E arrows   Enter check   N new   Esc quit )", g.terms),
-            GREY,
-            2,
-        );
-        win.update_with_buffer(&c.buf, W, H).expect("present failed");
-    }
-}
-
-fn digit_key(k: Key) -> Option<char> {
-    use Key::*;
-    Some(match k {
-        Key0 | NumPad0 => '0',
-        Key1 | NumPad1 => '1',
-        Key2 | NumPad2 => '2',
-        Key3 | NumPad3 => '3',
-        Key4 | NumPad4 => '4',
-        Key5 | NumPad5 => '5',
-        Key6 | NumPad6 => '6',
-        Key7 | NumPad7 => '7',
-        Key8 | NumPad8 => '8',
-        Key9 | NumPad9 => '9',
-        _ => return None,
-    })
+            scene(&g)
+        });
 }
 
 // ===========================================================================
@@ -347,4 +334,5 @@ mod tests {
         assert!(seen.iter().any(|(a, b)| a != b), "the two digits are always equal");
     }
 }
+
 

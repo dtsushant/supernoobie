@@ -204,9 +204,13 @@ calls is already readable.
 > ```
 >
 > A still picture is `scene(0.0)`. A film is `scene(t)` in a loop. Scrubbing,
-> stepping, exporting a PNG at any instant — all free, no new API. `RunFrame`
-> becomes a five-line `while window.is_open()` in *your* file, where it belongs,
-> not a feature of the library.
+> stepping, exporting a PNG at any instant — all free, no new API.
+>
+> And `RunFrame` did come back, once there was enough evidence for what it
+> should be: [`studio::Graph`] owns the canvas, the view, the window and the
+> loop, so `Graph::new("x").animate(scene)` is the whole program. It is a
+> *convenience over* `f(t) -> Frame`, not a replacement for it — which is why
+> `Graph::png` and `Graph::print` can run the same scene with no window at all.
 
 `merge` lets a scene be built out of parts that each know their own colours,
 so `fn digit(d, at) -> Frame` and `fn sticks(n, at) -> Frame` compose without
@@ -284,6 +288,7 @@ screen.
 | `shapes/` | things to draw — digits, faces, tallies, glyphs, waves. depends on `plotkit` only, so it has no window and can draw in a terminal. **[Shapes.md](Shapes.md) is the cookbook** |
 | `studio/` | the applications. depends on `shapes` + a window, and holds no geometry at all |
 | `shapes/src/bin/shape.rs` | `cargo run -p shapes -- seven --steps` — any shape drawn in the terminal, one construction line at a time |
+| `studio/src/bin/sketch.rs` | **a blank page.** `Graph` owns the window and the loop, so a sketch is a scene function and nothing else |
 | `studio/src/bin/waves.rs` | any number of sines and their sum, with the phasors that explain it |
 | `studio/src/main.rs` | the maths game — digits drawn as sums of sine waves |
 | `scripts/playground.rec` | the typed-text front door. hot-reloads on save |
