@@ -155,6 +155,23 @@ impl Motion {
             .then(Motion::of(move |_| Pose::new(Cx::expi(lean), Cx::ZERO)))
     }
 
+    /// Wander, without ever repeating and without a random number in sight.
+    ///
+    /// A few sine waves added together, with **frequencies that have no common
+    /// measure** — 1, the golden ratio, √2, √3. A sum of sines only repeats
+    /// when every term comes back at once, and terms whose frequency ratios are
+    /// irrational never do. So the path never retraces itself, and it never
+    /// needs a seed.
+    ///
+    /// That last part matters more than it looks: this is a pure function of
+    /// `t`, so a recorded run replays along exactly the same path. A random
+    /// walk would need its generator taped too.
+    ///
+    /// `spread` is how far it strays; `pace` how quickly.
+    pub fn wander(spread: f64, pace: f64) -> Motion {
+        Motion::of(move |t| Pose::new(Cx::ONE, wander_at(spread, pace, t)))
+    }
+
     /// Do this motion, then `next`. The pose you get is both at once.
     pub fn then(self, next: Motion) -> Motion {
         Motion::of(move |t| self.at(t).then(next.at(t)))
@@ -187,6 +204,26 @@ impl Motion {
     pub fn shape(&self, s: Shape, t: f64) -> Shape {
         self.at(t).shape(s)
     }
+}
+
+/// Where a wandering thing is at time `t`.
+///
+/// Two independent sums of sines, one per axis, at frequencies with no common
+/// measure. See [`Motion::wander`].
+pub fn wander_at(spread: f64, pace: f64, t: f64) -> Cx {
+    // 1, phi, sqrt(2), sqrt(3). No two of these have a rational ratio, so no
+    // amount of waiting brings them all back into step.
+    const F: [f64; 4] = [1.0, 1.618_033_988_749_895, 1.414_213_562_373_095, 1.732_050_807_568_877];
+    const W: [f64; 4] = [1.0, 0.55, 0.32, 0.18];
+    let total: f64 = W[0] + W[1] + W[2] + W[3];
+
+    let axis = |phase: f64| -> f64 {
+        (0..4).map(|k| W[k] * (pace * F[k] * t + phase * F[k]).sin()).sum::<f64>() / total
+    };
+    // The two axes are given different phases rather than different
+    // frequencies, so the wander is equally free in every direction instead of
+    // preferring one.
+    Cx::new(spread * axis(0.0), spread * axis(2.4))
 }
 
 impl Default for Motion {
@@ -335,6 +372,66 @@ mod tests {
         // and something a unit away stays a unit away
         let p = c + Cx::ONE;
         assert!(((m.at(0.3).apply(p) - c).abs() - 1.0).abs() < 1e-9);
+    }
+
+    /// ★ A wander that repeated would be a loop, not a wander. The frequencies
+    /// have no common measure, so no amount of waiting brings the terms back
+    /// into step.
+    #[test]
+    fn a_wander_never_retraces_itself() {
+        let start = wander_at(3.0, 0.5, 0.0);
+        let mut nearest = f64::MAX;
+        for k in 1..40_000 {
+            let t = k as f64 * 0.05; // out to 2000 seconds
+            nearest = nearest.min((wander_at(3.0, 0.5, t) - start).abs());
+        }
+        assert!(nearest > 1e-4, "it came back to its starting point (within {nearest})");
+    }
+
+    /// ★ And it is a pure function of time, so a taped run replays along the
+    /// same path. A random walk would need its generator recorded too.
+    #[test]
+    fn a_wander_is_the_same_every_time_it_is_asked() {
+        for k in 0..50 {
+            let t = k as f64 * 0.7;
+            assert_eq!(wander_at(2.0, 0.3, t), wander_at(2.0, 0.3, t));
+        }
+    }
+
+    /// It strays, but not without limit — a storm that walked off to infinity
+    /// would be a poor demonstration of anything.
+    #[test]
+    fn a_wander_stays_within_its_spread() {
+        for k in 0..5_000 {
+            let p = wander_at(3.0, 0.4, k as f64 * 0.13);
+            assert!(p.re.abs() <= 3.0 + 1e-9 && p.im.abs() <= 3.0 + 1e-9, "strayed to {p:?}");
+        }
+    }
+
+    /// Smooth, not jittery. Consecutive frames must be close together or the
+    /// thing teleports rather than travels.
+    #[test]
+    fn a_wander_is_smooth() {
+        let step = 1.0 / 60.0;
+        for k in 0..3_000 {
+            let (a, b) = (wander_at(3.0, 0.5, k as f64 * step), wander_at(3.0, 0.5, (k + 1) as f64 * step));
+            assert!((b - a).abs() < 0.1, "jumped {} in one frame", (b - a).abs());
+        }
+    }
+
+    /// It goes everywhere, rather than favouring one diagonal — which is what
+    /// giving the two axes different phases rather than different frequencies
+    /// buys.
+    #[test]
+    fn a_wander_goes_in_every_direction() {
+        let mut quadrants = [false; 4];
+        for k in 0..20_000 {
+            let p = wander_at(3.0, 0.5, k as f64 * 0.02);
+            if p.abs() > 0.4 {
+                quadrants[usize::from(p.re < 0.0) + 2 * usize::from(p.im < 0.0)] = true;
+            }
+        }
+        assert!(quadrants.iter().all(|q| *q), "it never visited some quadrants: {quadrants:?}");
     }
 
     #[test]

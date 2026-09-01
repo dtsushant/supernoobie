@@ -49,6 +49,7 @@
 //! | [`glyph`] | `+`, `=`, `?` |
 //! | [`grab`] | shapes you can take hold of — drag to move, drag the rim to resize |
 //! | [`motion`] | spin, walk, run, orbit — as values that compose |
+//! | [`terrain`] | things standing on the ground, and what knocks them down |
 //! | [`troupe`] | a group that is itself one of the things it groups |
 //! | [`wave`] | `a sin(kx + φ)`, and what happens when you add them |
 
@@ -61,6 +62,7 @@ pub mod glyph;
 pub mod grab;
 pub mod motion;
 pub mod recipe;
+pub mod terrain;
 pub mod troupe;
 pub mod wave;
 
@@ -68,6 +70,7 @@ pub use fourier::Series;
 pub use cyclone::Cyclone;
 pub use grab::Disc;
 pub use motion::{Motion, Pose};
+pub use terrain::{Field, Tree};
 pub use troupe::{Actor, Troupe};
 pub use recipe::{Recipe, Step, STEP_COLOURS};
 pub use wave::Wave;

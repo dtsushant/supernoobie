@@ -90,8 +90,8 @@ pub mod prelude {
     pub use crate::tape::Tape;
     pub use crate::{Graph, Keys, Sketch};
     pub use plotkit::{plot, Anchor, Canvas, Cx, Frame, Shape, View};
-    pub use shapes::{count, cyclone, digit, face, fourier, glyph, grab, motion, troupe, wave};
-    pub use shapes::{Actor, Cyclone, Disc, Draw, Motion, Place, Pose, Recipe, Series, Troupe, Wave};
+    pub use shapes::{count, cyclone, digit, face, fourier, glyph, grab, motion, terrain, troupe, wave};
+    pub use shapes::{Actor, Cyclone, Disc, Draw, Field, Motion, Place, Pose, Recipe, Series, Tree, Troupe, Wave};
     pub use std::f64::consts::{PI, TAU};
 }
 

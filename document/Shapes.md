@@ -586,6 +586,60 @@ Absent on purpose, so the line between a drawing and a model stays visible: air
 moving up the funnel, pressure falling toward the middle, Coriolis, and any
 coupling between the rings.
 
+### It crosses the ground, and the ground is not the screen
+
+```rust
+c.at = motion::wander_at(3.0, 0.35, t);   // where it stands, on the GROUND
+c.foot()                                   // where that lands on the page
+c.trail(path, from, to)                    // the track it has taken
+c.wind_at(ground)  c.reach(strength)  c.strongest_wind()
+c.lift                                     // how far its foot is off the ground
+```
+
+Moving across the ground is **not** a translation on screen. Sideways is one
+for one; going away from you climbs the page by only `sin(tilt)` of the
+distance covered. Add a plain 2D offset and it floats about on the glass —
+wrong without ever looking obviously wrong.
+
+`Motion::wander` / `motion::wander_at` give a path that never repeats, from
+sines at 1, φ, √2 and √3. A sum of sines comes back only when every term does
+at once, and frequencies with no common measure never do. No random number, so
+a **taped run replays along the same path**.
+
+---
+
+## `shapes::terrain` — things standing on the ground
+
+```rust
+let mut land = Field::new(220, 11.0);
+land.blow(t, |p| storm.wind_at(p));        // whatever cannot take it goes over
+let (up, down) = land.shapes(t, |x, y, z| storm.project(x, y, z));
+land.shapes_if(t, project, |tr| tr.at.im >= depth)   // for painter ordering
+```
+
+Trees stand **up** out of the ground, so they project like everything else and
+recede with the plane.
+
+**What falls is decided by the wind where each tree stands** — `v = Γ/2πr`
+against what that tree can take — not by a radius anybody chose. So the reach
+follows from the circulation:
+
+```text
+    r = Γ / (2π · strength)
+```
+
+which means a storm losing its circulation stops being able to flatten
+anything, with nothing written to arrange it. One catch worth knowing: inside
+the core the wind stops rising, so anything stronger than `strongest_wind()`
+never falls at all rather than falling very close in.
+
+Trees go over **across** the wind, not away from it — a quarter turn is `i`
+times outward — which is why fallen trees near a tornado lie in a curve.
+
+Positions come from the **R2 sequence**: the `k`-th point at `frac(k·a)` for
+irrational `a`, in two dimensions from the plastic number `g³ = g + 1`. No
+clumps, no gaps, no seed. The same idea as the wander, doing a different job.
+
 ---
 
 ## `shapes::face` — a smiley and a ghost
