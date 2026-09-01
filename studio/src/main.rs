@@ -241,44 +241,30 @@ fn main() {
         .map(|d| d.as_nanos() as u64)
         .unwrap_or(0x5EED_1234);
 
-    let mut g = Game::new(seed);
-
     Graph::new("STUDIO  -  numbers made of waves")
         .size(1200, 740)
         .scale(52.0)
         .origin(0.5, 0.42)
         .grid(false)
-        .play(move |t, keys| {
-            g.t = t;
-
-            if keys.enter() {
-                g.check();
-            }
-            if keys.backspace() {
-                g.typed.pop();
+        .with(Game::new(seed))
+        // One line per control, in the order the doc comment lists them.
+        .each_frame(|g, t| g.t = t)
+        .on_digit(|g, d| {
+            if g.mood != Mood::Right && g.typed.len() < 2 {
+                g.typed.push(char::from_digit(d, 10).expect("0..=9"));
                 g.mood = Mood::Asking;
             }
-            if keys.just('n') {
-                g.ask();
-            }
-            if keys.just('e') {
-                g.show_arrows = !g.show_arrows;
-            }
-            if keys.just('-') {
-                g.terms = g.terms.saturating_sub(1).max(1);
-            }
-            if keys.just('=') {
-                g.terms = (g.terms + 1).min(80);
-            }
-            for d in keys.digits() {
-                if g.mood != Mood::Right && g.typed.len() < 2 {
-                    g.typed.push(char::from_digit(d, 10).expect("0..=9"));
-                    g.mood = Mood::Asking;
-                }
-            }
-
-            scene(&g)
-        });
+        })
+        .on_enter(Game::check)
+        .on_backspace(|g| {
+            g.typed.pop();
+            g.mood = Mood::Asking;
+        })
+        .on('n', Game::ask)
+        .on('e', |g| g.show_arrows = !g.show_arrows)
+        .on('-', |g| g.terms = g.terms.saturating_sub(1).max(1))
+        .on('=', |g| g.terms = (g.terms + 1).min(80))
+        .run(scene);
 }
 
 // ===========================================================================

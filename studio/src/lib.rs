@@ -45,6 +45,26 @@
 //! In `play` only `Esc` and `G` are reserved — everything else reaches your
 //! scene through [`Keys`], because a sketch that responds to keys needs them
 //! more than the graph does.
+//!
+//! ## Binding keys to handlers
+//!
+//! Give the graph some state with [`Graph::with`] and the keys can be bound
+//! one by one, so the code reads like the table of controls it implements:
+//!
+//! ```no_run
+//! # use studio::prelude::*;
+//! # struct Game { n: u32, paused: bool }
+//! # fn scene(_: &Game) -> Frame { Frame::new() }
+//! Graph::new("game")
+//!     .with(Game { n: 0, paused: false })
+//!     .on('p', |g| g.paused = !g.paused)
+//!     .on_digit(|g, d| g.n = d)
+//!     .on_hold('w', |g| g.n += 1)
+//!     .run(scene);
+//! ```
+//!
+//! See [`Sketch`] for why it is written this way rather than as
+//! `key('p').click(f)`.
 
 use minifb::{Key, KeyRepeat, Window, WindowOptions};
 use plotkit::{plot, raster::Canvas, Cx, Frame, View};
@@ -55,7 +75,7 @@ use plotkit::{plot, raster::Canvas, Cx, Frame, View};
 /// use studio::prelude::*;
 /// ```
 pub mod prelude {
-    pub use crate::{Graph, Keys};
+    pub use crate::{Graph, Keys, Sketch};
     pub use plotkit::{plot, Canvas, Cx, Frame, Shape, View};
     pub use shapes::{count, digit, face, fourier, glyph, wave};
     pub use shapes::{Draw, Place, Recipe, Series, Wave};
@@ -195,6 +215,15 @@ impl Graph {
         }
     }
 
+    /// Hand the graph a piece of state to look after, so keys can be bound to
+    /// handlers that change it. See [`Sketch`].
+    ///
+    /// Call this **after** the builders — `.size`, `.scale` and friends belong
+    /// to the graph, and this hands the graph over.
+    pub fn with<S>(self, state: S) -> Sketch<S> {
+        Sketch { graph: self, state, bindings: Vec::new() }
+    }
+
     /// A still, written to a PNG. No window, so this works headless.
     pub fn png(self, path: &str, frame: Frame) -> std::io::Result<()> {
         let mut c = Canvas::new(self.w, self.h);
@@ -246,6 +275,161 @@ impl Graph {
     }
 }
 
+// ===========================================================================
+//  Binding keys to handlers
+// ===========================================================================
+
+/// A graph with a piece of state, and keys bound to handlers that change it.
+///
+/// ```no_run
+/// # use studio::prelude::*;
+/// # struct Game { score: u32, paused: bool }
+/// # fn scene(_: &Game) -> Frame { Frame::new() }
+/// # let game = Game { score: 0, paused: false };
+/// Graph::new("game")
+///     .with(game)
+///     .each_frame(|g, t| g.score = t as u32)
+///     .on('p', |g| g.paused = !g.paused)
+///     .on_digit(|g, d| g.score += d)
+///     .run(scene);
+/// ```
+///
+/// ## Why not `key('p').click(f)`
+///
+/// In JavaScript every handler can reach the same object, because everything
+/// is shared and mutable. Rust will not let two closures both hold `&mut game`
+/// — one of them could invalidate what the other is looking at, and that is
+/// the class of bug the language exists to stop.
+///
+/// So the state lives *here*, and each handler is lent it for the moment it
+/// runs. You get the same shape of code — a list of bindings, read top to
+/// bottom, each naming a key and what it does — with none of the aliasing.
+pub struct Sketch<S> {
+    graph: Graph,
+    state: S,
+    bindings: Vec<Binding<S>>,
+}
+
+enum Binding<S> {
+    /// Pressed this frame.
+    Press(char, Box<dyn FnMut(&mut S)>),
+    /// Held down, fired every frame it stays down.
+    Hold(char, Box<dyn FnMut(&mut S)>),
+    Enter(Box<dyn FnMut(&mut S)>),
+    Backspace(Box<dyn FnMut(&mut S)>),
+    Digit(Box<dyn FnMut(&mut S, u32)>),
+    /// The arrow keys, as a direction. Fires every frame, `0` when idle.
+    Arrows(Box<dyn FnMut(&mut S, Cx)>),
+    /// Every frame, whatever the keyboard is doing.
+    Frame(Box<dyn FnMut(&mut S, f64)>),
+}
+
+impl<S: 'static> Sketch<S> {
+    /// A key press, once per press however long it is held.
+    pub fn on(mut self, key: char, f: impl FnMut(&mut S) + 'static) -> Self {
+        self.bindings.push(Binding::Press(key, Box::new(f)));
+        self
+    }
+
+    /// A key held down, fired every frame it stays down — for movement and
+    /// anything else that should be continuous rather than stepwise.
+    pub fn on_hold(mut self, key: char, f: impl FnMut(&mut S) + 'static) -> Self {
+        self.bindings.push(Binding::Hold(key, Box::new(f)));
+        self
+    }
+
+    pub fn on_enter(mut self, f: impl FnMut(&mut S) + 'static) -> Self {
+        self.bindings.push(Binding::Enter(Box::new(f)));
+        self
+    }
+
+    pub fn on_backspace(mut self, f: impl FnMut(&mut S) + 'static) -> Self {
+        self.bindings.push(Binding::Backspace(Box::new(f)));
+        self
+    }
+
+    /// Each digit typed this frame, in the order it was typed.
+    pub fn on_digit(mut self, f: impl FnMut(&mut S, u32) + 'static) -> Self {
+        self.bindings.push(Binding::Digit(Box::new(f)));
+        self
+    }
+
+    /// The arrow keys as a direction — right is `1`, up is `i`. Fires every
+    /// frame, handing you `0` when nothing is held, so a single
+    /// `z = z + dir.scale(speed)` is the whole of movement.
+    pub fn on_arrows(mut self, f: impl FnMut(&mut S, Cx) + 'static) -> Self {
+        self.bindings.push(Binding::Arrows(Box::new(f)));
+        self
+    }
+
+    /// Every frame, with the time in seconds. Runs **before** the key
+    /// bindings, so the clock is already up to date when they fire.
+    pub fn each_frame(mut self, f: impl FnMut(&mut S, f64) + 'static) -> Self {
+        self.bindings.push(Binding::Frame(Box::new(f)));
+        self
+    }
+
+    /// Fire everything one frame would fire, without a window.
+    ///
+    /// [`Sketch::run`] calls this; so can a test, which is the point — the
+    /// bindings are ordinary code and do not need a screen to be checked.
+    pub fn step(&mut self, t: f64, keys: &Keys) {
+        // Frame handlers first, in registration order, then the rest — so
+        // anything that updates a clock has done so before a key reads it.
+        for b in &mut self.bindings {
+            if let Binding::Frame(f) = b {
+                f(&mut self.state, t);
+            }
+        }
+        for b in &mut self.bindings {
+            match b {
+                Binding::Frame(_) => {}
+                Binding::Press(k, f) => {
+                    if keys.just(*k) {
+                        f(&mut self.state);
+                    }
+                }
+                Binding::Hold(k, f) => {
+                    if keys.held(*k) {
+                        f(&mut self.state);
+                    }
+                }
+                Binding::Enter(f) => {
+                    if keys.enter() {
+                        f(&mut self.state);
+                    }
+                }
+                Binding::Backspace(f) => {
+                    if keys.backspace() {
+                        f(&mut self.state);
+                    }
+                }
+                Binding::Digit(f) => {
+                    for d in keys.digits() {
+                        f(&mut self.state, d);
+                    }
+                }
+                Binding::Arrows(f) => f(&mut self.state, keys.arrows()),
+            }
+        }
+    }
+
+    pub fn state(&self) -> &S {
+        &self.state
+    }
+
+    /// Open the window and go. `draw` turns the state into a picture and is
+    /// the only part that sees it whole.
+    pub fn run(self, mut draw: impl FnMut(&S) -> Frame + 'static) {
+        let Sketch { graph, state, bindings } = self;
+        let mut me = Sketch { graph: Graph::new(""), state, bindings };
+        graph.play(move |t, keys| {
+            me.step(t, keys);
+            draw(&me.state)
+        });
+    }
+}
+
 fn slug(s: &str) -> String {
     s.chars().map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' }).collect()
 }
@@ -259,6 +443,26 @@ pub struct Keys {
 impl Keys {
     fn none() -> Keys {
         Keys { pressed: Vec::new(), held: Vec::new() }
+    }
+
+    /// A key state built by hand, for tests and for driving a sketch with no
+    /// window. Everything listed counts as both pressed this frame and held.
+    ///
+    /// ```
+    /// # use studio::Keys;
+    /// let k = Keys::pressing("n7");
+    /// assert!(k.just('n'));
+    /// assert_eq!(k.digits(), vec![7]);
+    /// ```
+    pub fn pressing(keys: &str) -> Keys {
+        let v: Vec<Key> = keys.chars().filter_map(key_of).collect();
+        Keys { pressed: v.clone(), held: v }
+    }
+
+    /// Keys held but not newly pressed — so [`Keys::held`] answers yes and
+    /// [`Keys::just`] answers no.
+    pub fn holding(keys: &str) -> Keys {
+        Keys { pressed: Vec::new(), held: keys.chars().filter_map(key_of).collect() }
     }
 
     fn read(win: &Window) -> Keys {
@@ -425,5 +629,113 @@ mod tests {
     #[test]
     fn a_title_becomes_a_safe_filename() {
         assert_eq!(slug("My Sketch!"), "my-sketch-");
+    }
+
+    // ---- bindings --------------------------------------------------------
+
+    struct Toy {
+        n: i32,
+        typed: String,
+        at: Cx,
+        t: f64,
+        enters: i32,
+    }
+
+    impl Default for Toy {
+        fn default() -> Toy {
+            Toy { n: 0, typed: String::new(), at: Cx::ZERO, t: 0.0, enters: 0 }
+        }
+    }
+
+    fn toy() -> Sketch<Toy> {
+        Graph::new("t")
+            .with(Toy::default())
+            .each_frame(|s, t| s.t = t)
+            .on('p', |s| s.n += 1)
+            .on_hold('w', |s| s.n += 10)
+            .on_enter(|s| s.enters += 1)
+            .on_backspace(|s| {
+                s.typed.pop();
+            })
+            .on_digit(|s, d| s.typed.push(char::from_digit(d, 10).expect("0..=9")))
+            .on_arrows(|s, dir| s.at = s.at + dir)
+    }
+
+    /// ★ `on` fires once per press; `on_hold` fires every frame the key is
+    /// down. Getting these the same way round would make a menu key repeat and
+    /// a movement key stutter.
+    #[test]
+    fn a_press_fires_once_and_a_hold_fires_every_frame() {
+        let mut s = toy();
+        for _ in 0..5 {
+            s.step(0.0, &Keys::holding("p")); // down, but not newly pressed
+        }
+        assert_eq!(s.state().n, 0, "a held key should not repeat an `on` binding");
+
+        s.step(0.0, &Keys::pressing("p"));
+        assert_eq!(s.state().n, 1);
+
+        for _ in 0..3 {
+            s.step(0.0, &Keys::holding("w"));
+        }
+        assert_eq!(s.state().n, 31, "an `on_hold` binding should fire every frame");
+    }
+
+    /// Digits arrive in the order they were typed, one call each.
+    #[test]
+    fn digits_reach_their_handler_in_order() {
+        let mut s = toy();
+        s.step(0.0, &Keys::pressing("42"));
+        s.step(0.0, &Keys::pressing("7"));
+        assert_eq!(s.state().typed, "427");
+        s.step(0.0, &Keys::pressing("\n"));
+        assert_eq!(s.state().enters, 1);
+    }
+
+    /// Arrows fire every frame, handing over `0` when nothing is held — so a
+    /// single `z + dir.scale(speed)` is the whole of movement, with no special
+    /// case for standing still.
+    #[test]
+    fn arrows_fire_every_frame_even_when_idle() {
+        let mut s = toy();
+        s.step(0.0, &Keys::none());
+        assert_eq!(s.state().at, Cx::ZERO);
+        s.step(0.0, &Keys { pressed: vec![], held: vec![Key::Right, Key::Up] });
+        s.step(0.0, &Keys { pressed: vec![], held: vec![Key::Right] });
+        assert_eq!(s.state().at, Cx::new(2.0, 1.0));
+    }
+
+    /// ★ `each_frame` runs before the key bindings. A handler that reads the
+    /// clock — "how long ago did this happen" — would otherwise be a frame
+    /// behind, and the bug would be invisible until something timed out early.
+    #[test]
+    fn the_clock_is_set_before_any_key_is_handled() {
+        let seen = std::rc::Rc::new(std::cell::Cell::new(-1.0));
+        let peek = seen.clone();
+        let mut s = Graph::new("t")
+            .with(Toy::default())
+            .on('p', move |st: &mut Toy| peek.set(st.t))
+            .each_frame(|st: &mut Toy, t| st.t = t); // registered LAST on purpose
+
+        s.step(4.5, &Keys::pressing("p"));
+        assert_eq!(seen.get(), 4.5, "the handler saw a stale clock");
+    }
+
+    /// Bindings fire in the order they were written, so two handlers on the
+    /// same key compose predictably instead of racing.
+    #[test]
+    fn bindings_fire_in_the_order_written() {
+        let mut s = Graph::new("t")
+            .with(String::new())
+            .on('p', |st: &mut String| st.push('a'))
+            .on('p', |st: &mut String| st.push('b'));
+        s.step(0.0, &Keys::pressing("p"));
+        assert_eq!(s.state(), "ab");
+    }
+
+    #[test]
+    fn keys_built_by_hand_behave_like_real_ones() {
+        assert!(Keys::pressing("n").just('n') && Keys::pressing("n").held('n'));
+        assert!(Keys::holding("n").held('n') && !Keys::holding("n").just('n'));
     }
 }

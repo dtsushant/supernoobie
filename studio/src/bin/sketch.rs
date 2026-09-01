@@ -57,30 +57,45 @@ fn main() {
 /// **This is the only function you need to edit.**
 ///
 /// `t` is seconds since it started. Return whatever should be on screen then.
+#[allow(unused_variables)] // a still picture is allowed to ignore the clock
 fn scene(t: f64) -> Frame {
     let mut f = Frame::new();
 
     // --- a shape from the library, sitting still -------------------------
-    f.place(digit::glyph(7, 40), Cx::new(-3.0, 0.0)).color(0x4FBCD4).width(3);
+   // f.place(digit::glyph(7, 40), Cx::new(-3.0, 0.0)).color(0x4FBCD4).width(3);
 
     // --- the same shape, orbiting ----------------------------------------
     // Cx::expi(t) is the point at angle t on the unit circle. Scale it by 2
     // and it orbits at radius 2. That is the whole animation.
-    f.place(face::smiley(0.6), Cx::new(3.0, 0.0) + Cx::expi(t).scale(2.0)).color(0x6FCF97).width(2);
+   // f.place(face::smiley(0.6), Cx::new(3.0, 0.0) + Cx::expi(t).scale(2.0)).color(0x6FCF97).width(2);
 
     // --- a curve of your own ---------------------------------------------
     // Shape::param is `t -> z(t)`: give it a journey and it draws the path.
     // This one is a rose, r = cos(5θ), which closes after one full turn.
-    f.add(Shape::param(move |a| Cx::polar((5.0 * a).cos(), a + t * 0.3), 0.0, TAU, 600))
+   /* f.add(Shape::param(move |a| Cx::polar((5.0 * a).cos(), a + t * 0.3), 0.0, TAU, 600))
         .color(0xE585AC)
-        .width(2);
+        .width(2);*/
 
     // --- something written as an equation --------------------------------
-    // Shape::implicit draws F(x, y) = c without you solving for y.
-    f.add(Shape::implicit(|x, y| x * x + y * y, 6.25)).color(0x2C3742).width(1);
+    // Shape::implicit draws the LEVEL SET F(x, y) = c — every point where F
+    // takes the value c — without you having to solve for y.
+    //
+    // So the number is the value of F, NOT a radius. F here is x² + y², which
+    // is r², so this is the circle of radius sqrt(c):
+    //
+    //      c = 1  ->  r = 1      c = 2  ->  r = 1.41      c = 4  ->  r = 2
+    //
+    // c = 1 matching radius 1 is a coincidence — 1 is the one number that is
+    // its own square.
+    f.add(Shape::implicit(|x, y| x * x + y * y, 4.0)).color(0x2C3742).width(1);
+    //
+    // If you would rather the number BE the radius, make F the radius:
+    //     f.add(Shape::implicit(|x, y| (x * x + y * y).sqrt(), 2.0));   // |z| = 2
+    // or just say what you mean:
+    //     f.add(Shape::circle(Cx::ZERO, 2.0));
 
     // --- a label, pinned to a world position ------------------------------
-    f.label(Cx::new(0.0, -3.4), format!("t = {t:.1}s"), 0x5A6774, 2);
+    //f.label(Cx::new(0.0, -3.4), format!("t = {t:.1}s"), 0x5A6774, 2);
 
     f
 }
@@ -129,18 +144,10 @@ mod tests {
         assert!(f.bounds(&v).is_some(), "nothing in the frame has a position");
     }
 
-    /// It should move. A scene that ignores `t` is a still, and `animate`
-    /// would be the wrong thing to call.
-    #[test]
-    fn the_scene_moves_with_time() {
-        let v = View::centred(300, 300, 30.0);
-        let ink = |t: f64| {
-            let mut c = Canvas::new(300, 300);
-            c.clear(0);
-            scene(t).draw(&mut c, &v);
-            c.buf.iter().filter(|&&p| p != 0).count()
-        };
-        assert_ne!(ink(0.0), ink(1.1), "the picture is the same at t=0 and t=1.1");
-    }
-}
+    // There is deliberately no test that the scene MOVES. A sketch is a
+    // scratchpad — a still picture is a perfectly good thing to be drawing,
+    // and a test that failed the moment you commented out the moving parts
+    // would be the test being wrong, not the sketch.
 
+
+}

@@ -104,6 +104,42 @@ keys.enter()  keys.backspace()
 miniature: a direction is a number, so `z + keys.arrows().scale(speed)` moves
 a thing about and needs no vector type to do it.
 
+### Binding keys, one per line
+
+Give the graph some state and each key gets its own handler, so the code reads
+like the table of controls it implements:
+
+```rust
+Graph::new("game")
+    .with(Game::new(seed))
+    .each_frame(|g, t| g.t = t)          // runs BEFORE the key handlers
+    .on_digit(|g, d| g.typed.push(...))  // each digit typed, in order
+    .on_enter(Game::check)
+    .on_backspace(|g| { g.typed.pop(); })
+    .on('n', Game::ask)                  // once per press
+    .on_hold('w', |g| g.y += 0.1)        // every frame it is down
+    .on_arrows(|g, dir| g.at = g.at + dir.scale(0.1))
+    .run(scene);                         // scene: fn(&Game) -> Frame
+```
+
+**Why not `key('n').click(f)`.** In JavaScript every handler reaches the same
+object because everything is shared and mutable. Rust will not let two closures
+both hold `&mut game` — one could invalidate what the other is looking at, and
+that is the class of bug the language exists to stop. So the state lives in the
+`Sketch` and each handler is *lent* it for the moment it runs. Same shape of
+code, none of the aliasing.
+
+`Sketch::step(t, keys)` fires one frame's worth of bindings with no window, and
+`Keys::pressing("n7")` builds a key state by hand — so what the keys do is
+ordinary testable code:
+
+```rust
+// no .run(), so no window — the Sketch is the thing you step
+let mut s = Graph::new("t").with(game).on('n', Game::ask);
+s.step(0.0, &Keys::pressing("n"));
+assert_eq!(s.state().moves, 1);
+```
+
 ---
 
 ## The three crates
