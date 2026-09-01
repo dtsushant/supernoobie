@@ -80,6 +80,13 @@ pub struct Troupe {
     motion: Motion,
     /// The clock the motion is read at. [`Troupe::tick`] sets it.
     t: f64,
+    /// When the current motion started.
+    ///
+    /// A motion is read at `t - t0`, not at `t`. Without this, `travel` — which
+    /// is velocity times time — would put a group that started walking at
+    /// thirty seconds instantly thirty units away, and it would never be seen
+    /// again.
+    t0: f64,
 
     /// Which member is being dragged — chosen on the press, held until
     /// release.
@@ -99,6 +106,7 @@ impl Troupe {
             members: Vec::new(),
             motion: Motion::still(),
             t: 0.0,
+            t0: 0.0,
             holding: None,
             was_down: false,
         }
@@ -112,8 +120,25 @@ impl Troupe {
 
     /// How the whole group moves.
     pub fn moving(mut self, m: Motion) -> Troupe {
-        self.motion = m;
+        self.set_motion(m);
         self
+    }
+
+    /// Swap the motion, starting its clock from now.
+    ///
+    /// Whatever the old motion had **translated** the group by is baked into
+    /// the members first, so a walk that becomes a different walk carries on
+    /// from where it got to rather than teleporting home.
+    ///
+    /// A rotation cannot be baked in — [`Actor::nudge`] moves members, it does
+    /// not turn them — so that part is dropped. Which is why swapping away
+    /// from a spin snaps the group back square, and swapping away from a walk
+    /// does not move it at all.
+    pub fn set_motion(&mut self, m: Motion) {
+        let carried = self.pose().b;
+        self.nudge(carried);
+        self.motion = m;
+        self.t0 = self.t;
     }
 
     /// Set the clock. Call once a frame, before drawing or dragging.
@@ -121,9 +146,18 @@ impl Troupe {
         self.t = t;
     }
 
+    /// What the clock says. Needed by anything rebuilding a troupe mid-run:
+    /// a fresh one starts at zero, and handing it the wall clock afterwards
+    /// would make a `travel` jump to `velocity x elapsed`.
+    pub fn now(&self) -> f64 {
+        self.t
+    }
+
     /// Where the group is right now.
+    ///
+    /// Read at `t - t0`, so every motion starts from the moment it was set.
     pub fn pose(&self) -> Pose {
-        self.motion.at(self.t)
+        self.motion.at(self.t - self.t0)
     }
 
     pub fn len(&self) -> usize {
@@ -340,6 +374,54 @@ mod tests {
         assert!(!t.tapped());
         t.drag(Cx::new(-3.0, 0.0), false);
         assert!(t.tapped(), "pressed and released without travelling");
+    }
+
+    /// ★ The bug this exists for: a motion is read at `t - t0`, not `t`.
+    ///
+    /// `travel` is velocity times time. Start walking at thirty seconds on an
+    /// absolute clock and the group is instantly thirty units away — off
+    /// screen, and never seen again. Setting a motion has to start its clock.
+    #[test]
+    fn a_motion_starts_when_it_is_set_not_when_the_program_did() {
+        let mut t = two();
+        t.tick(30.0); // half a minute has gone by
+        t.set_motion(Motion::travel(Cx::new(1.0, 0.0)));
+
+        // Nothing has moved yet, because the walk has only just begun.
+        assert!(t.hit(Cx::new(-3.0, 0.0)), "it should still be where it was");
+        assert!(!t.hit(Cx::new(27.0, 0.0)), "it must not have teleported thirty units");
+
+        t.tick(31.0); // one second of walking
+        assert!(t.hit(Cx::new(-2.0, 0.0)), "one second at one unit a second");
+    }
+
+    /// ★ Swapping one walk for another carries on from where it got to,
+    /// because the translation so far is baked into the members. Otherwise
+    /// changing direction would fling everything back to the start.
+    #[test]
+    fn changing_direction_carries_on_from_where_it_got_to() {
+        let mut t = two();
+        t.set_motion(Motion::travel(Cx::new(1.0, 0.0)));
+        t.tick(4.0); // four units to the right
+        assert!(t.hit(Cx::new(1.0, 0.0)), "member 0 walked from -3 to 1");
+
+        t.set_motion(Motion::travel(Cx::new(0.0, 1.0))); // now upwards
+        assert!(t.hit(Cx::new(1.0, 0.0)), "it should not have jumped anywhere");
+
+        t.tick(6.0); // two seconds of walking up
+        assert!(t.hit(Cx::new(1.0, 2.0)), "carried on from where it was, upwards");
+    }
+
+    /// And the honest limit of that: a rotation cannot be baked into members
+    /// that only know how to be moved, so swapping away from a spin loses it.
+    #[test]
+    fn swapping_away_from_a_spin_loses_the_turn() {
+        let mut t = two().moving(Motion::spin(1.0));
+        t.tick(0.25); // a quarter turn: member 0 is at the bottom
+        assert!(t.hit(Cx::new(0.0, -3.0)));
+
+        t.set_motion(Motion::still());
+        assert!(t.hit(Cx::new(-3.0, 0.0)), "back to square, which is the documented behaviour");
     }
 
     #[test]

@@ -374,9 +374,22 @@ let mut t = Troupe::new()
 
 t.tick(time);              // once a frame, before anything asks where it is
 t.drag(pointer, down);     // dispatched to whichever member was grabbed
+t.set_motion(m);           // swap the motion, starting its clock NOW
 t.shape()                  // the whole group, as one shape
 t.parts()                  // each member separately, for individual colours
+t.now()                    // what the clock says
 ```
+
+> **A motion is read at `t - t0`, not `t`.** `travel` is velocity × time, so on
+> an absolute clock a group told to walk after thirty seconds is instantly
+> thirty units away — off screen, and never seen again. `set_motion` starts the
+> new motion's clock, and bakes whatever the old one had **translated** into
+> the members first, so changing direction mid-walk carries on from where it
+> got to. A rotation cannot be baked in — `nudge` moves members, it does not
+> turn them — so swapping away from a spin snaps the group back square.
+>
+> The same trap catches anything that *rebuilds* a troupe mid-run: a fresh one
+> starts its clock at zero, so hand it `now()` before the graph does.
 
 **`Troupe` implements `Actor`, and so do its members.** Same trait — so a group
 nests inside a group, and anything that takes one takes the other. That is what
