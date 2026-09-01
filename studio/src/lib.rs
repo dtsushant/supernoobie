@@ -218,7 +218,11 @@ impl Graph {
             if keys.scroll().abs() > 1e-6 {
                 zoom_about(&mut view, keys.at_px(), 1.0 + 0.14 * keys.scroll().clamp(-3.0, 3.0));
             }
-            if keys.panning() {
+            // A pan must BEGIN over the window — a button already down when the
+            // pointer arrives is not a drag of this graph. Once begun it
+            // continues wherever the pointer goes, so dragging off the edge
+            // does not drop it.
+            if keys.panning() && (last_pan.is_some() || keys.over()) {
                 if let Some((lx, ly)) = last_pan {
                     // The origin is in pixels, so moving it by the pointer's
                     // own delta makes the paper follow the hand exactly.

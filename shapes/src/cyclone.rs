@@ -154,12 +154,24 @@ impl Cyclone {
         self.arc(u, t, 0.0, TAU)
     }
 
-    /// Part of a ring, between two angles — used to draw the near and far
-    /// halves in different colours.
+    /// Part of a ring, between two angles **measured on the ring itself** —
+    /// so the piece drawn turns with the ring.
     fn arc(&self, u: f64, t: f64, a0: f64, a1: f64) -> Shape {
         let me = *self;
         let (r, z, phase) = (self.radius_at(u), self.height_at(u), self.phase_at(u, t));
         Shape::param(move |a| me.project(r * (a + phase).cos(), r * (a + phase).sin(), z), a0, a1, 96)
+    }
+
+    /// Part of a ring, between two angles **measured in the world** — so the
+    /// piece drawn stays where it is while the ring turns through it.
+    ///
+    /// The difference between this and [`Cyclone::arc`] is the whole of
+    /// near-and-far. Depth belongs to the camera, not to the material: a patch
+    /// of air is in front of the axis or behind it depending on where it *is*,
+    /// not on how far the ring it belongs to has turned.
+    fn arc_world(&self, u: f64, t: f64, w0: f64, w1: f64) -> Shape {
+        let phase = self.phase_at(u, t);
+        self.arc(u, t, w0 - phase, w1 - phase)
     }
 
     /// Every ring.
@@ -173,8 +185,11 @@ impl Cyclone {
     /// `sin > 0`. Drawing the far half dimmer is what stops the funnel reading
     /// as a stack of flat hoops.
     pub fn halves(&self, t: f64) -> (Shape, Shape) {
-        let far = (0..self.rings).map(|k| self.arc(self.u(k), t, 0.0, PI)).collect::<Vec<_>>();
-        let near = (0..self.rings).map(|k| self.arc(self.u(k), t, PI, TAU)).collect::<Vec<_>>();
+        // World angles, not ring angles. Split on the ring's own angle and the
+        // lit half whirls round with the ring — fastest at the bottom, where
+        // omega is largest — and the whole funnel appears to lurch about.
+        let far = (0..self.rings).map(|k| self.arc_world(self.u(k), t, 0.0, PI)).collect::<Vec<_>>();
+        let near = (0..self.rings).map(|k| self.arc_world(self.u(k), t, PI, TAU)).collect::<Vec<_>>();
         (Shape::group(far), Shape::group(near))
     }
 
@@ -371,11 +386,45 @@ mod tests {
         let c = Cyclone { rings: 4, ..Cyclone::default() };
         let (far, near) = c.halves(0.3);
         assert_eq!(pts(&far).len(), pts(&near).len());
+    }
 
-        // The far half sits higher on the page, which is what makes it read as
-        // further away.
-        let mean = |s: &Shape| pts(s).iter().map(|p| p.im).sum::<f64>() / pts(s).len() as f64;
-        assert!(mean(&far) > mean(&near), "the far half should be the upper one");
+    /// ★ Depth belongs to the camera, not to the material.
+    ///
+    /// The split has to be at fixed **world** angles. Split on the ring's own
+    /// angle instead and the lit half turns with the ring — fastest at the
+    /// bottom, where omega is largest — so the funnel appears to lurch about
+    /// the plane at random. Which is exactly what it did.
+    ///
+    /// Checked per ring and at many times, because averaging over the whole
+    /// funnel hides it: at any instant some rings have turned far enough to
+    /// flip and others have not, and the mean comes out plausible anyway.
+    #[test]
+    fn the_far_half_stays_far_however_much_it_has_turned() {
+        let c = Cyclone::default();
+        for step in 0..40 {
+            let t = step as f64 * 0.37; // well past a full turn at the bottom
+            for k in 0..8 {
+                let u = k as f64 / 7.0;
+                let far = c.arc_world(u, t, 0.0, PI);
+                let near = c.arc_world(u, t, PI, TAU);
+                assert!(
+                    mid_y(&far) > mid_y(&near),
+                    "at t = {t:.2}, ring {u:.2} has its far half below its near half —                      the split is turning with the ring"
+                );
+            }
+        }
+    }
+
+    /// And the rings really are turning under that fixed split — otherwise the
+    /// test above would pass for the boring reason that nothing ever moves.
+    #[test]
+    fn the_rings_do_turn_under_the_fixed_split() {
+        let c = Cyclone::default();
+        // Several turns over the span the depth test walks, which is what makes
+        // that test able to catch a split that turns with the material.
+        let bottom = c.phase_at(0.0, 40.0 * 0.37);
+        assert!(bottom > 4.0 * TAU, "the bottom barely moved: {bottom} rad");
+        assert!(c.phase_at(0.0, 1.0) > 8.0 * c.phase_at(1.0, 1.0), "and the bottom should far outrun the top");
     }
 
     /// A cyclone drawn with one ring, or none, must not divide by zero on its
