@@ -87,7 +87,30 @@ Builders, all optional: `.size(w, h)`, `.scale(k)`, `.origin(x, y)`,
 of size 1 or size 1000 and it fills the window either way, so a sketch never
 has to guess a zoom level.
 
-The graph keeps `Esc` and `G` for itself. In `plot` and `animate` it also takes
+### Moving about the page
+
+**In every mode:** the wheel zooms about the pointer, **right-drag** slides the
+paper around, and `Home` puts the view back. All on the mouse, so a sketch
+keeps every key for itself.
+
+```rust
+studio::zoom_about(&mut view, (px, py), factor)
+```
+
+Zooming keeps whatever is under the pointer *under the pointer*. The naive
+version multiplies the scale and zooms about the origin, so the thing you are
+closing in on slides away as you approach it. Instead: note the world point
+under the pointer, change the scale, then solve for where the origin has to be
+for that point to land back under it. From
+
+```text
+    px = origin.x + scale · world.x        py = origin.y − scale · world.y
+```
+
+that is one line each, and the minus on `y` is the same minus that makes `y`
+count upwards.
+
+The graph keeps `Esc`, `G` and `Home` for itself. In `plot` and `animate` it also takes
 `,`/`.` to zoom, the arrows to pan, `Space` to pause and `S` to save a PNG. In
 `play` it takes none of those, because a sketch reading the keyboard needs them
 more than the graph does — everything reaches you through `Keys`:

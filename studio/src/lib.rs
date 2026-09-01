@@ -37,14 +37,24 @@
 //! | [`Graph::png`] | write a picture to a file |
 //! | [`Graph::print`] | draw it in the terminal, in braille |
 //!
+//! ## Moving about the page
+//!
+//! **In every mode:** the wheel zooms about the pointer, dragging with the
+//! **right button** slides the paper around, and `Home` puts it back where it
+//! started. All on the mouse, so a sketch keeps every key for itself.
+//!
+//! Zooming keeps whatever is under the pointer under the pointer, rather than
+//! zooming about the origin — see [`zoom_about`]. Without that, the thing you
+//! are closing in on slides away from you as you approach it.
+//!
 //! ## Keys the graph handles for you
 //!
-//! In `plot` and `animate`: `Esc` quits, `G` toggles graph paper, `,` and `.`
-//! zoom, the arrow keys pan, `Space` pauses, and `S` saves a PNG.
+//! In every mode: `Esc` quits, `G` toggles graph paper, `Home` resets the view.
 //!
-//! In `play` only `Esc` and `G` are reserved — everything else reaches your
-//! scene through [`Keys`], because a sketch that responds to keys needs them
-//! more than the graph does.
+//! In `plot` and `animate` only, where the scene is not reading the keyboard:
+//! `,` and `.` zoom, the arrow keys pan, `Space` pauses, and `S` saves a PNG.
+//! In `play` those all reach your scene instead, because a sketch that responds
+//! to keys needs them more than the graph does.
 //!
 //! ## Binding keys to handlers
 //!
@@ -163,8 +173,9 @@ impl Graph {
 
         let mut view = self.view_for(&scene(0.0, &Keys::none()));
         let mut grid = self.grid;
+        let home_view = view;
         let (mut t, mut paused, mut saves) = (0.0f64, false, 0);
-        let mut was_down = false;
+        let (mut was_down, mut last_pan) = (false, None::<(f64, f64)>);
 
         while win.is_open() && !win.is_key_down(Key::Escape) {
             let keys = Keys::read(&win, &view, was_down);
@@ -196,8 +207,31 @@ impl Graph {
             scene(t, &keys).draw(&mut c, &view);
             win.update_with_buffer(&c.buf, w, h).expect("could not present the frame");
 
-            // Pan and zoom last, so a sketch reading the same key this frame
-            // is not fighting the graph over it.
+            // --- pan and zoom, in every mode -----------------------------
+            //
+            // On the mouse, never the keyboard, so a sketch keeps every key
+            // for itself. The wheel zooms, the right button drags the paper
+            // about, and Home puts it back.
+            if keys.scroll().abs() > 1e-6 {
+                zoom_about(&mut view, keys.at_px(), 1.0 + 0.14 * keys.scroll().clamp(-3.0, 3.0));
+            }
+            if keys.right_down() {
+                if let Some((lx, ly)) = last_pan {
+                    // The origin is in pixels, so moving it by the pointer's
+                    // own delta makes the paper follow the hand exactly.
+                    view.origin.0 += keys.at_px().0 - lx;
+                    view.origin.1 += keys.at_px().1 - ly;
+                }
+                last_pan = Some(keys.at_px());
+            } else {
+                last_pan = None;
+            }
+            if keys.home {
+                view = home_view;
+            }
+
+            // Keyboard pan and zoom last, so a sketch reading the same key
+            // this frame is not fighting the graph over it.
             if reserved {
                 if keys.just(' ') {
                     paused = !paused;
@@ -477,6 +511,27 @@ impl<S: 'static> Sketch<S> {
     }
 }
 
+/// Zoom a view by `factor`, keeping whatever is under `(px, py)` under it.
+///
+/// The obvious version — just multiply the scale — zooms about the origin, so
+/// the thing you were looking at slides off the edge as you close in on it.
+/// Instead: note the world point under the pointer, change the scale, then put
+/// the origin wherever it has to be for that point to land back under the
+/// pointer. From
+///
+/// ```text
+///     px = origin.x + scale * world.x        py = origin.y - scale * world.y
+/// ```
+///
+/// solving for the origin is one line each, and the minus on `y` is the same
+/// minus that makes `y` count upwards.
+pub fn zoom_about(view: &mut View, (px, py): (f64, f64), factor: f64) {
+    let anchor = view.to_world(px, py);
+    view.scale = (view.scale * factor).clamp(1e-4, 1e7);
+    view.origin.0 = px - view.scale * anchor.re;
+    view.origin.1 = py + view.scale * anchor.im;
+}
+
 fn slug(s: &str) -> String {
     s.chars().map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' }).collect()
 }
@@ -488,14 +543,30 @@ pub struct Keys {
     /// Where the pointer is, **in world coordinates** — already through the
     /// view, so it can be compared with the numbers a scene is written in.
     at: Cx,
+    /// The pointer in *screen* pixels, which is what zooming about it needs.
+    at_px: (f64, f64),
     over: bool,
     down: bool,
     clicked: bool,
+    right_down: bool,
+    scroll: f64,
+    home: bool,
 }
 
 impl Keys {
     fn none() -> Keys {
-        Keys { pressed: Vec::new(), held: Vec::new(), at: Cx::ZERO, over: false, down: false, clicked: false }
+        Keys {
+            pressed: Vec::new(),
+            held: Vec::new(),
+            at: Cx::ZERO,
+            at_px: (0.0, 0.0),
+            over: false,
+            down: false,
+            clicked: false,
+            right_down: false,
+            scroll: 0.0,
+            home: false,
+        }
     }
 
     /// Where the pointer is, in the same coordinates the scene is written in.
@@ -548,19 +619,39 @@ impl Keys {
         Keys { held: keys.chars().filter_map(key_of).collect(), ..Keys::none() }
     }
 
+    /// The pointer in screen pixels.
+    pub fn at_px(&self) -> (f64, f64) {
+        self.at_px
+    }
+
+    /// The right button, held. Used by the graph for panning.
+    pub fn right_down(&self) -> bool {
+        self.right_down
+    }
+
+    /// How far the wheel turned this frame. Positive is away from you.
+    pub fn scroll(&self) -> f64 {
+        self.scroll
+    }
+
     fn read(win: &Window, view: &View, was_down: bool) -> Keys {
         // Clamp for the position so it stays usable while dragging off the
         // edge; Discard only to ask whether the pointer is over us at all.
         let (mx, my) = win.get_mouse_pos(MouseMode::Clamp).unwrap_or((0.0, 0.0));
         let down = win.get_mouse_down(MouseButton::Left);
+        let pressed = win.get_keys_pressed(KeyRepeat::No);
         Keys {
-            pressed: win.get_keys_pressed(KeyRepeat::No),
+            home: pressed.contains(&Key::Home),
+            pressed,
             held: win.get_keys(),
             at: view.to_world(mx as f64, my as f64),
+            at_px: (mx as f64, my as f64),
             over: win.get_mouse_pos(MouseMode::Discard).is_some(),
             down,
             // Edge-triggered: a click is the transition, not the state.
             clicked: down && !was_down,
+            right_down: win.get_mouse_down(MouseButton::Right),
+            scroll: win.get_scroll_wheel().map_or(0.0, |(_, y)| y as f64),
         }
     }
 
@@ -863,6 +954,61 @@ mod tests {
         assert!((v.to_world(250.0, 200.0) - Cx::new(1.0, 0.0)).abs() < 1e-12);
         // And up on screen is up in the world, which is the whole job of View.
         assert!((v.to_world(200.0, 150.0) - Cx::new(0.0, 1.0)).abs() < 1e-12);
+    }
+
+    /// ★ Zooming keeps whatever is under the pointer under the pointer.
+    ///
+    /// The naive version multiplies the scale and zooms about the ORIGIN, so
+    /// the thing you are closing in on slides away from you — the single most
+    /// annoying possible behaviour in a graph viewer.
+    #[test]
+    fn zooming_keeps_the_point_under_the_pointer() {
+        let mut v = View::centred(800, 600, 50.0);
+        let spot = (610.0, 190.0); // somewhere off-centre, on purpose
+        let before = v.to_world(spot.0, spot.1);
+
+        for f in [1.25, 1.25, 0.8, 4.0, 0.1] {
+            zoom_about(&mut v, spot, f);
+            let after = v.to_world(spot.0, spot.1);
+            assert!((after - before).abs() < 1e-9, "the world slid: {before:?} -> {after:?}");
+        }
+    }
+
+    #[test]
+    fn zooming_really_changes_the_scale() {
+        let mut v = View::centred(400, 400, 50.0);
+        zoom_about(&mut v, (200.0, 200.0), 2.0);
+        assert!((v.scale - 100.0).abs() < 1e-9);
+        zoom_about(&mut v, (200.0, 200.0), 0.5);
+        assert!((v.scale - 50.0).abs() < 1e-9);
+    }
+
+    /// Zoom cannot be driven to zero or to infinity, either of which would
+    /// leave a view that can never be recovered by zooming back.
+    #[test]
+    fn zoom_stays_within_reach() {
+        let mut v = View::centred(400, 400, 50.0);
+        for _ in 0..400 {
+            zoom_about(&mut v, (200.0, 200.0), 0.5);
+        }
+        assert!(v.scale > 0.0 && v.scale.is_finite(), "scale was {}", v.scale);
+        for _ in 0..400 {
+            zoom_about(&mut v, (200.0, 200.0), 2.0);
+        }
+        assert!(v.scale.is_finite(), "scale was {}", v.scale);
+    }
+
+    /// Panning by the pointer's own delta makes the paper follow the hand
+    /// exactly — no scale factor, because the origin is already in pixels.
+    #[test]
+    fn panning_moves_the_world_by_exactly_the_hand() {
+        let mut v = View::centred(400, 400, 37.0);
+        let before = v.to_world(100.0, 100.0);
+        v.origin.0 += 25.0;
+        v.origin.1 += -13.0;
+        // The same WORLD point is now 25 right and 13 up the screen.
+        let (x, y) = v.to_screen(before);
+        assert!((x - 125).abs() <= 1 && (y - 87).abs() <= 1, "landed at {x}, {y}");
     }
 
     #[test]

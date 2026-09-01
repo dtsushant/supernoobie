@@ -8,9 +8,9 @@
 //! view, the graph paper, the loop. You will not need to touch them.
 //!
 //! ```text
-//!   Esc  quit          , .  zoom out / in
-//!   G    graph paper   arrows  pan
-//!   S    save a PNG    Space   pause
+//!   Esc  quit          wheel       zoom, about the pointer
+//!   G    graph paper   right-drag  slide the paper around
+//!   Home reset view    left-drag   the circle
 //! ```
 //!
 //! ## The three things to know

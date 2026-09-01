@@ -17,7 +17,15 @@
 //!   5        walk and spin at once
 //!
 //!   drag a rim to resize one   drag a middle to move one   G graph paper
+//!
+//!   wheel      zoom, about the pointer
+//!   right-drag slide the paper around
+//!   Home       put the view back
 //! ```
+//!
+//! Zoom out and set it running to watch where it goes; zoom in on one disc
+//! while the group walks and it stays grabbable, because the pointer is taken
+//! back through the group's pose before any member is asked about it.
 //!
 //! ## Direction is one complex number
 //!
@@ -195,6 +203,7 @@ fn scene(s: &Stage) -> Frame {
     }
     f.label(Cx::new(0.0, -6.1), "arrows aim it   drag a rim to resize, a middle to move", 0x5A6774, 2);
     f.label(Cx::new(0.0, -6.9), "1 still  2 walk  3 run  4 orbit  5 both  Q/E spin  R reset", 0x46525E, 2);
+    f.label(Cx::new(0.0, -7.7), "wheel zooms   right-drag slides the paper   Home resets the view", 0x46525E, 2);
     f
 }
 
