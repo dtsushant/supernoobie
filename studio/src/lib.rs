@@ -66,7 +66,7 @@
 //! See [`Sketch`] for why it is written this way rather than as
 //! `key('p').click(f)`.
 
-use minifb::{Key, KeyRepeat, Window, WindowOptions};
+use minifb::{Key, KeyRepeat, MouseButton, MouseMode, Window, WindowOptions};
 use plotkit::{plot, raster::Canvas, Cx, Frame, View};
 
 /// Everything a sketch is likely to want, in one line.
@@ -164,9 +164,11 @@ impl Graph {
         let mut view = self.view_for(&scene(0.0, &Keys::none()));
         let mut grid = self.grid;
         let (mut t, mut paused, mut saves) = (0.0f64, false, 0);
+        let mut was_down = false;
 
         while win.is_open() && !win.is_key_down(Key::Escape) {
-            let keys = Keys::read(&win);
+            let keys = Keys::read(&win, &view, was_down);
+            was_down = keys.down;
 
             if keys.just('g') {
                 grid = !grid;
@@ -322,6 +324,8 @@ enum Binding<S> {
     Arrows(Box<dyn FnMut(&mut S, Cx)>),
     /// Every frame, whatever the keyboard is doing.
     Frame(Box<dyn FnMut(&mut S, f64)>),
+    /// A mouse click, with where it landed in world coordinates.
+    Click(Box<dyn FnMut(&mut S, Cx)>),
 }
 
 impl<S: 'static> Sketch<S> {
@@ -359,6 +363,19 @@ impl<S: 'static> Sketch<S> {
     /// `z = z + dir.scale(speed)` is the whole of movement.
     pub fn on_arrows(mut self, f: impl FnMut(&mut S, Cx) + 'static) -> Self {
         self.bindings.push(Binding::Arrows(Box::new(f)));
+        self
+    }
+
+    /// A mouse click, handed the position **in world coordinates** — the same
+    /// numbers the scene is written in, so a hit test is just the mathematics:
+    ///
+    /// ```text
+    ///     if (at - centre).abs() <= radius { ... }     // |z - c| <= r
+    /// ```
+    ///
+    /// Fires once when the button goes down, not every frame it is held.
+    pub fn on_click(mut self, f: impl FnMut(&mut S, Cx) + 'static) -> Self {
+        self.bindings.push(Binding::Click(Box::new(f)));
         self
     }
 
@@ -410,6 +427,11 @@ impl<S: 'static> Sketch<S> {
                     }
                 }
                 Binding::Arrows(f) => f(&mut self.state, keys.arrows()),
+                Binding::Click(f) => {
+                    if keys.clicked() {
+                        f(&mut self.state, keys.at());
+                    }
+                }
             }
         }
     }
@@ -438,11 +460,42 @@ fn slug(s: &str) -> String {
 pub struct Keys {
     pressed: Vec<Key>,
     held: Vec<Key>,
+    /// Where the pointer is, **in world coordinates** — already through the
+    /// view, so it can be compared with the numbers a scene is written in.
+    at: Cx,
+    over: bool,
+    down: bool,
+    clicked: bool,
 }
 
 impl Keys {
     fn none() -> Keys {
-        Keys { pressed: Vec::new(), held: Vec::new() }
+        Keys { pressed: Vec::new(), held: Vec::new(), at: Cx::ZERO, over: false, down: false, clicked: false }
+    }
+
+    /// Where the pointer is, in the same coordinates the scene is written in.
+    ///
+    /// So a hit test is the mathematics itself — `(keys.at() - c).abs() <= r`
+    /// **is** the definition of the disc of radius `r` about `c`. For an
+    /// arbitrary shape, [`plotkit::Shape::contains`] answers the same question.
+    pub fn at(&self) -> Cx {
+        self.at
+    }
+
+    /// Is the pointer over the window at all?
+    pub fn over(&self) -> bool {
+        self.over
+    }
+
+    /// The button, held down.
+    pub fn down(&self) -> bool {
+        self.down
+    }
+
+    /// The button, the moment it went down — once per click, not once per
+    /// frame the finger is resting on it.
+    pub fn clicked(&self) -> bool {
+        self.clicked
     }
 
     /// A key state built by hand, for tests and for driving a sketch with no
@@ -456,17 +509,34 @@ impl Keys {
     /// ```
     pub fn pressing(keys: &str) -> Keys {
         let v: Vec<Key> = keys.chars().filter_map(key_of).collect();
-        Keys { pressed: v.clone(), held: v }
+        Keys { pressed: v.clone(), held: v, ..Keys::none() }
+    }
+
+    /// A click at a world position, for tests and headless use.
+    pub fn clicking(at: Cx) -> Keys {
+        Keys { at, over: true, down: true, clicked: true, ..Keys::none() }
     }
 
     /// Keys held but not newly pressed — so [`Keys::held`] answers yes and
     /// [`Keys::just`] answers no.
     pub fn holding(keys: &str) -> Keys {
-        Keys { pressed: Vec::new(), held: keys.chars().filter_map(key_of).collect() }
+        Keys { held: keys.chars().filter_map(key_of).collect(), ..Keys::none() }
     }
 
-    fn read(win: &Window) -> Keys {
-        Keys { pressed: win.get_keys_pressed(KeyRepeat::No), held: win.get_keys() }
+    fn read(win: &Window, view: &View, was_down: bool) -> Keys {
+        // Clamp for the position so it stays usable while dragging off the
+        // edge; Discard only to ask whether the pointer is over us at all.
+        let (mx, my) = win.get_mouse_pos(MouseMode::Clamp).unwrap_or((0.0, 0.0));
+        let down = win.get_mouse_down(MouseButton::Left);
+        Keys {
+            pressed: win.get_keys_pressed(KeyRepeat::No),
+            held: win.get_keys(),
+            at: view.to_world(mx as f64, my as f64),
+            over: win.get_mouse_pos(MouseMode::Discard).is_some(),
+            down,
+            // Edge-triggered: a click is the transition, not the state.
+            clicked: down && !was_down,
+        }
     }
 
     /// Pressed this frame — for anything that should happen once per press.
@@ -604,25 +674,25 @@ mod tests {
 
     #[test]
     fn arrows_read_as_a_direction() {
-        let k = Keys { pressed: vec![], held: vec![Key::Right, Key::Up] };
+        let k = Keys { pressed: vec![], held: vec![Key::Right, Key::Up], ..Keys::none() };
         assert_eq!(k.arrows(), Cx::new(1.0, 1.0));
-        let k = Keys { pressed: vec![], held: vec![Key::Left] };
+        let k = Keys { pressed: vec![], held: vec![Key::Left], ..Keys::none() };
         assert_eq!(k.arrows(), Cx::new(-1.0, 0.0));
         // Both at once cancel, rather than one winning arbitrarily.
-        let k = Keys { pressed: vec![], held: vec![Key::Left, Key::Right] };
+        let k = Keys { pressed: vec![], held: vec![Key::Left, Key::Right], ..Keys::none() };
         assert_eq!(k.arrows(), Cx::ZERO);
     }
 
     #[test]
     fn just_and_held_are_different_questions() {
-        let k = Keys { pressed: vec![Key::N], held: vec![Key::N, Key::E] };
+        let k = Keys { pressed: vec![Key::N], held: vec![Key::N, Key::E], ..Keys::none() };
         assert!(k.just('n') && k.held('n'));
         assert!(k.held('e') && !k.just('e'), "e is down but was not pressed this frame");
     }
 
     #[test]
     fn digits_come_back_in_order() {
-        let k = Keys { pressed: vec![Key::Key4, Key::NumPad2], held: vec![] };
+        let k = Keys { pressed: vec![Key::Key4, Key::NumPad2], ..Keys::none() };
         assert_eq!(k.digits(), vec![4, 2]);
     }
 
@@ -700,8 +770,8 @@ mod tests {
         let mut s = toy();
         s.step(0.0, &Keys::none());
         assert_eq!(s.state().at, Cx::ZERO);
-        s.step(0.0, &Keys { pressed: vec![], held: vec![Key::Right, Key::Up] });
-        s.step(0.0, &Keys { pressed: vec![], held: vec![Key::Right] });
+        s.step(0.0, &Keys { pressed: vec![], held: vec![Key::Right, Key::Up], ..Keys::none() });
+        s.step(0.0, &Keys { pressed: vec![], held: vec![Key::Right], ..Keys::none() });
         assert_eq!(s.state().at, Cx::new(2.0, 1.0));
     }
 
@@ -731,6 +801,43 @@ mod tests {
             .on('p', |st: &mut String| st.push('b'));
         s.step(0.0, &Keys::pressing("p"));
         assert_eq!(s.state(), "ab");
+    }
+
+    /// ★ A click is the moment the button goes down, not every frame it is
+    /// held. The other way round, one click on a colour swatch would cycle it
+    /// sixty times a second.
+    #[test]
+    fn a_click_fires_once_per_press() {
+        let hits = std::rc::Rc::new(std::cell::Cell::new(0));
+        let count = hits.clone();
+        let mut s = Graph::new("t").with(Cx::ZERO).on_click(move |st: &mut Cx, at| {
+            count.set(count.get() + 1);
+            *st = at;
+        });
+
+        // Down for three frames, but only the first is a click.
+        let spot = Cx::new(2.0, -1.0);
+        s.step(0.0, &Keys::clicking(spot));
+        s.step(0.0, &Keys { down: true, clicked: false, at: spot, over: true, ..Keys::none() });
+        s.step(0.0, &Keys { down: true, clicked: false, at: spot, over: true, ..Keys::none() });
+        assert_eq!(hits.get(), 1, "a held button should not repeat");
+        assert_eq!(*s.state(), spot, "the handler is told where it landed");
+
+        s.step(0.0, &Keys::none());
+        s.step(0.0, &Keys::clicking(spot));
+        assert_eq!(hits.get(), 2, "releasing and pressing again is a second click");
+    }
+
+    /// The position handed to a click handler is in world coordinates, so a
+    /// hit test can be written in the same numbers as the scene.
+    #[test]
+    fn a_click_arrives_in_world_coordinates() {
+        let v = View::centred(400, 400, 50.0);
+        // The middle of the window is the origin; 50 px right is 1 unit right.
+        assert!((v.to_world(200.0, 200.0) - Cx::ZERO).abs() < 1e-12);
+        assert!((v.to_world(250.0, 200.0) - Cx::new(1.0, 0.0)).abs() < 1e-12);
+        // And up on screen is up in the world, which is the whole job of View.
+        assert!((v.to_world(200.0, 150.0) - Cx::new(0.0, 1.0)).abs() < 1e-12);
     }
 
     #[test]

@@ -98,6 +98,21 @@ keys.held('w')     // held down — for things that happen continuously
 keys.arrows()      // a direction as a Cx: right is 1, up is i
 keys.digits()      // digits typed this frame, in order
 keys.enter()  keys.backspace()
+
+keys.at()          // the pointer, IN WORLD COORDINATES
+keys.clicked()     // the moment the button went down, once per click
+keys.down()  keys.over()
+```
+
+`keys.at()` comes back already through the view, in the same numbers the scene
+is written in — so a hit test is the mathematics itself:
+
+```rust
+.on_click(|d, at| {
+    if (at - centre).abs() <= radius {   // |z - c| <= r IS the disc
+        d.colour = d.pick_colour();
+    }
+})
 ```
 
 `keys.arrows()` returning a `Cx` is the point of the whole library in
@@ -255,6 +270,32 @@ fourier::resample(path, n)                // even spacing ALONG the curve
 > mean: an ellipse stepped at even **angles** is exactly two terms, but
 > re-spaced by arclength it is not, because arclength is not proportional to
 > angle.
+
+---
+
+## Hit testing — was that click on it?
+
+For a circle the answer is its own definition, `|z - c| <= r`, and writing that
+out is better than calling anything. For a shape without such a tidy
+definition, `Shape` will answer:
+
+```rust
+shape.contains(p, lo, hi, width_px)        // inside a closed shape
+shape.touches(p, tol, lo, hi, width_px)    // within tol of the outline
+shape.distance(p, lo, hi, width_px)        // how far off it was
+```
+
+`contains` counts how many times a ray from `p` crosses the outline. Odd means
+inside — walk in from infinity and every crossing swaps you between out and in,
+so the parity is the answer.
+
+**Inside and on-the-line are different questions.** The middle of a ring is
+inside it but nowhere near it, and which one you want depends on whether the
+shape reads as a button or as a wire.
+
+`lo`, `hi` and `width_px` are the same arguments `polylines` takes, because a
+shape that only exists relative to a view has to be sampled against one before
+there is anything to measure.
 
 ---
 

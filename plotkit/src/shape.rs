@@ -228,12 +228,166 @@ impl Shape {
             _ => false,
         }
     }
+
+    // ---- hit testing -----------------------------------------------------
+
+    /// How far `p` is from the nearest bit of the drawn outline.
+    ///
+    /// The same `lo`, `hi` and `width_px` as [`Shape::polylines`], because a
+    /// shape that only exists relative to a view has to be sampled against one
+    /// before there is anything to measure a distance to.
+    pub fn distance(&self, p: Cx, lo: Cx, hi: Cx, width_px: usize) -> f64 {
+        let mut best = f64::MAX;
+        for run in self.polylines(lo, hi, width_px) {
+            if run.len() == 1 {
+                best = best.min((p - run[0]).abs());
+            }
+            for seg in run.windows(2) {
+                best = best.min(point_to_segment(p, seg[0], seg[1]));
+            }
+        }
+        best
+    }
+
+    /// Is `p` within `tol` of the outline? A click *on the line*.
+    pub fn touches(&self, p: Cx, tol: f64, lo: Cx, hi: Cx, width_px: usize) -> bool {
+        self.distance(p, lo, hi, width_px) <= tol
+    }
+
+    /// Is `p` inside? A click *anywhere in* a closed shape.
+    ///
+    /// Counts how many times a ray from `p` crosses the outline. Odd means
+    /// inside — walk in from infinity and every crossing swaps you between out
+    /// and in, so the parity is the answer. Each run is treated as closed,
+    /// which is what makes this meaningful for a circle or a polygon and
+    /// meaningless for an open arc.
+    pub fn contains(&self, p: Cx, lo: Cx, hi: Cx, width_px: usize) -> bool {
+        let mut inside = false;
+        for run in self.polylines(lo, hi, width_px) {
+            if run.len() < 3 {
+                continue;
+            }
+            let n = run.len();
+            for k in 0..n {
+                let (a, b) = (run[k], run[(k + 1) % n]);
+                // Does the horizontal ray through p cross this edge? The
+                // half-open test `>` vs `<=` is what stops a vertex lying
+                // exactly on the ray from being counted twice.
+                if (a.im > p.im) != (b.im > p.im) {
+                    let x = a.re + (p.im - a.im) / (b.im - a.im) * (b.re - a.re);
+                    if x > p.re {
+                        inside = !inside;
+                    }
+                }
+            }
+        }
+        inside
+    }
+}
+
+/// Distance from a point to a line segment — the nearest point on it is the
+/// projection, clamped to the ends.
+fn point_to_segment(p: Cx, a: Cx, b: Cx) -> f64 {
+    let ab = b - a;
+    let len2 = ab.abs_sq();
+    if len2 < 1e-18 {
+        return (p - a).abs();
+    }
+    let t = ((p - a).dot(ab) / len2).clamp(0.0, 1.0);
+    (p - (a + ab.scale(t))).abs()
 }
 
 // ===========================================================================
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const WIDE_LO: Cx = Cx::new(-20.0, -20.0);
+    const WIDE_HI: Cx = Cx::new(20.0, 20.0);
+    fn near(s: &Shape, p: Cx) -> f64 {
+        s.distance(p, WIDE_LO, WIDE_HI, 600)
+    }
+    fn inside(s: &Shape, p: Cx) -> bool {
+        s.contains(p, WIDE_LO, WIDE_HI, 600)
+    }
+
+    /// ★ For a circle the hit test IS the definition: `|z - c| <= r`. The
+    /// general machinery must agree with the one-line version, or the sketch
+    /// that uses the one-liner and the library that uses the general one would
+    /// disagree about what was clicked.
+    #[test]
+    fn a_circle_agrees_with_the_definition_of_a_disc() {
+        let (c, r) = (Cx::new(1.0, -2.0), 3.0);
+        let s = Shape::circle(c, r);
+        for k in 0..200 {
+            let p = c + Cx::polar(0.2 + 0.06 * k as f64, 0.7 * k as f64);
+            // Away from the rim, where the polygon approximation and the true
+            // circle can disagree, the two answers must match.
+            let d = (p - c).abs();
+            if (d - r).abs() > 0.05 {
+                assert_eq!(inside(&s, p), d <= r, "disagreed at |z-c| = {d}");
+            }
+        }
+    }
+
+    /// Inside is not the same question as on the line. A click in the middle
+    /// of a ring is inside it but nowhere near it.
+    #[test]
+    fn inside_and_on_the_line_are_different_questions() {
+        let s = Shape::circle(Cx::ZERO, 3.0);
+        assert!(inside(&s, Cx::ZERO), "the middle is inside");
+        assert!(near(&s, Cx::ZERO) > 2.9, "but it is nowhere near the line");
+        assert!(!s.touches(Cx::ZERO, 0.5, WIDE_LO, WIDE_HI, 600));
+        assert!(s.touches(Cx::new(3.0, 0.0), 0.1, WIDE_LO, WIDE_HI, 600), "a point ON the rim touches it");
+    }
+
+    #[test]
+    fn distance_to_a_segment_is_the_perpendicular_when_it_can_be() {
+        let s = Shape::path(vec![Cx::new(-2.0, 0.0), Cx::new(2.0, 0.0)]);
+        assert!((near(&s, Cx::new(0.0, 1.5)) - 1.5).abs() < 1e-12, "straight above the middle");
+        // Past the end, the nearest point is the end itself, not the
+        // infinite line — which would have said 1.5.
+        assert!((near(&s, Cx::new(4.0, 1.5)) - (2.0f64 * 2.0 + 1.5 * 1.5).sqrt()).abs() < 1e-12);
+    }
+
+    /// A square knows its own inside, including near the corners where a
+    /// careless ray-crossing test double-counts a vertex.
+    #[test]
+    fn a_polygon_knows_its_inside() {
+        let s = Shape::polygon(vec![Cx::new(-1.0, -1.0), Cx::new(1.0, -1.0), Cx::new(1.0, 1.0), Cx::new(-1.0, 1.0)]);
+        assert!(inside(&s, Cx::ZERO));
+        assert!(inside(&s, Cx::new(0.9, 0.9)));
+        assert!(!inside(&s, Cx::new(1.1, 0.0)));
+        assert!(!inside(&s, Cx::new(0.0, 1.1)));
+        // A ray leaving exactly through a corner must not be counted twice.
+        assert!(!inside(&s, Cx::new(-3.0, 1.0)));
+    }
+
+    /// An open curve has no inside, and says so rather than inventing one.
+    #[test]
+    fn an_open_arc_has_no_meaningful_inside() {
+        let s = Shape::path(vec![Cx::new(-1.0, 0.0), Cx::new(0.0, 1.0), Cx::new(1.0, 0.0)]);
+        assert!(!inside(&s, Cx::new(0.0, -5.0)), "well outside any reading of it");
+    }
+
+    /// A group is hit if any of its parts is — so a face counts as clicked
+    /// when you land on an eye.
+    #[test]
+    fn a_group_is_hit_when_any_part_is() {
+        let s = Shape::group(vec![Shape::circle(Cx::new(-3.0, 0.0), 1.0), Shape::circle(Cx::new(3.0, 0.0), 1.0)]);
+        assert!(inside(&s, Cx::new(3.0, 0.0)));
+        assert!(inside(&s, Cx::new(-3.0, 0.0)));
+        assert!(!inside(&s, Cx::ZERO), "the gap between them is not inside either");
+    }
+
+    /// Hit testing follows a transform, because it runs on the shape as drawn
+    /// rather than on the shape as written.
+    #[test]
+    fn hit_testing_follows_a_transform() {
+        let s = Shape::circle(Cx::ZERO, 1.0).shift(Cx::new(5.0, 0.0));
+        assert!(inside(&s, Cx::new(5.0, 0.0)));
+        assert!(!inside(&s, Cx::ZERO));
+    }
     use std::f64::consts::{PI, TAU};
 
     const LO: Cx = Cx { re: -10.0, im: -10.0 };
