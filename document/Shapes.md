@@ -542,6 +542,52 @@ draggable while it moves.
 
 ---
 
+## `shapes::cyclone` — a 2D drawing that reads as 3D
+
+```rust
+let c = Cyclone::new();
+
+c.project(x, y, z)     // Cx     — the one place space becomes page
+c.ring(u, t)           // Shape  — one height, as the ellipse it projects to
+c.halves(t)            // (far, near) — for the depth cue
+c.streamers(5, t)      // Shape  — strands of air, winding up
+c.eye()  c.spine()  c.shape(t)
+
+c.radius_at(u)  c.spin_at(r)  c.foreshortening()
+```
+
+Nothing in it is 3D — every point ends up as one `Cx` — and it reads as solid
+on the back of one fact:
+
+> **An ellipse is a circle seen at an angle.**
+
+```text
+    screen_x = x
+    screen_y = y · sin(tilt)  +  z · cos(tilt)
+               ^^^^^^^^^^^^      ^^^^^^^^^^^^
+               depth squashed    height stands up
+```
+
+Overhead (`tilt = π/2`) the rings are circles and every height lands in the
+same place. Edge on (`tilt = 0`) they collapse to lines and height is all you
+see. `cargo run -p studio --release --bin sketch` puts that on the up and down
+arrows, which is the fastest way to feel it.
+
+**The physics is in how fast each ring turns.** A vortex conserves circulation,
+so `ω(r) = Γ / 2πr²` — the narrow bottom whips round while the wide top barely
+moves. That is why the strands *wind up* rather than turning as a rigid body:
+it is the same conservation law as a skater pulling their arms in.
+
+Taken literally `ω → ∞` at the middle. The **core radius** stops that — inside
+it the flow turns as a solid body, which is what a real vortex does. That is a
+*Rankine vortex*, and the core is the eye.
+
+Absent on purpose, so the line between a drawing and a model stays visible: air
+moving up the funnel, pressure falling toward the middle, Coriolis, and any
+coupling between the rings.
+
+---
+
 ## `shapes::face` — a smiley and a ghost
 
 ```rust

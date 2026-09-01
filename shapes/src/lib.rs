@@ -45,6 +45,7 @@
 //! | [`digit`] | 0–9, as outlines and as truncated Fourier series |
 //! | [`face`] | a smiley and a ghost |
 //! | [`count`] | tally marks |
+//! | [`cyclone`] | a 2D drawing that reads as 3D — one `sin(tilt)` does it |
 //! | [`glyph`] | `+`, `=`, `?` |
 //! | [`grab`] | shapes you can take hold of — drag to move, drag the rim to resize |
 //! | [`motion`] | spin, walk, run, orbit — as values that compose |
@@ -52,6 +53,7 @@
 //! | [`wave`] | `a sin(kx + φ)`, and what happens when you add them |
 
 pub mod count;
+pub mod cyclone;
 pub mod digit;
 pub mod face;
 pub mod fourier;
@@ -63,6 +65,7 @@ pub mod troupe;
 pub mod wave;
 
 pub use fourier::Series;
+pub use cyclone::Cyclone;
 pub use grab::Disc;
 pub use motion::{Motion, Pose};
 pub use troupe::{Actor, Troupe};
