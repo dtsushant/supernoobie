@@ -2,17 +2,14 @@
 /target/
 **/*.rs.bk
 
-# Generated output - regenerate rather than commit
-pulley.svg
-pulley_sim.svg
-frame*.png
-bodies*.png
-cloth*.png
-fluid*.png
-spin*.png
-render*.png
-pca*.png
-game*.png
+# Generated output - regenerate rather than commit.
+# The apps name their own files: `S` in a Graph window writes <title>-N.png,
+# and --record writes whatever tape you asked for. Neither is predictable
+# enough to list, so ignore the kinds. `git add -f` if one is ever worth
+# keeping.
+*.png
+*.svg
+*.tape
 
 # Editors
 /.idea/
