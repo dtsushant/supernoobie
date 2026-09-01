@@ -9,7 +9,7 @@
 //!
 //! ```text
 //!   Esc  quit          wheel       zoom, about the pointer
-//!   G    graph paper   right-drag  slide the paper around
+//!   G    graph paper   right-drag  slide the paper (or shift + left-drag)
 //!   Home reset view    left-drag   the circle
 //! ```
 //!

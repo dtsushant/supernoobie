@@ -87,11 +87,44 @@ Builders, all optional: `.size(w, h)`, `.scale(k)`, `.origin(x, y)`,
 of size 1 or size 1000 and it fills the window either way, so a sketch never
 has to guess a zoom level.
 
+### Text that stays put
+
+`Frame::label` puts text at a **world** position, so it travels with the
+drawing — right for naming a curve, wrong for a title, which slides away when
+you pan and grows when you zoom.
+
+`Frame::pin` puts it on the **window** instead:
+
+```rust
+f.pin(Anchor::TopLeft, 14.0, 12.0, "walking right", 0x9AA7B4, 2);
+f.pin(Anchor::Bottom,   0.0, -14.0, "wheel zooms",   0x5A6774, 1);
+```
+
+Nine anchors — `TopLeft` `Top` `TopRight` `Left` `Middle` `Right` `BottomLeft`
+`Bottom` `BottomRight` — then an offset in pixels and a size. The size is the
+last argument and nothing about the view changes it, so one constant makes a
+whole readout bigger:
+
+```rust
+const TEXT: i32 = 2;                      // bump to 3 and everything grows
+f.pin(Anchor::TopLeft, 14.0, 12.0, title, ink, TEXT);
+f.pin(Anchor::TopLeft, 14.0, 12.0 + 9.0 * TEXT as f64, second_line, ink, TEXT);
+```
+
+The rule: **is it part of the drawing?** A label naming a curve is. A title is
+not — it is written on the glass in front.
+
 ### Moving about the page
 
-**In every mode:** the wheel zooms about the pointer, **right-drag** slides the
-paper around, and `Home` puts the view back. All on the mouse, so a sketch
-keeps every key for itself.
+**In every mode:** the wheel zooms about the pointer, and `Home` puts the view
+back. To slide the paper, drag with the **right button**, the **middle
+button**, or **shift + left** — three gestures because there is only one way to
+find out which buttons a given window system actually reports, and being unable
+to pan at all is worse than an extra line of code.
+
+**Shift + arrows** pans too. That works because `Keys::arrows()` returns zero
+while shift is held: the rule is *shift means talk to the graph, not the
+sketch*, so shift-arrow pans without also steering whatever the sketch steers.
 
 ```rust
 studio::zoom_about(&mut view, (px, py), factor)

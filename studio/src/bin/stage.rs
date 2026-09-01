@@ -18,9 +18,10 @@
 //!
 //!   drag a rim to resize one   drag a middle to move one   G graph paper
 //!
-//!   wheel      zoom, about the pointer
-//!   right-drag slide the paper around
-//!   Home       put the view back
+//!   wheel        zoom, about the pointer
+//!   right-drag   slide the paper around (or middle-drag, or shift + left-drag)
+//!   shift+arrows slide it with the keyboard
+//!   Home         put the view back
 //! ```
 //!
 //! Zoom out and set it running to watch where it goes; zoom in on one disc
@@ -197,13 +198,18 @@ fn scene(s: &Stage) -> Frame {
         f.add(Shape::point(tip)).color(0x6B7987).dot(6.0);
     }
 
-    f.label(Cx::new(0.0, 6.4), s.mode.name(), 0x9AA7B4, 2);
+    // Pinned to the window, not the world: a title is not part of the drawing,
+    // so it must not slide away when the paper is panned or grow when it is
+    // zoomed. `TEXT` is the one number to change to make it all bigger.
+    const TEXT: i32 = 2;
+    f.pin(Anchor::TopLeft, 14.0, 12.0, s.mode.name(), 0x9AA7B4, TEXT);
     if s.mode.uses_direction() {
-        f.label(Cx::new(0.0, 5.6), format!("dir = {:.2} + {:.2}i", s.dir.re, s.dir.im), 0x5A6774, 2);
+        f.pin(Anchor::TopLeft, 14.0, 12.0 + 9.0 * TEXT as f64, format!("dir = {:.2} + {:.2}i", s.dir.re, s.dir.im), 0x5A6774, TEXT);
     }
-    f.label(Cx::new(0.0, -6.1), "arrows aim it   drag a rim to resize, a middle to move", 0x5A6774, 2);
-    f.label(Cx::new(0.0, -6.9), "1 still  2 walk  3 run  4 orbit  5 both  Q/E spin  R reset", 0x46525E, 2);
-    f.label(Cx::new(0.0, -7.7), "wheel zooms   right-drag slides the paper   Home resets the view", 0x46525E, 2);
+    let line = |n: f64| -14.0 - 9.0 * TEXT as f64 * n;
+    f.pin(Anchor::BottomLeft, 14.0, line(2.0), "arrows aim it   drag a rim to resize, a middle to move", 0x5A6774, TEXT);
+    f.pin(Anchor::BottomLeft, 14.0, line(1.0), "1 still  2 walk  3 run  4 orbit  5 both  Q/E spin  R reset", 0x46525E, TEXT);
+    f.pin(Anchor::BottomLeft, 14.0, line(0.0), "wheel zooms   right-drag or shift-drag slides the paper   Home resets", 0x46525E, TEXT);
     f
 }
 
@@ -367,4 +373,5 @@ mod tests {
         assert!((far - 2.0).abs() < 0.05, "expected radius 2, drew {far}");
     }
 }
+
 

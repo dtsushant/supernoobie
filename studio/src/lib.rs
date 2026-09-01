@@ -86,7 +86,7 @@ use plotkit::{plot, raster::Canvas, Cx, Frame, View};
 /// ```
 pub mod prelude {
     pub use crate::{Graph, Keys, Sketch};
-    pub use plotkit::{plot, Canvas, Cx, Frame, Shape, View};
+    pub use plotkit::{plot, Anchor, Canvas, Cx, Frame, Shape, View};
     pub use shapes::{count, digit, face, fourier, glyph, grab, motion, troupe, wave};
     pub use shapes::{Actor, Disc, Draw, Motion, Place, Pose, Recipe, Series, Troupe, Wave};
     pub use std::f64::consts::{PI, TAU};
@@ -215,7 +215,7 @@ impl Graph {
             if keys.scroll().abs() > 1e-6 {
                 zoom_about(&mut view, keys.at_px(), 1.0 + 0.14 * keys.scroll().clamp(-3.0, 3.0));
             }
-            if keys.right_down() {
+            if keys.panning() {
                 if let Some((lx, ly)) = last_pan {
                     // The origin is in pixels, so moving it by the pointer's
                     // own delta makes the paper follow the hand exactly.
@@ -228,6 +228,13 @@ impl Graph {
             }
             if keys.home {
                 view = home_view;
+            }
+            // Shift-arrows pan in every mode, since `arrows()` withholds them
+            // from the sketch while shift is down.
+            if keys.shift {
+                let d = raw_arrows(&keys).scale(14.0);
+                view.origin.0 += d.re;
+                view.origin.1 -= d.im;
             }
 
             // Keyboard pan and zoom last, so a sketch reading the same key
@@ -511,6 +518,14 @@ impl<S: 'static> Sketch<S> {
     }
 }
 
+/// The arrows as the keyboard actually has them, ignoring the shift rule —
+/// so the graph can use them for panning at the same moment the sketch is
+/// being told there are none.
+fn raw_arrows(k: &Keys) -> Cx {
+    let axis = |neg: Key, pos: Key| f64::from(k.held.contains(&pos) as i8) - f64::from(k.held.contains(&neg) as i8);
+    Cx::new(axis(Key::Left, Key::Right), axis(Key::Down, Key::Up))
+}
+
 /// Zoom a view by `factor`, keeping whatever is under `(px, py)` under it.
 ///
 /// The obvious version — just multiply the scale — zooms about the origin, so
@@ -549,6 +564,8 @@ pub struct Keys {
     down: bool,
     clicked: bool,
     right_down: bool,
+    middle_down: bool,
+    shift: bool,
     scroll: f64,
     home: bool,
 }
@@ -564,6 +581,8 @@ impl Keys {
             down: false,
             clicked: false,
             right_down: false,
+            middle_down: false,
+            shift: false,
             scroll: 0.0,
             home: false,
         }
@@ -629,6 +648,23 @@ impl Keys {
         self.right_down
     }
 
+    /// Either shift key. **Shift means "talk to the graph, not the sketch"** —
+    /// while it is held, [`Keys::arrows`] reports nothing, so shift-arrow pans
+    /// the view without also steering whatever the sketch is steering.
+    pub fn shift(&self) -> bool {
+        self.shift
+    }
+
+    /// Any gesture that means "slide the paper": the right button, the middle
+    /// button, or shift with the left.
+    ///
+    /// Three of them because there is only one way to find out which buttons a
+    /// given window system actually reports, and being unable to pan is worse
+    /// than an extra line of code.
+    fn panning(&self) -> bool {
+        self.right_down || self.middle_down || (self.shift && self.down)
+    }
+
     /// How far the wheel turned this frame. Positive is away from you.
     pub fn scroll(&self) -> f64 {
         self.scroll
@@ -651,6 +687,8 @@ impl Keys {
             // Edge-triggered: a click is the transition, not the state.
             clicked: down && !was_down,
             right_down: win.get_mouse_down(MouseButton::Right),
+            middle_down: win.get_mouse_down(MouseButton::Middle),
+            shift: win.is_key_down(Key::LeftShift) || win.is_key_down(Key::RightShift),
             scroll: win.get_scroll_wheel().map_or(0.0, |(_, y)| y as f64),
         }
     }
@@ -668,6 +706,11 @@ impl Keys {
     /// The arrow keys as a direction, so `z + keys.arrows().scale(speed)`
     /// moves a thing about. Right is `1`, up is `i`, as they should be.
     pub fn arrows(&self) -> Cx {
+        // Shift hands the arrows to the graph for panning, so a sketch that
+        // steers with them is not also dragged sideways.
+        if self.shift {
+            return Cx::ZERO;
+        }
         let axis = |neg: Key, pos: Key| {
             f64::from(self.held.contains(&pos) as i8) - f64::from(self.held.contains(&neg) as i8)
         };
@@ -1009,6 +1052,34 @@ mod tests {
         // The same WORLD point is now 25 right and 13 up the screen.
         let (x, y) = v.to_screen(before);
         assert!((x - 125).abs() <= 1 && (y - 87).abs() <= 1, "landed at {x}, {y}");
+    }
+
+    /// ★ Shift means "talk to the graph". While it is held the sketch is told
+    /// there are no arrows, so shift-arrow pans the view without also steering
+    /// whatever the sketch steers with them.
+    #[test]
+    fn shift_takes_the_arrows_away_from_the_sketch() {
+        let held = vec![Key::Right, Key::Up];
+        let plain = Keys { held: held.clone(), ..Keys::none() };
+        assert_eq!(plain.arrows(), Cx::new(1.0, 1.0));
+
+        let shifted = Keys { held, shift: true, ..Keys::none() };
+        assert_eq!(shifted.arrows(), Cx::ZERO, "the sketch should see nothing");
+        assert_eq!(raw_arrows(&shifted), Cx::new(1.0, 1.0), "but the graph still can");
+    }
+
+    /// Three ways to pan, because there is only one way to find out which
+    /// buttons a given window system reports, and being unable to drag the
+    /// paper at all is worse than an extra line of code.
+    #[test]
+    fn any_of_three_gestures_pans() {
+        assert!(Keys { right_down: true, ..Keys::none() }.panning());
+        assert!(Keys { middle_down: true, ..Keys::none() }.panning());
+        assert!(Keys { shift: true, down: true, ..Keys::none() }.panning());
+
+        assert!(!Keys::none().panning());
+        assert!(!Keys { down: true, ..Keys::none() }.panning(), "a plain left drag belongs to the sketch");
+        assert!(!Keys { shift: true, ..Keys::none() }.panning(), "shift alone is not a drag");
     }
 
     #[test]

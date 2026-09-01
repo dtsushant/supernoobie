@@ -45,12 +45,49 @@ impl Default for Style {
     }
 }
 
+/// Where on the window a pinned caption sits.
+///
+/// Nine positions, the ones a caption is ever wanted in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Anchor {
+    TopLeft,
+    Top,
+    TopRight,
+    Left,
+    Middle,
+    Right,
+    BottomLeft,
+    Bottom,
+    BottomRight,
+}
+
+impl Anchor {
+    /// The point it hangs from, and how much of the text hangs back past it —
+    /// `0` for left/top, `0.5` for centred, `1` for right/bottom.
+    fn spot(self, w: f64, h: f64) -> (f64, f64, f64, f64) {
+        use Anchor::*;
+        let (x, fx) = match self {
+            TopLeft | Left | BottomLeft => (0.0, 0.0),
+            Top | Middle | Bottom => (w / 2.0, 0.5),
+            TopRight | Right | BottomRight => (w, 1.0),
+        };
+        let (y, fy) = match self {
+            TopLeft | Top | TopRight => (0.0, 0.0),
+            Left | Middle | Right => (h / 2.0, 0.5),
+            BottomLeft | Bottom | BottomRight => (h, 1.0),
+        };
+        (x, y, fx, fy)
+    }
+}
+
 #[derive(Clone)]
 pub struct Frame {
     items: Vec<(Shape, Style)>,
     next_colour: usize,
-    /// Text pinned to world positions — labels that travel with the drawing.
+    /// Text at world positions — labels that travel with the drawing.
     labels: Vec<(Cx, String, u32, i32)>,
+    /// Text at window positions — captions that do not.
+    pins: Vec<(Anchor, f64, f64, String, u32, i32)>,
 }
 
 impl Default for Frame {
@@ -61,7 +98,7 @@ impl Default for Frame {
 
 impl Frame {
     pub fn new() -> Self {
-        Frame { items: Vec::new(), next_colour: 0, labels: Vec::new() }
+        Frame { items: Vec::new(), next_colour: 0, labels: Vec::new(), pins: Vec::new() }
     }
 
     /// Add a shape, taking the next palette colour. Returns its style so it
@@ -79,8 +116,31 @@ impl Frame {
     }
 
     /// Text at a world position, so it moves with whatever it labels.
+    ///
+    /// Use this for something that names a *part of the drawing* — it should
+    /// travel with what it names, and go off the edge when that does.
     pub fn label(&mut self, at: Cx, text: impl Into<String>, colour: u32, scale: i32) {
         self.labels.push((at, text.into(), colour, scale));
+    }
+
+    /// Text pinned to the **window**, not the world.
+    ///
+    /// It does not move when the view is panned and does not resize when it is
+    /// zoomed, because it is not part of the drawing — it is written on the
+    /// glass in front of it. Titles, readouts and lists of controls belong
+    /// here; a [`Frame::label`] naming a curve does not.
+    ///
+    /// `dx` and `dy` are pixels in from the anchor, `scale` multiplies the
+    /// 5×7 font.
+    ///
+    /// ```no_run
+    /// # use plotkit::{Frame, frame::Anchor};
+    /// # let mut f = Frame::new();
+    /// f.pin(Anchor::TopLeft, 14.0, 12.0, "walking right", 0x9AA7B4, 2);
+    /// f.pin(Anchor::Bottom, 0.0, -18.0, "wheel zooms", 0x5A6774, 1);
+    /// ```
+    pub fn pin(&mut self, at: Anchor, dx: f64, dy: f64, text: impl Into<String>, colour: u32, scale: i32) {
+        self.pins.push((at, dx, dy, text.into(), colour, scale.max(1)));
     }
 
     pub fn len(&self) -> usize {
@@ -95,6 +155,7 @@ impl Frame {
     pub fn merge(&mut self, other: Frame) {
         self.items.extend(other.items);
         self.labels.extend(other.labels);
+        self.pins.extend(other.pins);
     }
 
     /// The box everything in the frame fits inside, as `(bottom-left,
@@ -151,6 +212,14 @@ impl Frame {
         }
         for (at, text, colour, scale) in &self.labels {
             v.text_mid(c, *at, text, *colour, *scale);
+        }
+        for (at, dx, dy, text, colour, scale) in &self.pins {
+            // Straight to the canvas. The view is deliberately not consulted:
+            // that is what makes a pin stay put.
+            let (ax, ay, fx, fy) = at.spot(c.w as f64, c.h as f64);
+            let tw = Canvas::text_w(text, *scale) as f64;
+            let th = 7.0 * *scale as f64;
+            c.text((ax + dx - tw * fx) as i32, (ay + dy - th * fy) as i32, text, *colour, *scale);
         }
     }
 }
@@ -282,6 +351,100 @@ mod tests {
         b.add(Shape::point(Cx::new(1.0, 1.0))).color(0x222222);
         a.merge(b);
         assert_eq!(a.len(), 2);
+    }
+
+    /// ★ The whole point of a pin: it does not move when the view does. A
+    /// caption that slid away as you panned, or grew as you zoomed, would be
+    /// part of the drawing — and a title is not part of the drawing.
+    #[test]
+    fn a_pin_stays_put_however_the_view_moves() {
+        let ink = |v: &View| {
+            let mut c = Canvas::new(240, 120);
+            c.clear(0);
+            let mut f = Frame::new();
+            f.pin(Anchor::TopLeft, 10.0, 8.0, "HELLO", 0xFFFFFF, 2);
+            f.draw(&mut c, v);
+            c.buf.clone()
+        };
+        let base = ink(&View::centred(240, 120, 40.0));
+        assert!(base.iter().any(|&p| p != 0), "the pin should have drawn something");
+
+        // Zoomed right in, zoomed right out, and panned a long way: identical.
+        assert_eq!(base, ink(&View::centred(240, 120, 4000.0)));
+        assert_eq!(base, ink(&View::centred(240, 120, 0.05)));
+        assert_eq!(base, ink(&View::centred(240, 120, 40.0).with_origin(-900.0, 700.0)));
+    }
+
+    /// A label, by contrast, is part of the drawing and must move with it —
+    /// otherwise nothing could name a curve.
+    #[test]
+    fn a_label_does_move_with_the_view() {
+        let ink = |v: &View| {
+            let mut c = Canvas::new(240, 120);
+            c.clear(0);
+            let mut f = Frame::new();
+            f.label(Cx::new(1.0, 0.0), "HELLO", 0xFFFFFF, 2);
+            f.draw(&mut c, v);
+            c.buf.iter().position(|&p| p != 0)
+        };
+        assert_ne!(ink(&View::centred(240, 120, 40.0)), ink(&View::centred(240, 120, 40.0).with_origin(30.0, 60.0)));
+    }
+
+    /// The nine anchors land in nine different places, and each one keeps its
+    /// text inside the window rather than half off the edge.
+    #[test]
+    fn every_anchor_lands_somewhere_different_and_stays_on_screen() {
+        use Anchor::*;
+        let v = View::centred(300, 200, 30.0);
+        let mut seen = Vec::new();
+        for a in [TopLeft, Top, TopRight, Left, Middle, Right, BottomLeft, Bottom, BottomRight] {
+            let mut c = Canvas::new(300, 200);
+            c.clear(0);
+            let mut f = Frame::new();
+            // Nudged in from the edge by the same amount the applications use.
+            let (dx, dy) = match a {
+                TopLeft | Left | BottomLeft => (8.0, 0.0),
+                TopRight | Right | BottomRight => (-8.0, 0.0),
+                _ => (0.0, 0.0),
+            };
+            let (dx, dy) = (dx, dy + if matches!(a, TopLeft | Top | TopRight) { 8.0 } else if matches!(a, BottomLeft | Bottom | BottomRight) { -14.0 } else { 0.0 });
+            f.pin(a, dx, dy, "XX", 0xFFFFFF, 2);
+            f.draw(&mut c, &v);
+            let lit: Vec<usize> = c.buf.iter().enumerate().filter(|(_, &p)| p != 0).map(|(i, _)| i).collect();
+            assert!(!lit.is_empty(), "{a:?} drew nothing — it fell off the window");
+            seen.push(lit[0]);
+        }
+        let mut sorted = seen.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), 9, "two anchors landed in the same place");
+    }
+
+    /// Bigger text is bigger. The size is the caller's to choose, and nothing
+    /// about the view changes it.
+    #[test]
+    fn a_pin_can_be_resized() {
+        let ink = |scale: i32| {
+            let mut c = Canvas::new(300, 120);
+            c.clear(0);
+            let mut f = Frame::new();
+            f.pin(Anchor::TopLeft, 6.0, 6.0, "ABC", 0xFFFFFF, scale);
+            f.draw(&mut c, &View::centred(300, 120, 30.0));
+            c.buf.iter().filter(|&&p| p != 0).count()
+        };
+        assert!(ink(3) > ink(1) * 3, "scale 3 should be much more ink than scale 1");
+    }
+
+    #[test]
+    fn merging_carries_pins_too() {
+        let mut a = Frame::new();
+        let mut b = Frame::new();
+        b.pin(Anchor::Middle, 0.0, 0.0, "X", 0xFFFFFF, 2);
+        a.merge(b);
+        let mut c = Canvas::new(60, 60);
+        c.clear(0);
+        a.draw(&mut c, &View::centred(60, 60, 10.0));
+        assert!(painted(&c) > 0, "the pin was lost in the merge");
     }
 
     #[test]
