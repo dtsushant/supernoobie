@@ -66,6 +66,8 @@
 //! 20 000 Hz, twice that is 40 000, and the rest is room to put a filter in.
 
 use physics::Oscillator;
+use plotkit::{Cx, Shape};
+use shapes::Wave;
 use std::f64::consts::TAU;
 
 /// Samples a second. 44100 is the CD rate, and the reason is Nyquist: a little
@@ -148,6 +150,11 @@ impl Tone {
         self
     }
 
+    pub fn with_attack(mut self, seconds: f64) -> Tone {
+        self.attack = seconds;
+        self
+    }
+
     /// How loud it is at time `t`: eased in, then dying away.
     ///
     /// The decay is `e^{−t/τ}`, which is a damped oscillator seen from the
@@ -194,6 +201,64 @@ impl Tone {
     /// fine and the twelfth harmonic is not.
     pub fn aliases_at(&self, rate: u32) -> bool {
         self.top_frequency() >= f64::from(rate) / 2.0
+    }
+
+    // ---- the same recipe, drawn ------------------------------------------
+
+    /// The harmonics as [`Wave`]s, in an `x` where **one unit is one period**
+    /// of the fundamental.
+    ///
+    /// The bridge between hearing and seeing: a timbre *is* a list of waves,
+    /// so the very recipe that makes the sound can be drawn. Normalised by
+    /// period rather than by hertz, so the picture is legible whether the note
+    /// is a low A or a high one.
+    pub fn waves(&self) -> Vec<Wave> {
+        let total = self.timbre.total();
+        self.timbre
+            .0
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| a.abs() > 1e-12)
+            .map(|(k, a)| Wave::sine().amplitude(a / total).frequency(TAU * (k + 1) as f64))
+            .collect()
+    }
+
+    /// The waveform: what the sound actually looks like, `cycles` periods of
+    /// it, about one unit tall.
+    ///
+    /// A curve with ends rather than a `graph`, because this is a *picture of
+    /// a sound* — a thing of a definite length that goes somewhere on the page
+    /// — not a wave stretching across the window.
+    ///
+    /// **The steady shape, without the envelope.** What one cycle looks like
+    /// once the note is going, rather than a note fading as you look at it.
+    /// The envelope is a separate thing and belongs on its own axis; mixing
+    /// the two would show a waveform that shrinks along its own length, which
+    /// is a picture of nothing.
+    pub fn waveform(&self, cycles: f64) -> Shape {
+        let ws = self.waves();
+        Shape::param(move |x| Cx::new(x, shapes::wave::total(&ws, x)), 0.0, cycles.max(0.01), 600)
+    }
+
+    /// The recipe itself: one upright per harmonic, as tall as that harmonic
+    /// is loud.
+    ///
+    /// This is the thing that differs between a clarinet and a sawtooth. The
+    /// waveform above is what you get when you add these up, and the sound is
+    /// the same addition again — one recipe, three views.
+    pub fn spectrum(&self) -> Shape {
+        let total = self.timbre.total();
+        Shape::group(
+            self.timbre
+                .0
+                .iter()
+                .enumerate()
+                .map(|(k, a)| {
+                    let x = (k + 1) as f64;
+                    Shape::path(vec![Cx::new(x, 0.0), Cx::new(x, a.abs() / total)])
+                })
+                .collect::<Vec<_>>(),
+        )
     }
 
     /// The envelope as the damped oscillator it is, if you would rather think
@@ -325,6 +390,53 @@ mod tests {
     fn sampling_gives_the_number_of_samples_it_says() {
         assert_eq!(Tone::pluck(440.0).samples(1.0, 8_000).len(), 8_000);
         assert_eq!(Tone::pluck(440.0).samples(0.0, 8_000).len(), 0);
+    }
+
+    /// ★ The recipe, the picture and the sound are one thing. The waveform
+    /// drawn from `waves()` has to be the same curve the samples trace, or the
+    /// picture would be illustrating something other than what you hear.
+    ///
+    /// With the envelope flat, since `waveform` shows the steady shape and
+    /// `at` includes the envelope — a difference worth having and worth
+    /// stating.
+    #[test]
+    fn what_is_drawn_is_what_is_heard() {
+        // No attack and effectively no decay, so the envelope is flat at 1 and
+        // the two views are comparable. `waveform` is deliberately the STEADY
+        // shape; `at` includes the envelope.
+        let t = Tone::pluck(1.0).with_timbre(Timbre::clarinet(9)).with_decay(1e9).with_attack(0.0);
+        let drawn = t.waveform(2.0).polylines(Cx::new(-9.0, -9.0), Cx::new(9.0, 9.0), 600);
+        // At a fundamental of 1 Hz, one unit of x is one second, so the two
+        // are directly comparable.
+        for p in drawn.into_iter().flatten() {
+            assert!((p.im - t.at(p.re)).abs() < 1e-6, "at x = {}: drew {} but plays {}", p.re, p.im, t.at(p.re));
+        }
+    }
+
+    /// One upright per harmonic, as tall as it is loud — and a clarinet's
+    /// missing even harmonics are missing from the picture too.
+    #[test]
+    fn the_spectrum_shows_which_harmonics_are_there() {
+        let bars = |t: Timbre| {
+            Tone::pluck(440.0)
+                .with_timbre(t)
+                .spectrum()
+                .polylines(Cx::new(-99.0, -99.0), Cx::new(99.0, 99.0), 200)
+                .into_iter()
+                .map(|r| (r[0].re, r[1].im))
+                .collect::<Vec<_>>()
+        };
+        let reed = bars(Timbre::clarinet(6));
+        assert_eq!(reed.len(), 6, "one upright per harmonic, present or not");
+        for (x, h) in &reed {
+            let harmonic = *x as usize;
+            assert_eq!(*h == 0.0, harmonic % 2 == 0, "harmonic {harmonic} should be {} tall", if harmonic % 2 == 0 { "not" } else { "" });
+        }
+        // And the fundamental is the tallest, in every timbre here.
+        for t in [Timbre::saw(8), Timbre::triangle(8), Timbre::clarinet(8)] {
+            let b = bars(t);
+            assert!(b[0].1 >= b.iter().map(|(_, h)| *h).fold(0.0, f64::max) - 1e-12);
+        }
     }
 
     /// The envelope really is a damped oscillator, so the two views agree.

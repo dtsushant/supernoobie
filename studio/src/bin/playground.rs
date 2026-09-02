@@ -50,6 +50,13 @@
 //! about that point rather than shifting it, because shifting a thing with no
 //! ends drags the samples sideways and leaves a bare strip at one edge.
 //!
+//! ## One screen, six ideas
+//!
+//! This has outgrown a single view, and that is a fair sign it is working. If
+//! it gets in your way, the honest fix is to split it: one binary per idea,
+//! the way `waves`, `stage` and `sketch` already are. Nothing here would have
+//! to change to do it, because every part is a value that draws itself.
+//!
 //! ## The tree is also a sum of waves
 //!
 //! Not decorated with them — **made** of them, and that is not a trick. A
@@ -69,6 +76,7 @@
 use plotkit::{Cx, Frame, Shape};
 use std::f64::consts::PI;
 use physics::{fall::gravity, Fall, Oscillator};
+use sound::{pitch, wav, Timbre, Tone, RATE};
 use shapes::{bough, wave, Wave, Wind};
 use shapes::digit::glyph;
 use shapes::face::smiley;
@@ -78,6 +86,8 @@ const TREE: u32 = 0x8FBF6A;
 const MODE: u32 = 0x4A6B56;
 const GUST: u32 = 0x7FA6C4;
 const BALL: u32 = 0xE0A44A;
+const TONE: u32 = 0xE585AC;
+const SPEC: u32 = 0x9B7BD4;
 
 /// A colour dimmed toward the background, for fading a gust in and out.
 fn fade(c: u32, amount: f64) -> u32 {
@@ -101,6 +111,9 @@ struct Air {
     tree: Oscillator,
     /// Gravity, for the ball.
     g: f64,
+    /// Which recipe of harmonics the note is made of. The same list draws the
+    /// spectrum, draws the waveform, and makes the sound.
+    voice: usize,
 }
 
 impl Air {
@@ -123,6 +136,22 @@ impl Air {
         self.tree.step(dt, stiff * target);
     }
 
+    /// The four recipes, and what each one is like.
+    fn voices() -> [(&'static str, Timbre); 4] {
+        [
+            ("pure: one sine, nothing else", Timbre::pure()),
+            ("triangle: odd harmonics, 1/n^2 -- soft", Timbre::triangle(15)),
+            ("clarinet: odd harmonics, 1/n -- woody", Timbre::clarinet(15)),
+            ("sawtooth: every harmonic, 1/n -- bright", Timbre::saw(15)),
+        ]
+    }
+
+    /// The note being shown. One value; three views of it.
+    fn tone(&self) -> Tone {
+        let (_, timbre) = Self::voices()[self.voice % 4].clone();
+        Tone::pluck(pitch::named("A3").unwrap_or(pitch::A4)).with_timbre(timbre).with_decay(1.4)
+    }
+
     fn blowing(&self) -> Wind {
         let gust = 1.0 + 0.35 * (self.t * 0.9).sin() + 0.18 * (self.t * 2.3).sin();
         Wind::new(self.wind * gust)
@@ -139,6 +168,7 @@ fn main() {
             // Lightly damped: a tree wobbles a few times before it stops.
             tree: Oscillator::new(2.6, 0.22),
             g: gravity::EARTH,
+            voice: 3,
         })
         .each_frame(Air::advance)
         .on_hold('>', |a| a.wind = (a.wind + 0.06).min(30.0))
@@ -148,6 +178,18 @@ fn main() {
         .on_hold('j', |a| a.g = (a.g - 0.12).max(0.0))
         .on('m', |a| a.g = gravity::MOON)
         .on('e', |a| a.g = gravity::EARTH)
+        // The sound. Same recipe drawn and heard, so 1-4 change both at once.
+        .on('1', |a| a.voice = 0)
+        .on('2', |a| a.voice = 1)
+        .on('3', |a| a.voice = 2)
+        .on('4', |a| a.voice = 3)
+        .on('5', |a| {
+            let note = a.tone();
+            match wav::write("playground.wav", &note.samples(2.0, RATE), RATE) {
+                Ok(()) => println!("wrote playground.wav -- the note you are looking at"),
+                Err(e) => eprintln!("could not write it: {e}"),
+            }
+        })
         .run(scene);
 }
 
@@ -252,12 +294,26 @@ fn scene(a: &Air) -> Frame {
         2,
     );
 
+    // --- the sound, which is the same mathematics ---------------------------
+    // One recipe, three views: the harmonics as uprights, the waveform they
+    // add up to, and -- press 5 -- a file you can listen to. Adding the
+    // harmonics is the same `wave::sum` that draws the square wave above.
+    let note = a.tone();
+    let (voice, _) = Air::voices()[a.voice % 4].clone();
+
+    // The recipe. A clarinet's missing even harmonics are visibly missing.
+    f.add(Shape::path(vec![Cx::new(-10.6, -4.4), Cx::new(-3.6, -4.4)])).color(0x3E4A55).width(1);
+    f.place(note.spectrum().map(|z| Cx::new(z.re * 0.42, z.im * 2.2)), Cx::new(-10.6, -4.4)).color(SPEC).width(3);
+
+    // What those add up to: two periods of the wave itself.
+    f.place(note.waveform(2.0).map(|z| Cx::new(z.re * 3.3, z.im * 0.62)), Cx::new(-10.6, -6.4)).color(TONE).width(2);
+
     // --- a ball, with the gravity dial -------------------------------------
     // Galileo: distance goes as the SQUARE of the time, and mass does not come
     // into it. With air it stops speeding up and approaches a terminal
     // velocity -- the same e^(-t/tau) as the tree settling above.
     let air = Fall::in_air(a.g.max(0.01), 1.1);
-    let from = Cx::new(-8.4, 8.2);
+    let from = Cx::new(-1.6, 8.2);
     let landing = air.hits(from, 0.0, -8.4).unwrap_or(6.0);
     let phase = t % (landing + 0.9);
     let ball = air.at(from, 0.0, phase.min(landing));
@@ -273,6 +329,8 @@ fn scene(a: &Air) -> Frame {
         2,
     );
     f.pin(plotkit::Anchor::BottomLeft, 14.0, -74.0, "s = 1/2 g t^2 -- Galileo. Mass does not come into it.", BALL, 2);
+    f.pin(plotkit::Anchor::BottomLeft, 14.0, -114.0, format!("1-4 timbre: {voice}"), TONE, 2);
+    f.pin(plotkit::Anchor::BottomLeft, 14.0, -94.0, "bars are the harmonics, the curve is their sum -- 5 writes it as a WAV", SPEC, 2);
 
     f
 }
@@ -285,7 +343,7 @@ mod tests {
 
     #[test]
     fn the_scene_draws_something_that_moves() {
-        let air = |t: f64| Air { t, was: t, wind: 2.2, tree: Oscillator::new(2.6, 0.22), g: gravity::EARTH };
+        let air = |t: f64| Air { t, was: t, wind: 2.2, tree: Oscillator::new(2.6, 0.22), g: gravity::EARTH, voice: 3 };
         assert!(!scene(&air(0.0)).is_empty());
         let v = View::centred(400, 400, 20.0);
         let ink = |t: f64| {
@@ -302,7 +360,7 @@ mod tests {
     #[test]
     fn the_wind_lays_the_tree_over_but_never_past_flat() {
         let angle = |wind: f64| {
-            Air { t: 0.0, was: 0.0, wind, tree: Oscillator::new(2.6, 0.22), g: gravity::EARTH }
+            Air { t: 0.0, was: 0.0, wind, tree: Oscillator::new(2.6, 0.22), g: gravity::EARTH, voice: 3 }
                 .blowing()
                 .trunk_angle(STIFFNESS)
         };
@@ -315,10 +373,12 @@ mod tests {
     /// A gust is drawn only when there is wind to carry it.
     #[test]
     fn calm_air_has_no_gusts() {
-        let calm = Air { t: 3.0, was: 3.0, wind: 0.0, tree: Oscillator::new(2.6, 0.22), g: gravity::EARTH };
+        let calm = Air { t: 3.0, was: 3.0, wind: 0.0, tree: Oscillator::new(2.6, 0.22), g: gravity::EARTH, voice: 3 };
         assert!(calm.blowing().gusts(10, Cx::ZERO, Cx::new(1.0, 1.0), 3.0).is_empty());
     }
 }
+
+
 
 
 
