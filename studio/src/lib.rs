@@ -81,6 +81,7 @@
 //! See [`Sketch`] for why it is written this way rather than as
 //! `key('p').click(f)`.
 
+use std::sync::{Arc, Mutex};
 use minifb::{Key, KeyRepeat, MouseButton, MouseMode, Window, WindowOptions};
 use plotkit::{plot, raster::Canvas, Cx, Frame, View};
 
@@ -182,6 +183,14 @@ impl Graph {
             Window::new(&self.title, w, h, WindowOptions::default()).expect("could not open a window");
         win.set_target_fps(60);
 
+        // Text input, which is not the same thing as key codes. A key code
+        // says which key went down; only the window knows what character that
+        // means, once shift and the keyboard layout have had their say. The
+        // callback runs on the window's own thread, so what it collects is
+        // shared and drained once a frame.
+        let typing: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+        win.set_input_callback(Box::new(Typing(Arc::clone(&typing))));
+
         let mut view = self.view_for(&scene(0.0, &Keys::none()));
         let mut grid = self.grid;
         let home_view = view;
@@ -190,7 +199,8 @@ impl Graph {
         let mut show_input = false;
 
         while win.is_open() && !win.is_key_down(Key::Escape) {
-            let keys = Keys::read(&win, &view, was_down);
+            let typed = typing.lock().map(|mut t| std::mem::take(&mut *t)).unwrap_or_default();
+            let keys = Keys::read(&win, &view, was_down, typed);
             was_down = keys.down;
 
             if keys.just('g') {
@@ -320,7 +330,7 @@ impl Graph {
     /// Call this **after** the builders — `.size`, `.scale` and friends belong
     /// to the graph, and this hands the graph over.
     pub fn with<S>(self, state: S) -> Sketch<S> {
-        Sketch { graph: self, state, bindings: Vec::new(), tape: Reel::Live }
+        Sketch { graph: self, state, bindings: Vec::new(), gate: None, tape: Reel::Live }
     }
 
     /// A still, written to a PNG. No window, so this works headless.
@@ -408,6 +418,9 @@ pub struct Sketch<S> {
     state: S,
     bindings: Vec<Binding<S>>,
     tape: Reel,
+    /// While this says no, the key bindings stand down — for a sketch with
+    /// somewhere to type in it. See [`Sketch::gate`].
+    gate: Option<Box<dyn Fn(&S) -> bool>>,
 }
 
 /// Whether a sketch is being taped, replayed, or neither.
@@ -434,6 +447,7 @@ enum Binding<S> {
     /// The pointer every frame: where it is, and whether the button is down.
     Pointer(Box<dyn FnMut(&mut S, Cx, bool)>),
     PointerPx(Box<dyn FnMut(&mut S, Cx, (f64, f64), bool)>),
+    Keyboard(Box<dyn FnMut(&mut S, &Keys)>),
 }
 
 impl<S: 'static> Sketch<S> {
@@ -527,6 +541,30 @@ impl<S: 'static> Sketch<S> {
         self
     }
 
+    /// The whole keyboard, for anything that wants the characters rather than
+    /// particular keys — a text field, mainly.
+    ///
+    /// Runs **before** the key bindings and is never gated, so a sketch that
+    /// has taken the keyboard for typing still receives it.
+    pub fn on_keys(mut self, f: impl FnMut(&mut S, &Keys) + 'static) -> Self {
+        self.bindings.push(Binding::Keyboard(Box::new(f)));
+        self
+    }
+
+    /// While this returns `false`, the **key** bindings do not fire.
+    ///
+    /// For a sketch with somewhere to type in it. Without a gate, every
+    /// shortcut has to test the same condition, thirty times, and the day one
+    /// of them is forgotten typing a `p` into a formula quietly switches tool.
+    /// One place decides.
+    ///
+    /// The pointer, the clock and [`Sketch::on_keys`] are not gated: the
+    /// window still has to work while you are typing in it.
+    pub fn gate(mut self, f: impl Fn(&S) -> bool + 'static) -> Self {
+        self.gate = Some(Box::new(f));
+        self
+    }
+
     /// Every frame, with the time in seconds. Runs **before** the key
     /// bindings, so the clock is already up to date when they fire.
     pub fn each_frame(mut self, f: impl FnMut(&mut S, f64) + 'static) -> Self {
@@ -590,7 +628,13 @@ impl<S: 'static> Sketch<S> {
                 f(&mut self.state, t);
             }
         }
+        // One place decides whether the keyboard belongs to the sketch's own
+        // shortcuts or to something inside it that is being typed into.
+        let keys_ours = self.gate.as_ref().is_none_or(|g| g(&self.state));
         for b in &mut self.bindings {
+            if !keys_ours && !matches!(b, Binding::Pointer(_) | Binding::PointerPx(_) | Binding::Frame(_) | Binding::Keyboard(_)) {
+                continue;
+            }
             match b {
                 Binding::Frame(_) => {}
                 Binding::Press(k, f) => {
@@ -626,6 +670,7 @@ impl<S: 'static> Sketch<S> {
                 }
                 Binding::Pointer(f) => f(&mut self.state, keys.at(), keys.down()),
                 Binding::PointerPx(f) => f(&mut self.state, keys.at(), keys.at_px(), keys.down()),
+                Binding::Keyboard(f) => f(&mut self.state, keys),
             }
         }
     }
@@ -637,8 +682,8 @@ impl<S: 'static> Sketch<S> {
     /// Open the window and go. `draw` turns the state into a picture and is
     /// the only part that sees it whole.
     pub fn run(self, mut draw: impl FnMut(&S) -> Frame + 'static) {
-        let Sketch { graph, state, bindings, tape } = self;
-        let mut me = Sketch { graph: Graph::new(""), state, bindings, tape };
+        let Sketch { graph, state, bindings, tape, gate } = self;
+        let mut me = Sketch { graph: Graph::new(""), state, bindings, tape, gate };
         graph.play(move |t, keys| {
             me.step(t, keys);
             draw(&me.state)
@@ -679,6 +724,28 @@ fn slug(s: &str) -> String {
     s.chars().map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' }).collect()
 }
 
+/// Collects what the window says was typed.
+///
+/// `minifb` hands characters to a callback rather than letting you ask for
+/// them, because they arrive from the operating system when they arrive — a
+/// long press repeats, a dead key produces nothing and then two things at
+/// once, and none of that lines up with frames.
+struct Typing(Arc<Mutex<String>>);
+
+impl minifb::InputCallback for Typing {
+    fn add_char(&mut self, uni: u32) {
+        // Control codes come through here too. Backspace and Enter are keys,
+        // not characters, and are read as keys.
+        if let Some(c) = char::from_u32(uni) {
+            if !c.is_control() {
+                if let Ok(mut t) = self.0.lock() {
+                    t.push(c);
+                }
+            }
+        }
+    }
+}
+
 /// What the keyboard is doing, without minifb in your file.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Keys {
@@ -697,6 +764,18 @@ pub struct Keys {
     shift: bool,
     scroll: f64,
     home: bool,
+    /// The characters typed this frame, in order.
+    ///
+    /// **Not** worked out from key codes. A key code says which key went down;
+    /// it does not say what character that means, because that depends on
+    /// shift, on the keyboard layout, and on whatever the operating system
+    /// does with dead keys. Guessing gives a program that can type `a` and `1`
+    /// and nothing that needs a shift — no brackets, no `*`, no capitals,
+    /// which rules out writing a formula.
+    ///
+    /// So this comes from the window's own text input, which is the only thing
+    /// that knows.
+    typed: String,
 }
 
 impl Keys {
@@ -714,6 +793,7 @@ impl Keys {
             shift: false,
             scroll: 0.0,
             home: false,
+            typed: String::new(),
         }
     }
 
@@ -808,6 +888,15 @@ impl Keys {
         self.middle_down
     }
 
+    /// What was typed this frame, as characters rather than key codes.
+    ///
+    /// Empty on almost every frame. Backspace and Enter do not appear here —
+    /// they are not characters — so ask [`Keys::backspace`] and
+    /// [`Keys::enter`] for those.
+    pub fn typed(&self) -> &str {
+        &self.typed
+    }
+
     /// Was `Home` pressed this frame? The graph uses it to reset the view.
     pub fn home_pressed(&self) -> bool {
         self.home
@@ -867,10 +956,14 @@ impl Keys {
             shift,
             scroll,
             home,
+            // A tape records key codes, not text. Replaying one therefore
+            // types nothing -- which is right: a recording of somebody
+            // drawing should not also retype their formulas.
+            typed: String::new(),
         }
     }
 
-    fn read(win: &Window, view: &View, was_down: bool) -> Keys {
+    fn read(win: &Window, view: &View, was_down: bool, typed: String) -> Keys {
         // Clamp for the position so it stays usable while dragging off the
         // edge; Discard only to ask whether the pointer is over us at all.
         let (mx, my) = win.get_mouse_pos(MouseMode::Clamp).unwrap_or((0.0, 0.0));
@@ -890,6 +983,7 @@ impl Keys {
             middle_down: win.get_mouse_down(MouseButton::Middle),
             shift: win.is_key_down(Key::LeftShift) || win.is_key_down(Key::RightShift),
             scroll: win.get_scroll_wheel().map_or(0.0, |(_, y)| y as f64),
+            typed,
         }
     }
 

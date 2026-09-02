@@ -83,6 +83,28 @@
 //!                                                  S O     save, open
 //! ```
 //!
+//! ## The written half
+//!
+//! Down the right-hand side: a row of script each, Desmos-fashion.
+//!
+//! ```text
+//!     [x] r = 2
+//!         ------o------          a slider, because the row binds a number
+//!     [x] circle(0, r)
+//!     [ ] ngon(0, r, 6)          switched off, not deleted
+//!     [+] a new row
+//! ```
+//!
+//! Change `r` and everything that mentions it changes. `time` is bound to the
+//! clock, so `param(exp(i*(t + time)), 0, tau)` animates without any
+//! keyframes at all.
+//!
+//! **While a row is being typed the keyboard belongs to it** — otherwise
+//! typing `p` in a formula would switch to the pick tool. Tapping the drawing
+//! gives it back. (Not `Esc`: that closes the window, everywhere in this
+//! repository, and a key that means two things is a key that will one day mean
+//! the wrong one.)
+//!
 //! ## Where the work happens
 //!
 //! Not here. This file is a window: it paints what [`easel`] says and reports
@@ -96,6 +118,7 @@
 //! ```
 
 use easel::bar::{Bar, Cmd, INKS, STEP, WIDTH};
+use easel::panel::{Panel, Poke};
 use easel::{Board, Tool};
 use plotkit::{Anchor, Cx, Frame, Shape};
 use shapes::Nib;
@@ -115,6 +138,11 @@ struct Studio {
     px: (f64, f64),
     /// Down last frame, so a press on the bar happens once.
     was_down: bool,
+    /// The rows down the right, laid out afresh each frame because their
+    /// number and heights change with what is in them.
+    panel: Panel,
+    /// How wide and tall the window is, for laying the panel out.
+    size: (i32, i32),
 }
 
 const EDGE: u32 = 0x22303C;
@@ -130,6 +158,8 @@ impl Studio {
             was: 0.0,
             px: (-1.0, -1.0),
             was_down: false,
+            panel: Panel::default(),
+            size: (1200, 780),
         };
         if std::path::Path::new(&s.file).exists() {
             s.open();
@@ -278,18 +308,43 @@ impl Studio {
     /// unreachable, and slowly filling the file.
     fn pointer(&mut self, at: Cx, px: (f64, f64), down: bool) {
         self.px = px;
-        let on_bar = self.bar.covers(self.px.0, self.px.1);
-        if on_bar {
-            if down && !self.was_down {
-                if let Some(cmd) = self.bar.at(self.px.0, self.px.1) {
-                    self.obey(cmd);
+        self.panel = Panel::new(self.size.0, &self.board);
+        let pressed = down && !self.was_down;
+        let furniture = self.bar.covers(px.0, px.1) || self.panel.covers(px.0);
+
+        if furniture {
+            if let Some(cmd) = pressed.then(|| self.bar.at(px.0, px.1)).flatten() {
+                self.obey(cmd);
+            }
+            match self.panel.at(px.0, px.1) {
+                // A slider is dragged, so it answers to being held, not only
+                // to the press. Remembered once, at the press, or a drag
+                // would leave a hundred steps to undo.
+                Some(Poke::Drag(row, value)) if down => {
+                    if pressed {
+                        self.board.edit(None);
+                    }
+                    self.board.set_dial(row, value);
                 }
+                Some(poke) if pressed => match poke {
+                    Poke::Tick(row) => {
+                        self.board.toggle_row(row);
+                    }
+                    Poke::Edit(row) => self.board.edit(Some(row)),
+                    Poke::Add => self.board.add_row(),
+                    Poke::Drag(..) => {}
+                },
+                _ => {}
             }
             // Tell the board the pen is up, so a stroke in progress is
             // finished properly rather than left hanging when the hand
-            // wanders over the toolbar.
+            // wanders over the furniture.
             self.board.pointer(at, false);
         } else {
+            // Tapping the drawing puts the keyboard back where it belongs.
+            if pressed {
+                self.board.edit(None);
+            }
             self.board.pointer(at, down);
         }
         self.was_down = down;
@@ -302,10 +357,30 @@ fn main() {
     Graph::new("studio")
         .scale(70.0)
         .with(Studio::new(file))
+        // While a row is being typed the keyboard belongs to it -- otherwise
+        // typing `p` in a formula would switch to the pick tool. One place
+        // decides, rather than thirty shortcuts each testing the same thing.
+        .gate(|s: &Studio| s.board.editing.is_none())
         .each_frame(|s, t| {
             let dt = (t - s.was).clamp(0.0, 1.0 / 15.0);
             s.was = t;
             s.board.tick(dt);
+        })
+        // Typing, and the two keys that are not characters. Registered before
+        // the shortcuts so the row has the keyboard first -- though what
+        // really settles it is that every shortcut below asks `not typing`.
+        .on_keys(|s, keys| {
+            if s.board.editing.is_some() {
+                if !keys.typed().is_empty() {
+                    s.board.type_into(keys.typed());
+                }
+                if keys.backspace() {
+                    s.board.rub_out();
+                }
+                if keys.enter() {
+                    s.board.add_row();
+                }
+            }
         })
         .on_pointer_px(|s, at, px, down| s.pointer(at, px, down))
         // --- the nib ---------------------------------------------------------
@@ -378,7 +453,8 @@ fn page(s: &Studio) -> Frame {
     // --- the toolbar ---------------------------------------------------------
     // One call. The rectangles are `easel`'s, and the same ones decide what a
     // tap hit, so painting and hitting cannot drift apart.
-    s.bar.paint(&mut f, &s.board, 620);
+    s.bar.paint(&mut f, &s.board, s.size.1);
+    s.panel.paint(&mut f, &s.board, s.size.1);
 
     // --- what is going on ----------------------------------------------------
     let doing = match s.board.chosen() {

@@ -155,6 +155,14 @@ pub struct Board {
     /// time it happens to be.
     pub clock: f64,
     pub playing: bool,
+
+    /// Which script row is being typed into, if any.
+    ///
+    /// While this is set the keyboard belongs to the row, and none of the
+    /// studio's shortcuts fire. Typing `p` in a formula must not switch to the
+    /// pick tool, and the way to be sure is that there is exactly one place
+    /// that decides — here.
+    pub editing: Option<usize>,
 }
 
 impl Default for Board {
@@ -182,6 +190,7 @@ impl Board {
             selected: Vec::new(),
             clock: 0.0,
             playing: false,
+            editing: None,
         }
     }
 
@@ -474,6 +483,73 @@ impl Board {
             }
         }
         seen.len()
+    }
+
+    // ---- the written half ---------------------------------------------------
+
+    /// Start typing in a row, or stop.
+    ///
+    /// Remembered as **one step back** for the whole edit: a row is retyped a
+    /// character at a time, and an undo that walked back through every
+    /// keystroke would be useless for getting out of a mess.
+    pub fn edit(&mut self, row: Option<usize>) {
+        if row.is_some() && row != self.editing {
+            self.past.remember(&self.sheet);
+        }
+        self.editing = row.filter(|k| *k < self.sheet.script.len());
+    }
+
+    /// Add a row and start typing in it.
+    pub fn add_row(&mut self) {
+        self.past.remember(&self.sheet);
+        self.sheet.script.add("");
+        self.editing = Some(self.sheet.script.len() - 1);
+    }
+
+    /// Put characters into the row being typed.
+    pub fn type_into(&mut self, text: &str) -> bool {
+        let Some(k) = self.editing else { return false };
+        let Some(r) = self.sheet.script.rows.get_mut(k) else { return false };
+        r.text.push_str(text);
+        true
+    }
+
+    /// Take the last character back.
+    ///
+    /// An empty row that is rubbed out again **goes away**, because that is
+    /// what pressing backspace on nothing means, and the alternative is a
+    /// drawing slowly filling with blank rows nobody can get rid of.
+    pub fn rub_out(&mut self) -> bool {
+        let Some(k) = self.editing else { return false };
+        let Some(r) = self.sheet.script.rows.get_mut(k) else { return false };
+        if r.text.pop().is_some() {
+            return true;
+        }
+        self.sheet.script.rows.remove(k);
+        self.editing = if k == 0 { None } else { Some(k - 1) };
+        true
+    }
+
+    /// Switch a row on or off.
+    pub fn toggle_row(&mut self, k: usize) -> bool {
+        let Some(was) = self.sheet.script.rows.get(k).map(|r| r.on) else { return false };
+        // Remembered before the change, and the row is reached again
+        // afterwards -- the snapshot has to be of the state BEFORE, so the
+        // borrow cannot be held across it.
+        self.past.remember(&self.sheet);
+        self.sheet.script.rows[k].on = !was;
+        true
+    }
+
+    /// Move a slider.
+    ///
+    /// Not remembered per frame — a drag would otherwise leave a hundred steps
+    /// to undo. It is remembered when the drag starts, by whoever starts it.
+    pub fn set_dial(&mut self, row: usize, value: f64) -> bool {
+        let Some(name) = self.sheet.script.rows.get(row).and_then(|r| r.binds()).map(str::to_string) else {
+            return false;
+        };
+        self.sheet.script.set_dial(&name, value)
     }
 
     // ---- keyframes ---------------------------------------------------------
@@ -1379,6 +1455,98 @@ mod tests {
 
         b.sheet.script.set_dial("r", 3.0);
         assert_eq!(b.frame().len(), drawn_only + 2, "and still both after a dial moves");
+    }
+
+    /// ★ Typing goes into the row and nowhere else. While a row is being
+    /// typed the keyboard belongs to it -- typing `p` in a formula must not
+    /// also switch to the pick tool.
+    #[test]
+    fn typing_goes_into_the_row_being_edited() {
+        let mut b = Board::new();
+        b.add_row();
+        assert_eq!(b.editing, Some(0));
+        for c in ["c", "i", "r", "c", "l", "e", "(", "0", ",", " ", "2", ")"] {
+            b.type_into(c);
+        }
+        assert_eq!(b.sheet.script.rows[0].text, "circle(0, 2)");
+        assert_eq!(b.frame().len(), 1, "and it draws");
+
+        b.edit(None);
+        assert!(!b.type_into("x"), "nothing is being typed into now");
+        assert_eq!(b.sheet.script.rows[0].text, "circle(0, 2)");
+    }
+
+    /// ★ Backspace on an empty row takes the row away. That is what pressing
+    /// it on nothing means, and the alternative is a drawing slowly filling
+    /// with blank rows nobody can get rid of.
+    #[test]
+    fn rubbing_out_an_empty_row_removes_it() {
+        let mut b = Board::new();
+        b.add_row();
+        b.type_into("ab");
+        assert!(b.rub_out());
+        assert_eq!(b.sheet.script.rows[0].text, "a");
+        assert!(b.rub_out());
+        assert_eq!(b.sheet.script.rows[0].text, "");
+
+        assert!(b.rub_out(), "and again takes the row itself");
+        assert_eq!(b.sheet.script.len(), 0);
+        assert_eq!(b.editing, None);
+    }
+
+    /// A whole edit is one step back, not one per keystroke -- an undo that
+    /// walked back through every character would be useless for getting out of
+    /// a mess.
+    #[test]
+    fn retyping_a_row_is_one_step_back() {
+        let mut b = Board::new();
+        b.sheet.script.add("circle(0, 1)");
+        let before = b.sheet.clone();
+
+        b.edit(Some(0));
+        for _ in 0..6 {
+            b.type_into("x");
+        }
+        assert!(b.undo());
+        assert_eq!(b.sheet, before);
+    }
+
+    /// A row switched off is kept, and switching it is undoable.
+    #[test]
+    fn a_row_can_be_switched_off_and_back() {
+        let mut b = Board::new();
+        b.sheet.script.add("circle(0, 1)");
+        assert_eq!(b.frame().len(), 1);
+
+        assert!(b.toggle_row(0));
+        assert_eq!(b.frame().len(), 0, "off means it does not draw");
+        assert_eq!(b.sheet.script.rows[0].text, "circle(0, 1)", "but it is still there");
+
+        assert!(b.undo());
+        assert_eq!(b.frame().len(), 1);
+    }
+
+    /// ★ Moving a slider moves everything that mentions the variable.
+    #[test]
+    fn a_slider_moves_everything_that_mentions_it() {
+        let mut b = Board::new();
+        b.sheet.script.add("r = 2");
+        b.sheet.script.add("circle(0, r)");
+        b.sheet.script.add("ngon(5, r, 6)");
+
+        let reach = |b: &Board| {
+            let (lo, hi) = (Cx::new(-50.0, -50.0), Cx::new(50.0, 50.0));
+            b.written()
+                .shapes
+                .iter()
+                .flat_map(|(s, _)| s.polylines(lo, hi, 600))
+                .flatten()
+                .map(|z| z.im.abs())
+                .fold(0.0, f64::max)
+        };
+        let small = reach(&b);
+        assert!(b.set_dial(0, 5.0));
+        assert!(reach(&b) > small * 2.0, "both shapes should have grown");
     }
 
     /// A tap leaves nothing — no invisible speck that can still be clicked on.
