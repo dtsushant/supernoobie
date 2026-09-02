@@ -82,6 +82,16 @@ impl View {
         let (p, q) = (self.to_screen(a), self.to_screen(b));
         c.thick_line(p.0, p.1, q.0, q.1, t, col);
     }
+    /// Fill a polygon given in **world** coordinates.
+    ///
+    /// The corners are converted and the filling happens in pixels, which is
+    /// the only place it can: a fill is about which pixels are inside, and
+    /// there are no pixels until the view has had its say.
+    pub fn poly(&self, c: &mut Canvas, pts: &[Cx], col: u32) {
+        let screen: Vec<(i32, i32)> = pts.iter().map(|z| self.to_screen(*z)).collect();
+        c.fill_poly(&screen, col);
+    }
+
     /// `r` is a **world** radius; it is scaled like everything else.
     pub fn ring(&self, c: &mut Canvas, at: Cx, r: f64, t: i32, col: u32) {
         let p = self.to_screen(at);

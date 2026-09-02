@@ -37,11 +37,18 @@ pub struct Style {
     pub dot: f64,
     /// Draw the vertices of a path as well as its edges.
     pub show_vertices: bool,
+    /// Paint the inside rather than trace the outline.
+    ///
+    /// On the **style** rather than on the shape, so that everything becomes
+    /// fillable at once and nothing has to be rebuilt to be filled: a circle,
+    /// a hand-drawn stroke and a Fourier series are all just runs of points by
+    /// the time they reach the canvas, and any run of points can be filled.
+    pub filled: bool,
 }
 
 impl Default for Style {
     fn default() -> Self {
-        Style { colour: PALETTE[0], width: 2, dot: 5.0, show_vertices: false }
+        Style { colour: PALETTE[0], width: 2, dot: 5.0, show_vertices: false, filled: false }
     }
 }
 
@@ -227,6 +234,7 @@ impl Frame {
                 match run.len() {
                     0 => {}
                     1 => v.disc(c, run[0], dot_world, st.colour),
+                    _ if st.filled => v.poly(c, &run, st.colour),
                     _ => {
                         if shape.is_points() {
                             for p in &run {
@@ -277,6 +285,15 @@ impl StyleRef<'_> {
     }
     pub fn dot(self, r: f64) -> Self {
         self.f.items[self.k].1.dot = r;
+        self
+    }
+    /// Paint the inside instead of tracing the outline.
+    ///
+    /// The shape does not have to be closed on paper — the fill closes it,
+    /// because a run of points and a straight line back to the start is what
+    /// "inside" has to mean.
+    pub fn fill(self) -> Self {
+        self.f.items[self.k].1.filled = true;
         self
     }
     pub fn vertices(self, on: bool) -> Self {

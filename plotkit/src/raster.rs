@@ -158,6 +158,77 @@ impl Canvas {
         }
     }
 
+    /// Fill a polygon, given its corners in order.
+    ///
+    /// ## How it works, and why this rule
+    ///
+    /// A scanline sweep. For each row of pixels, find every place the outline
+    /// crosses that row, sort those crossings across the row, and fill
+    /// **between alternate pairs**:
+    ///
+    /// ```text
+    ///     row 40:   ....x========x......x====x....
+    ///                   1        2      3    4
+    ///                   fill 1-2, skip 2-3, fill 3-4
+    /// ```
+    ///
+    /// That alternation is the **even-odd rule**, and it is not an
+    /// approximation: a point is inside a closed curve exactly when a ray from
+    /// it to infinity crosses the curve an odd number of times, because every
+    /// crossing swaps you between in and out. It is the same argument
+    /// [`Shape::contains`](crate::Shape::contains) already uses to decide
+    /// whether a click landed inside something, so a click and the paint agree
+    /// by construction rather than by luck.
+    ///
+    /// It also gives holes for free. Draw a ring as an outer loop and an inner
+    /// one and the middle is crossed twice, so it stays empty — which is how a
+    /// letter O gets its hole with no code that knows what a hole is.
+    ///
+    /// ## The two details that are easy to get wrong
+    ///
+    /// **A horizontal edge is skipped**, because it does not *cross* the row —
+    /// it lies along it, and counting it would toggle inside-ness for the
+    /// whole width of the edge.
+    ///
+    /// **A vertex is counted once, not twice.** The test is `y0 <= y < y1`
+    /// (half open) rather than `y0 <= y <= y1`. With the closed test, a row
+    /// passing exactly through a shared corner counts both edges, the parity
+    /// flips twice, and the fill drops out — which shows up as thin bright
+    /// lines scattered across an otherwise solid shape.
+    pub fn fill_poly(&mut self, pts: &[(i32, i32)], c: u32) {
+        if pts.len() < 3 {
+            return;
+        }
+        let (top, bottom) = pts.iter().fold((i32::MAX, i32::MIN), |(a, b), p| (a.min(p.1), b.max(p.1)));
+        let top = top.max(0);
+        let bottom = bottom.min(self.h as i32 - 1);
+
+        let mut crossings: Vec<f32> = Vec::with_capacity(16);
+        for y in top..=bottom {
+            crossings.clear();
+            for k in 0..pts.len() {
+                let (x0, y0) = pts[k];
+                let (x1, y1) = pts[(k + 1) % pts.len()];
+                // Half open, and so a shared corner is counted once. Also
+                // skips horizontal edges, since then `y0 == y1` and no `y` can
+                // be both >= and < it.
+                let hits = (y0 <= y && y < y1) || (y1 <= y && y < y0);
+                if !hits {
+                    continue;
+                }
+                let along = (y - y0) as f32 / (y1 - y0) as f32;
+                crossings.push(x0 as f32 + along * (x1 - x0) as f32);
+            }
+            crossings.sort_by(f32::total_cmp);
+            for pair in crossings.chunks(2) {
+                let [from, to] = pair else { continue };
+                for x in (*from).round() as i32..=(*to).round() as i32 {
+                    self.px(x, y, c);
+                }
+            }
+        }
+    }
+
     pub fn rect(&mut self, x: i32, y: i32, w: i32, h: i32, c: u32) {
         self.line(x, y, x + w, y, c);
         self.line(x, y + h, x + w, y + h, c);
@@ -477,5 +548,137 @@ mod tests {
         assert_eq!(c.buf[5], 0x000000);
         c.px_blend(1, 1, 0xFFFFFF, 255);
         assert_eq!(c.buf[5], 0xFFFFFF);
+    }
+
+    /// How many pixels of `c` are lit.
+    fn painted(canvas: &Canvas, c: u32) -> usize {
+        canvas.buf.iter().filter(|p| **p == c).count()
+    }
+
+    /// ★ A filled square covers its area — not its area plus a fringe, and not
+    /// one row short. Off-by-one at an edge is invisible on one shape and
+    /// obvious the moment two are laid side by side, as a seam of background
+    /// between them.
+    #[test]
+    fn a_filled_square_covers_its_area() {
+        let mut c = Canvas::new(40, 40);
+        c.clear(0);
+        c.fill_poly(&[(10, 10), (20, 10), (20, 20), (10, 20)], 0xFFFFFF);
+        // Eleven pixels across, ten rows: the last row is the one the half
+        // open rule deliberately leaves to whatever is drawn below.
+        assert_eq!(painted(&c, 0xFFFFFF), 11 * 10);
+        assert_eq!(c.buf[15 * 40 + 15], 0xFFFFFF, "the middle should be painted");
+        assert_eq!(c.buf[5 * 40 + 5], 0, "and the outside should not");
+    }
+
+    /// ★ Even-odd gives holes for free. An outer loop and an inner one, and
+    /// the middle is crossed twice on its way out, so it stays empty — which
+    /// is how a letter O gets its hole with no code that knows what a hole is.
+    #[test]
+    fn a_ring_keeps_its_hole() {
+        let mut c = Canvas::new(60, 60);
+        c.clear(0);
+        // Outer square, then back along an inner one, joined into a single
+        // list of corners.
+        c.fill_poly(
+            &[(10, 10), (50, 10), (50, 50), (10, 50), (10, 10), (20, 20), (20, 40), (40, 40), (40, 20), (20, 20)],
+            0xFFFFFF,
+        );
+        assert_eq!(c.buf[30 * 60 + 30], 0, "the hole should still be a hole");
+        assert_eq!(c.buf[15 * 60 + 30], 0xFFFFFF, "and the ring itself should be solid");
+    }
+
+    /// ★ The half open rule, which is the whole reason for it. A row passing
+    /// exactly through a corner shared by two edges must count it ONCE. Count
+    /// it twice and the parity flips twice, the row drops out, and you get
+    /// thin bright lines scattered across a shape that is otherwise solid.
+    #[test]
+    fn a_row_through_a_shared_corner_does_not_drop_out() {
+        let mut c = Canvas::new(40, 40);
+        c.clear(0);
+        // A diamond: rows 10 and 30 pass exactly through the side corners.
+        c.fill_poly(&[(20, 5), (35, 20), (20, 35), (5, 20)], 0xFFFFFF);
+        for y in 6..34 {
+            let row = (0..40).filter(|x| c.buf[y * 40 + x] == 0xFFFFFF).count();
+            assert!(row > 0, "row {y} came out empty");
+        }
+    }
+
+    /// A horizontal edge lies ALONG a row rather than crossing it, so it must
+    /// not be counted — counting it toggles inside-ness for the edge's whole
+    /// width and the fill inverts from there on.
+    #[test]
+    fn a_horizontal_edge_does_not_invert_the_row() {
+        let mut c = Canvas::new(40, 40);
+        c.clear(0);
+        // A shape with a long flat top and a flat bottom.
+        c.fill_poly(&[(5, 10), (35, 10), (30, 25), (10, 25)], 0xFFFFFF);
+        assert_eq!(c.buf[18 * 40 + 20], 0xFFFFFF, "inside");
+        assert_eq!(c.buf[18 * 40 + 2], 0, "outside, to the left");
+        assert_eq!(c.buf[30 * 40 + 20], 0, "outside, below");
+    }
+
+    /// ★ What is painted and what a click lands in must be the same set.
+    /// Both are the even-odd rule, so they agree by construction rather than
+    /// by luck — and if they ever stop agreeing, picking things up in the
+    /// editor starts missing near the edges in a way nobody can reproduce.
+    #[test]
+    fn the_paint_agrees_with_what_a_click_would_hit() {
+        use crate::{Cx, Shape, View};
+        let corners =
+            [Cx::new(-2.0, -1.0), Cx::new(2.0, -1.5), Cx::new(1.5, 2.0), Cx::new(0.0, 0.5), Cx::new(-1.5, 2.0)];
+        let shape = Shape::polygon(corners.to_vec());
+        let v = View::centred(80, 80, 15.0);
+
+        let mut c = Canvas::new(80, 80);
+        c.clear(0);
+        v.poly(&mut c, &corners, 0xFFFFFF);
+
+        let (lo, hi) = (Cx::new(-4.0, -4.0), Cx::new(4.0, 4.0));
+        let mut checked = 0;
+        for iy in 0..80 {
+            for ix in 0..80 {
+                let here = v.to_world(ix as f64 + 0.5, iy as f64 + 0.5);
+                // Skip the boundary, where a half pixel either way is a fair
+                // disagreement and says nothing about the rule.
+                if shape.distance(here, lo, hi, 80) < 2.0 / 15.0 {
+                    continue;
+                }
+                let painted = c.buf[iy * 80 + ix] == 0xFFFFFF;
+                assert_eq!(painted, shape.contains(here, lo, hi, 80), "they disagree at pixel ({ix}, {iy})");
+                checked += 1;
+            }
+        }
+        assert!(checked > 3_000, "the test should have looked at most of the canvas, not {checked} pixels");
+    }
+
+    /// Two points are not a polygon, and asking to fill one must be nothing
+    /// rather than a panic — a stroke can easily be one click long.
+    #[test]
+    fn too_few_corners_is_nothing_rather_than_a_panic() {
+        let mut c = Canvas::new(20, 20);
+        c.clear(0);
+        c.fill_poly(&[], 0xFFFFFF);
+        c.fill_poly(&[(1, 1)], 0xFFFFFF);
+        c.fill_poly(&[(1, 1), (10, 10)], 0xFFFFFF);
+        assert_eq!(painted(&c, 0xFFFFFF), 0);
+    }
+
+    /// ★ A shape mostly off the edge is clipped, not wrapped and not a panic.
+    /// Panning is the normal state of the editor, so most shapes are partly
+    /// outside most of the time.
+    #[test]
+    fn a_shape_off_the_edge_is_clipped_rather_than_wrapped() {
+        let mut c = Canvas::new(30, 30);
+        c.clear(0);
+        c.fill_poly(&[(-100, -100), (20, -100), (20, 15), (-100, 15)], 0xFFFFFF);
+        assert_eq!(c.buf[5 * 30 + 5], 0xFFFFFF, "the part on screen should be painted");
+        assert_eq!(c.buf[25 * 30 + 25], 0, "and nothing should have wrapped round");
+
+        // Entirely off, in every direction.
+        for far in [(-500, -500), (500, -500), (500, 500), (-500, 500)] {
+            c.fill_poly(&[far, (far.0 + 50, far.1), (far.0 + 50, far.1 + 50)], 0xFF0000);
+        }
+        assert_eq!(painted(&c, 0xFF0000), 0);
     }
 }
