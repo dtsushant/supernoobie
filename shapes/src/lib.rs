@@ -56,6 +56,7 @@
 //! | [`terrain`] | things standing on the ground, and what knocks them down |
 //! | [`troupe`] | a group that is itself one of the things it groups |
 //! | [`wave`] | `a sin(kx + φ)`, and what happens when you add them |
+//! | [`wind`] | force as `v²`, the lean it causes, and gusts crossing the sky |
 
 pub mod bough;
 pub mod count;
@@ -70,6 +71,7 @@ pub mod recipe;
 pub mod terrain;
 pub mod troupe;
 pub mod wave;
+pub mod wind;
 
 pub use fourier::Series;
 pub use cyclone::Cyclone;
@@ -79,6 +81,7 @@ pub use terrain::{Field, Tree};
 pub use troupe::{Actor, Troupe};
 pub use recipe::{Recipe, Step, STEP_COLOURS};
 pub use wave::Wave;
+pub use wind::Wind;
 
 // Placing used to live here, as the traits `Place` and `Draw`. It does not any
 // more: `Shape::at`, `Shape::sized`, `Frame::place` and `Recipe::at` are
