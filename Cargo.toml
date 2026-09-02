@@ -14,7 +14,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net"]
 minifb = { version = "0.28", optional = true }
 
 [workspace]
-members = ["plotkit", "shapes", "studio"]
+members = ["physics", "plotkit", "shapes", "studio"]
 
 [features]
 # live browser console, rendered server-side

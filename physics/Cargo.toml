@@ -1,0 +1,9 @@
+[package]
+name = "physics"
+version = "0.1.0"
+edition = "2021"
+description = "How things move: oscillators that settle, and bodies that fall. The mathematics, with the story of where it came from."
+
+[dependencies]
+# Geometry only. No window, no shapes — physics should be testable in the dark.
+plotkit = { path = "../plotkit" }

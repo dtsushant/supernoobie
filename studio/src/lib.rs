@@ -95,6 +95,7 @@ pub mod prelude {
     pub use crate::tape::Tape;
     pub use crate::{Graph, Keys, Sketch};
     pub use plotkit::{plot, Anchor, Canvas, Cx, Frame, Shape, View};
+    pub use physics::{fall, oscillator, Fall, Oscillator};
     pub use shapes::{bough, count, cyclone, digit, face, fourier, glyph, grab, motion, terrain, troupe, wave, wind};
     pub use shapes::{Actor, Cyclone, Disc, Field, Motion, Pose, Recipe, Series, Tree, Troupe, Wave, Wind};
     pub use std::f64::consts::{PI, TAU};

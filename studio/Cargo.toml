@@ -11,6 +11,7 @@ description = "An animation studio built on plotkit. Pure maths in, pictures out
 # The rendering library, used exactly as any other project would use it.
 plotkit = { path = "../plotkit" }
 shapes = { path = "../shapes" }
+physics = { path = "../physics" }
 # A window and a keyboard. Nothing else.
 minifb = "0.28"
 

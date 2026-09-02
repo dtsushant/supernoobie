@@ -290,7 +290,7 @@ cargo run -p studio --release -- --replay run.tape
 
 ---
 
-## The three crates
+## The four crates
 
 ```
   plotkit    the paper.  Cx, View, Shape, Frame, plot, pen, raster, expr, script.
@@ -300,9 +300,18 @@ cargo run -p studio --release -- --replay run.tape
              depends on plotkit only. NO window, so it can be used from a test
              or the command line.
       |
-  studio     the applications. depends on shapes + a window.
+  physics    how things MOVE, as opposed to what they look like.
+             oscillators that settle, bodies that fall. No window, so every
+             claim in it can be checked in the dark.
+      |
+  studio     the applications. depends on shapes + physics + a window.
              contains no geometry at all — only state, layout, and a loop.
 ```
+
+`physics` is separate from `shapes` on purpose: `shapes` knows what a thing
+**looks like**, `physics` knows what it **does**. Every module there states the
+formula, what it does, who worked it out and how, and what it is used for
+here — so the engineering is never a black box you are trusting.
 
 The split is load-bearing. `shapes` has no window, which is exactly why
 `cargo run -p shapes -- ghost` can draw one in a terminal.

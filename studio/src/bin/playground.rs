@@ -13,7 +13,8 @@
 //! ```text
 //!     use studio::prelude::*;                   // everything, one line
 //!
-//!     use plotkit::{Cx, Frame};                 // or name what you want
+//!     use plotkit::{Cx, Frame, Shape};          // or name what you want
+//!     use physics::{Fall, Oscillator};
 //!     use shapes::{bough, wave, Wave, Wind};
 //!     use studio::Graph;
 //! ```
@@ -65,8 +66,9 @@
 //! Left of the tree you can see the three modes on their own, and under them
 //! their sum — which is the bend the trunk is drawn with.
 
-use plotkit::{Cx, Frame};
+use plotkit::{Cx, Frame, Shape};
 use std::f64::consts::PI;
+use physics::{fall::gravity, Fall, Oscillator};
 use shapes::{bough, wave, Wave, Wind};
 use shapes::digit::glyph;
 use shapes::face::smiley;
@@ -75,6 +77,7 @@ use studio::Graph;
 const TREE: u32 = 0x8FBF6A;
 const MODE: u32 = 0x4A6B56;
 const GUST: u32 = 0x7FA6C4;
+const BALL: u32 = 0xE0A44A;
 
 /// A colour dimmed toward the background, for fading a gust in and out.
 fn fade(c: u32, amount: f64) -> u32 {
@@ -88,8 +91,16 @@ const STIFFNESS: f64 = 1.4;
 
 struct Air {
     t: f64,
+    /// The clock last frame, so the oscillator can be stepped by a real `dt`.
+    was: f64,
     /// What you have asked for with the arrow keys.
     wind: f64,
+    /// The tree's answer to the wind: a damped second-order system, so it
+    /// overshoots, wobbles and SETTLES rather than snapping to the new angle.
+    /// This is the Laplace part — the poles decide how it gets there.
+    tree: Oscillator,
+    /// Gravity, for the ball.
+    g: f64,
 }
 
 impl Air {
@@ -97,6 +108,21 @@ impl Air {
     ///
     /// Real wind is never steady, and a steady one leans the tree to an angle
     /// and leaves it there, which shows nothing.
+        /// Bring the tree up to date.
+    ///
+    /// The wind sets a target lean — the angle where the two moments balance.
+    /// The oscillator is what actually gets there, and `rest_under` says a
+    /// push of `f` settles at `f/ω²`, so pushing with `ω²·target` settles at
+    /// the target. Take the wind away and it swings back and settles rather
+    /// than snapping upright.
+    fn advance(&mut self, t: f64) {
+        let dt = (t - self.was).clamp(0.0, 1.0 / 20.0);
+        (self.was, self.t) = (t, t);
+        let target = self.blowing().lean(STIFFNESS);
+        let stiff = self.tree.omega * self.tree.omega;
+        self.tree.step(dt, stiff * target);
+    }
+
     fn blowing(&self) -> Wind {
         let gust = 1.0 + 0.35 * (self.t * 0.9).sin() + 0.18 * (self.t * 2.3).sin();
         Wind::new(self.wind * gust)
@@ -106,11 +132,22 @@ impl Air {
 fn main() {
     Graph::new("playground")
         .scale(44.0)
-        .with(Air { t: 0.0, wind: 2.2 })
-        .each_frame(|a, t| a.t = t)
+        .with(Air {
+            t: 0.0,
+            was: 0.0,
+            wind: 2.2,
+            // Lightly damped: a tree wobbles a few times before it stops.
+            tree: Oscillator::new(2.6, 0.22),
+            g: gravity::EARTH,
+        })
+        .each_frame(Air::advance)
         .on_hold('>', |a| a.wind = (a.wind + 0.06).min(30.0))
         .on_hold('<', |a| a.wind = (a.wind - 0.06).max(-30.0))
         .on('0', |a| a.wind = 0.0)
+        .on_hold('u', |a| a.g = (a.g + 0.12).min(60.0))
+        .on_hold('j', |a| a.g = (a.g - 0.12).max(0.0))
+        .on('m', |a| a.g = gravity::MOON)
+        .on('e', |a| a.g = gravity::EARTH)
         .run(scene);
 }
 
@@ -160,8 +197,11 @@ fn scene(a: &Air) -> Frame {
     // Upright in calm air, leaning by however far the wind wins the argument.
     // `lean` is the deflection, so it composes with whatever direction the
     // trunk grows in — turn `upright` and the whole thing tilts with it.
+    // Not the static balance: where the OSCILLATOR has got to on its way
+    // there. That is the difference between a tree that snaps to an angle and
+    // one that swings past it and settles back.
     let upright = PI / 2.0;
-    let angle = upright - w.lean(STIFFNESS);
+    let angle = upright - a.tree.x;
     for (level, boughs) in
         bough::tree(Cx::new(1.5, -8.4), angle, 2.3, 6, 0.5, w.shake(0.06), t).into_iter().enumerate()
     {
@@ -197,7 +237,43 @@ fn scene(a: &Air) -> Frame {
         GUST,
         2,
     );
-    f.pin(plotkit::Anchor::TopRight, -14.0, 48.0, "left / right for wind    0 for calm", 0x46525E, 2);
+    f.pin(
+        plotkit::Anchor::TopRight,
+        -14.0,
+        48.0,
+        format!(
+            "zeta {:.2}  poles {:+.2}{:+.2}i  settles in {:.1}s",
+            a.tree.zeta,
+            a.tree.poles().0.re,
+            a.tree.poles().0.im,
+            a.tree.settling_time()
+        ),
+        0x9B7BD4,
+        2,
+    );
+
+    // --- a ball, with the gravity dial -------------------------------------
+    // Galileo: distance goes as the SQUARE of the time, and mass does not come
+    // into it. With air it stops speeding up and approaches a terminal
+    // velocity -- the same e^(-t/tau) as the tree settling above.
+    let air = Fall::in_air(a.g.max(0.01), 1.1);
+    let from = Cx::new(-8.4, 8.2);
+    let landing = air.hits(from, 0.0, -8.4).unwrap_or(6.0);
+    let phase = t % (landing + 0.9);
+    let ball = air.at(from, 0.0, phase.min(landing));
+
+    f.add(air.path(from, 0.0, phase.min(landing))).color(0x3E4A55).width(1);
+    f.add(Shape::circle(ball, 0.22)).color(BALL).width(2);
+    f.pin(
+        plotkit::Anchor::BottomLeft,
+        14.0,
+        -54.0,
+        format!("g {:.2}   falls in {:.1}s   terminal {:.1}/s   (U/J, M moon, E earth)", a.g, landing, air.terminal_velocity()),
+        BALL,
+        2,
+    );
+    f.pin(plotkit::Anchor::BottomLeft, 14.0, -74.0, "s = 1/2 g t^2 -- Galileo. Mass does not come into it.", BALL, 2);
+
     f
 }
 
@@ -209,7 +285,7 @@ mod tests {
 
     #[test]
     fn the_scene_draws_something_that_moves() {
-        let air = |t: f64| Air { t, wind: 2.2 };
+        let air = |t: f64| Air { t, was: t, wind: 2.2, tree: Oscillator::new(2.6, 0.22), g: gravity::EARTH };
         assert!(!scene(&air(0.0)).is_empty());
         let v = View::centred(400, 400, 20.0);
         let ink = |t: f64| {
@@ -225,7 +301,11 @@ mod tests {
     /// flat — the saturation comes from the geometry, not from a clamp.
     #[test]
     fn the_wind_lays_the_tree_over_but_never_past_flat() {
-        let angle = |wind: f64| Air { t: 0.0, wind }.blowing().trunk_angle(STIFFNESS);
+        let angle = |wind: f64| {
+            Air { t: 0.0, was: 0.0, wind, tree: Oscillator::new(2.6, 0.22), g: gravity::EARTH }
+                .blowing()
+                .trunk_angle(STIFFNESS)
+        };
         assert!((angle(0.0) - PI / 2.0).abs() < 1e-9, "calm leaves it upright");
         assert!(angle(3.0) < angle(1.0), "more wind, further over");
         assert!(angle(300.0) > 0.0, "but never past flat");
@@ -235,9 +315,11 @@ mod tests {
     /// A gust is drawn only when there is wind to carry it.
     #[test]
     fn calm_air_has_no_gusts() {
-        assert!(Air { t: 3.0, wind: 0.0 }.blowing().gusts(10, Cx::ZERO, Cx::new(1.0, 1.0), 3.0).is_empty());
+        let calm = Air { t: 3.0, was: 3.0, wind: 0.0, tree: Oscillator::new(2.6, 0.22), g: gravity::EARTH };
+        assert!(calm.blowing().gusts(10, Cx::ZERO, Cx::new(1.0, 1.0), 3.0).is_empty());
     }
 }
+
 
 
 
