@@ -35,6 +35,23 @@
 //! chosen without a modifier key — which matters with a pen, where there is
 //! no second button.
 //!
+//! ## Keyframes: at zero you edit the shape, after zero you edit the animation
+//!
+//! ```text
+//!     clock at 0      dragging moves the shape itself
+//!     clock past 0    dragging leaves a KEY at that moment
+//! ```
+//!
+//! One rule instead of a record button whose state everybody forgets. Wind the
+//! clock to two seconds with `>|`, drag the figure where it should be then,
+//! and that is an animation. The in-between is worked out — turning the short
+//! way, and taking size in ratios, which is why a half turn does not collapse
+//! the shape through nothing on its way round.
+//!
+//! `|<` and `>|` step between the moments you set, `key` leaves one where the
+//! shape stands, and the other moments are drawn faintly underneath so a
+//! movement can be seen rather than remembered.
+//!
 //! ## Making something move
 //!
 //! ```text
@@ -57,7 +74,8 @@
 //! ```text
 //!     1 2 3        nib: quill, round, broad        D E P   draw, rub, pick
 //!     [ ]          thinner / thicker               SPACE   play or stop
-//!     , .          the broad nib's angle           B       back to the start
+//!     ; '          the broad nib's angle           B       back to the start
+//!     , .          step between keys                K L     leave / remove a key
 //!     - =          more / less spring              G H     group, split up
 //!                                                  N       do nothing (clear the act)
 //!     T            taper on and off                U R     undo, redo
@@ -193,6 +211,25 @@ impl Studio {
                     "choose a shape first: press pick, then tap one".into()
                 };
             }
+            Cmd::Key => {
+                self.say = if self.board.key() {
+                    format!("key at {:.2}s -- drag it to where it should be then", self.board.clock)
+                } else {
+                    "tap a shape first".into()
+                };
+            }
+            Cmd::Unkey => {
+                self.say = if self.board.unkey() { "key removed".into() } else { "no key at this moment".into() };
+            }
+            Cmd::Step(forwards) => {
+                self.say = if self.board.next_key(forwards) {
+                    format!("at {:.2}s", self.board.clock)
+                } else if forwards {
+                    "no key after this one".into()
+                } else {
+                    "no key before this one".into()
+                };
+            }
             Cmd::Group => {
                 self.say = if self.board.group() {
                     "one figure now -- tap any part to take it all".into()
@@ -277,12 +314,12 @@ fn main() {
         .on('3', |s| s.set_nib(2))
         .on_hold('[', |s| s.resize(0.97))
         .on_hold(']', |s| s.resize(1.03))
-        .on_hold(',', |s| {
+        .on_hold(';', |s| {
             if let Nib::Broad { width, angle } = s.board.nib {
                 s.board.nib = Nib::Broad { width, angle: angle - 0.03 };
             }
         })
-        .on_hold('.', |s| {
+        .on_hold('\'', |s| {
             if let Nib::Broad { width, angle } = s.board.nib {
                 s.board.nib = Nib::Broad { width, angle: angle + 0.03 };
             }
@@ -303,6 +340,10 @@ fn main() {
         .on('b', |s| s.obey(Cmd::Rewind))
         .on('n', |s| s.obey(Cmd::Stop))
         .on('g', |s| s.obey(Cmd::Group))
+        .on('k', |s| s.obey(Cmd::Key))
+        .on('l', |s| s.obey(Cmd::Unkey))
+        .on(',', |s| s.obey(Cmd::Step(false)))
+        .on('.', |s| s.obey(Cmd::Step(true)))
         .on('h', |s| s.obey(Cmd::Ungroup))
         // --- the page ---------------------------------------------------------
         .on('u', |s| s.obey(Cmd::Undo))
@@ -316,6 +357,12 @@ fn main() {
 
 fn page(s: &Studio) -> Frame {
     let mut f = s.board.frame();
+
+    // Onion skin: the other moments this thing is keyed at, drawn faintly
+    // underneath. Nearly free -- a frame is the same drawing at another time.
+    for ghost in s.board.ghosts() {
+        f.add(ghost).color(0x2A3542).width(1);
+    }
 
     // What is chosen, so the action buttons have something visible to act on.
     for ring in s.board.selection() {
@@ -355,6 +402,19 @@ fn page(s: &Studio) -> Frame {
         14.0,
         format!("{}   {}   {}", tool_name(s), s.nib_name(), doing),
         s.board.colour,
+        2,
+    );
+    let keys = s.board.keys_here();
+    f.pin(
+        Anchor::TopLeft,
+        (WIDTH + 14) as f64,
+        50.0,
+        if s.board.clock <= 0.0 {
+            "at 0s: dragging moves the shape itself".to_string()
+        } else {
+            format!("at {:.2}s: dragging leaves a key here   ({keys} key(s))", s.board.clock)
+        },
+        if s.board.on_a_key() { 0xE0A44A } else { 0x6B7987 },
         2,
     );
     f.pin(

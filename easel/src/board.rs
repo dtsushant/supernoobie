@@ -38,6 +38,26 @@
 //! — and shift already means *"talk to the graph"* everywhere in this
 //! repository.
 //!
+//! ## At zero you edit the shape; after zero you edit the animation
+//!
+//! One rule, and it removes a mode switch that every animation program has and
+//! everybody forgets the state of.
+//!
+//! ```text
+//!     clock at 0      dragging moves the shape itself
+//!     clock past 0    dragging leaves a KEY at that moment
+//! ```
+//!
+//! The clock is already on screen and already the thing you were thinking
+//! about, so it says what a drag means without a separate switch to hunt for.
+//! Wind to two seconds, drag the figure where it should be then, and you have
+//! made an animation.
+//!
+//! The first key you make also plants one at zero, holding wherever the shape
+//! already was. Without it a single key would apply at every moment — one key
+//! is one pose for all time — and the shape would jump to its new place the
+//! instant the drawing opened.
+//!
 //! ## Decide on the press
 //!
 //! What a drag *means* is settled the instant the pointer goes down and is not
@@ -72,6 +92,8 @@ use crate::history::History;
 use crate::ink::Ink;
 use crate::mark::Mark;
 use crate::sheet::Sheet;
+use crate::track::Ease;
+use shapes::Pose;
 
 /// What a drag means.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -190,7 +212,7 @@ impl Board {
                 self.ink = Some(ink);
             }
             Tool::Pick => {
-                if let Some(k) = self.sheet.at(at, self.touch) {
+                if let Some(k) = self.sheet.at(at, self.touch, self.clock) {
                     // Remembered on the press, so the whole drag is one step
                     // back rather than sixty. Choosing is left to the release,
                     // where a tap can be told from a drag.
@@ -228,9 +250,22 @@ impl Board {
                     // reached past a selection to grab something else.
                     let moving: Vec<usize> =
                         if self.selected.contains(&k) { self.selected.clone() } else { vec![k] };
+                    let by = at - was;
+                    let when = self.clock;
                     for j in moving {
-                        if let Some(m) = self.sheet.marks.get_mut(j) {
-                            *m = m.shifted(at - was);
+                        let Some(m) = self.sheet.marks.get_mut(j) else { continue };
+                        if when <= 0.0 {
+                            *m = m.shifted(by);
+                        } else {
+                            // A key at zero first, holding wherever it already
+                            // was. Without it one key would mean one pose for
+                            // all time, and the shape would jump to its new
+                            // place the instant the drawing opened.
+                            if m.track.is_empty() {
+                                m.track.set(0.0, m.act.at(0.0), Ease::Smooth);
+                            }
+                            let now = m.pose_at(when);
+                            m.track.set(when, Pose::new(now.a, now.b + by), Ease::Smooth);
                         }
                     }
                     self.holding = Some((k, at));
@@ -244,6 +279,13 @@ impl Board {
     }
 
     fn release(&mut self, at: Cx) {
+        // The release carries a position like any other frame, and it has to
+        // be acted on: a hand still moving when it lifts would otherwise lose
+        // its last step, and the mark would stop a little short of where it
+        // was let go. Rarely visible -- a window reports every frame, so the
+        // lost step is one frame long -- but wrong, and wrong in the same
+        // direction every time.
+        self.drag(at);
         let tapped = !self.wandered;
         if let Some(ink) = self.ink.take() {
             // A tap makes no mark anyway -- `Ink::lift` refuses anything under
@@ -266,7 +308,7 @@ impl Board {
     /// A tap: choose what is under it, or let go of it if it was already
     /// chosen. Nothing under it means choose nothing.
     fn tap(&mut self, at: Cx) {
-        let Some(k) = self.sheet.at(at, self.touch) else {
+        let Some(k) = self.sheet.at(at, self.touch, self.clock) else {
             self.selected.clear();
             return;
         };
@@ -294,7 +336,7 @@ impl Board {
 
     /// Take out whatever is under the pointer.
     fn rub(&mut self, at: Cx) {
-        if let Some(k) = self.sheet.at(at, self.touch) {
+        if let Some(k) = self.sheet.at(at, self.touch, self.clock) {
             self.sheet.marks.remove(k);
             // Everything above it has just shifted down one. A selection left
             // pointing at an index rather than at a mark would silently start
@@ -325,6 +367,7 @@ impl Board {
                 // hand.
                 closed: false,
                 act: crate::Act::still(),
+                track: crate::Track::new(),
                 group: 0,
             }
         })
@@ -374,9 +417,12 @@ impl Board {
         self.to_each(|m| m.act.steps.push(crate::action::Step { action, seconds: seconds.unwrap_or(f64::INFINITY) }))
     }
 
-    /// Take away everything the chosen marks do.
+    /// Take away everything the chosen marks do — verbs and keys alike.
     pub fn stop_doing(&mut self) -> bool {
-        self.to_each(|m| m.act = Act::still())
+        self.to_each(|m| {
+            m.act = Act::still();
+            m.track = crate::Track::new();
+        })
     }
 
     /// Whether the chosen marks start again at the end.
@@ -430,9 +476,95 @@ impl Board {
         seen.len()
     }
 
+    // ---- keyframes ---------------------------------------------------------
+
+    /// Leave a key at the clock for every chosen mark, holding where it is now.
+    ///
+    /// For pausing a movement — two keys the same makes a shape wait — and for
+    /// giving yourself a moment to drag from.
+    pub fn key(&mut self) -> bool {
+        let when = self.clock;
+        self.to_each(|m| {
+            if m.track.is_empty() {
+                m.track.set(0.0, m.act.at(0.0), Ease::Smooth);
+            }
+            let now = m.pose_at(when);
+            m.track.set(when, now, Ease::Smooth);
+        })
+    }
+
+    /// Take away the key at the clock, if there is one.
+    pub fn unkey(&mut self) -> bool {
+        let when = self.clock;
+        let any = self.selected.iter().any(|k| {
+            self.sheet.marks.get(*k).is_some_and(|m| m.track.key_at(when).is_some())
+        });
+        if !any {
+            return false;
+        }
+        self.to_each(|m| {
+            m.track.clear_at(when);
+        })
+    }
+
+    /// Step the clock to the next key on the chosen marks, so you can move
+    /// between the moments you set rather than hunting for them.
+    pub fn next_key(&mut self, forwards: bool) -> bool {
+        let now = self.clock;
+        let mut best: Option<f64> = None;
+        for k in &self.selected {
+            let Some(m) = self.sheet.marks.get(*k) else { continue };
+            for at in m.track.moments() {
+                let ahead = if forwards { at > now + crate::track::SAME } else { at < now - crate::track::SAME };
+                if ahead && best.is_none_or(|b| if forwards { at < b } else { at > b }) {
+                    best = Some(at);
+                }
+            }
+        }
+        match best {
+            Some(at) => {
+                self.clock = at;
+                self.playing = false;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Is there a key at the clock on anything chosen?
+    pub fn on_a_key(&self) -> bool {
+        self.selected
+            .iter()
+            .any(|k| self.sheet.marks.get(*k).is_some_and(|m| m.track.key_at(self.clock).is_some()))
+    }
+
+    /// How many keys the first chosen mark has.
+    pub fn keys_here(&self) -> usize {
+        self.chosen().map_or(0, |m| m.track.len())
+    }
+
+    /// **Onion skin**: the chosen marks at each of the moments they are keyed
+    /// at, so you can see where a movement came from and where it is going.
+    ///
+    /// Nearly free, because a frame is only the same drawing at another time.
+    pub fn ghosts(&self) -> Vec<Shape> {
+        self.selected
+            .iter()
+            .filter_map(|k| self.sheet.marks.get(*k))
+            .flat_map(|m| {
+                m.track
+                    .moments()
+                    .into_iter()
+                    .filter(|at| (at - self.clock).abs() > crate::track::SAME)
+                    .map(|at| m.at(at))
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
     /// Does anything on the page move at all?
     pub fn has_animation(&self) -> bool {
-        self.sheet.marks.iter().any(|m| !m.act.steps.is_empty())
+        self.sheet.marks.iter().any(Mark::moves)
     }
 
     pub fn undo(&mut self) -> bool {
@@ -527,7 +659,7 @@ impl Board {
             .iter()
             .filter_map(|k| {
                 let m = self.sheet.marks.get(*k)?;
-                let pose = m.act.at(self.clock);
+                let pose = m.pose_at(self.clock);
                 let here = m.anchor();
                 let (lo, hi) = m.bounds()?;
                 let pad = 0.08 + (hi - lo).abs() * 0.03;
@@ -1056,6 +1188,162 @@ mod tests {
             let there = b.sheet.marks[0].act.at(t);
             let here = opened.sheet.marks[0].act.at(t);
             assert!((there.b - here.b).abs() < 1e-3, "at t={t} it moved differently");
+        }
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// ★ **At zero you edit the shape; after zero you edit the animation.** One
+    /// rule instead of a record button whose state everybody forgets.
+    #[test]
+    fn dragging_at_zero_moves_the_shape_and_dragging_later_makes_a_key() {
+        let mut b = Board::new();
+        draw(&mut b, &ring(1.0, Cx::ZERO, 60));
+        let drawn = b.sheet.marks[0].pts.clone();
+        tap(&mut b, Cx::new(1.0, 0.0));
+        b.tool = Tool::Pick;
+
+        // At zero: the geometry itself moves.
+        b.pointer(Cx::new(1.0, 0.0), true);
+        b.pointer(Cx::new(2.0, 0.0), true);
+        b.pointer(Cx::new(3.0, 0.0), false);
+        assert!(b.sheet.marks[0].track.is_empty(), "no keys should have been made");
+        assert!((b.sheet.marks[0].pts[0] - drawn[0] - Cx::new(2.0, 0.0)).abs() < 1e-9);
+
+        // Past zero: the geometry stays put and a key appears.
+        let now = b.sheet.marks[0].pts.clone();
+        b.clock = 2.0;
+        b.pointer(Cx::new(3.0, 0.0), true);
+        b.pointer(Cx::new(3.0, 1.0), true);
+        b.pointer(Cx::new(3.0, 2.0), false);
+        assert_eq!(b.sheet.marks[0].pts, now, "the shape itself must not have moved");
+        assert_eq!(b.sheet.marks[0].track.len(), 2, "one key here, and one holding at zero");
+    }
+
+    /// ★ The first key you make plants one at zero. Without it a single key
+    /// would apply at every moment — one key is one pose for all time — and
+    /// the shape would jump to its new place the instant the drawing opened.
+    #[test]
+    fn the_first_key_leaves_the_shape_where_it_was_at_the_start() {
+        let mut b = Board::new();
+        draw(&mut b, &ring(1.0, Cx::ZERO, 60));
+        tap(&mut b, Cx::new(1.0, 0.0));
+        b.tool = Tool::Pick;
+
+        b.clock = 1.5;
+        b.pointer(Cx::new(1.0, 0.0), true);
+        b.pointer(Cx::new(1.0, 2.0), true);
+        b.pointer(Cx::new(1.0, 4.0), false);
+
+        let m = &b.sheet.marks[0];
+        assert!(m.pose_at(0.0).b.abs() < 1e-9, "at the start it should be where it was drawn");
+        assert!((m.pose_at(1.5).b.im - 4.0).abs() < 0.01, "and at 1.5 where it was put: {:?}", m.pose_at(1.5).b);
+    }
+
+    /// Keys win over verbs, and they are not composed. A shape pushed by two
+    /// hands at once cannot be edited, because undoing what you see means
+    /// guessing which half caused it.
+    #[test]
+    fn keys_win_over_verbs_rather_than_adding_to_them() {
+        let mut b = Board::new();
+        draw(&mut b, &ring(1.0, Cx::ZERO, 60));
+        tap(&mut b, Cx::new(1.0, 0.0));
+        b.give(Action::Drift(Cx::new(5.0, 0.0)), Some(4.0));
+
+        let m = &mut b.sheet.marks[0];
+        m.track.set(0.0, Pose::STILL, Ease::Linear);
+        m.track.set(2.0, Pose::new(Cx::ONE, Cx::new(0.0, 1.0)), Ease::Linear);
+        // Halfway: the key says half a unit up and nothing sideways. The verb
+        // would have said two and a half units along.
+        let half = b.sheet.marks[0].pose_at(1.0).b;
+        assert!(half.re.abs() < 1e-9, "the drift must not still be adding: {half:?}");
+        assert!((half.im - 0.5).abs() < 1e-9);
+    }
+
+    /// A key can be dropped and taken away without dragging anything, for
+    /// making a shape wait where it is.
+    #[test]
+    fn a_key_can_be_left_and_removed_where_it_stands() {
+        let mut b = Board::new();
+        draw(&mut b, &ring(1.0, Cx::ZERO, 60));
+        tap(&mut b, Cx::new(1.0, 0.0));
+
+        b.clock = 1.0;
+        assert!(b.key());
+        assert!(b.on_a_key());
+        assert_eq!(b.keys_here(), 2, "and one at the start");
+
+        assert!(b.unkey());
+        assert!(!b.on_a_key());
+        assert!(!b.unkey(), "twice is nothing");
+    }
+
+    /// ★ Stepping between keys, so the moments you set can be reached again
+    /// rather than hunted for by dragging a clock.
+    #[test]
+    fn the_clock_can_step_between_the_moments_you_set() {
+        let mut b = Board::new();
+        draw(&mut b, &ring(1.0, Cx::ZERO, 60));
+        tap(&mut b, Cx::new(1.0, 0.0));
+        for at in [0.0, 1.0, 2.5] {
+            b.clock = at;
+            b.key();
+        }
+
+        b.clock = 0.0;
+        assert!(b.next_key(true));
+        assert!((b.clock - 1.0).abs() < 1e-9);
+        assert!(b.next_key(true));
+        assert!((b.clock - 2.5).abs() < 1e-9);
+        assert!(!b.next_key(true), "there is nothing after the last");
+
+        assert!(b.next_key(false));
+        assert!((b.clock - 1.0).abs() < 1e-9);
+    }
+
+    /// Onion skinning: the chosen marks at each moment they are keyed at, so a
+    /// movement can be seen rather than remembered.
+    #[test]
+    fn the_other_moments_can_be_seen_faintly() {
+        let mut b = Board::new();
+        draw(&mut b, &ring(1.0, Cx::ZERO, 60));
+        tap(&mut b, Cx::new(1.0, 0.0));
+        for at in [0.0, 1.0, 2.0] {
+            b.clock = at;
+            b.key();
+        }
+        b.clock = 1.0;
+        // The one you are on is not a ghost of itself.
+        assert_eq!(b.ghosts().len(), 2);
+
+        b.selected.clear();
+        assert!(b.ghosts().is_empty(), "nothing chosen, nothing to compare");
+    }
+
+    /// ★ And an animation made of keys survives the file and runs the same.
+    #[test]
+    fn an_animation_made_of_keys_reopens_and_runs_the_same() {
+        let mut b = Board::new();
+        draw(&mut b, &ring(1.0, Cx::ZERO, 60));
+        tap(&mut b, Cx::new(1.0, 0.0));
+        b.tool = Tool::Pick;
+        for (when, to) in [(1.0, Cx::new(2.0, 1.0)), (2.0, Cx::new(4.0, -1.0))] {
+            b.clock = when;
+            b.pointer(Cx::new(1.0, 0.0), true);
+            b.pointer(Cx::new(1.0, 0.0) + to.scale(0.5), true);
+            b.pointer(Cx::new(1.0, 0.0) + to, false);
+        }
+
+        let path = std::env::temp_dir().join("easel-keys.easel");
+        let path = path.to_str().expect("a path");
+        b.save(path).expect("saved");
+        let mut opened = Board::new();
+        opened.load(path).expect("loaded");
+        assert!(opened.has_animation());
+        for t in [0.0, 0.4, 1.0, 1.7, 2.0, 3.0] {
+            let there = b.sheet.marks[0].pose_at(t);
+            let here = opened.sheet.marks[0].pose_at(t);
+            assert!((there.b - here.b).abs() < 1e-3, "at t={t} it moved differently");
+            assert!((there.a - here.a).abs() < 1e-3);
         }
         let _ = std::fs::remove_file(path);
     }

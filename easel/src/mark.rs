@@ -46,6 +46,7 @@ use shapes::fourier::Series;
 use shapes::{Nib, Pose, Stroke};
 
 use crate::action::Act;
+use crate::track::Track;
 
 /// One mark on the page.
 #[derive(Clone, Debug, PartialEq)]
@@ -66,6 +67,14 @@ pub struct Mark {
     /// What it does when the clock is running. Numbers, like everything else
     /// here, so an animation is a few extra words in the file.
     pub act: Act,
+    /// Where it is at particular moments.
+    ///
+    /// **Wins over [`act`](Mark::act) when it has any keys in it.** The two are
+    /// different ways of saying the same kind of thing, and composing them
+    /// would give a shape being pushed by two hands at once — which is
+    /// impossible to reason about and impossible to edit, because undoing what
+    /// you can see means guessing which half caused it.
+    pub track: Track,
     /// Which group it belongs to. `0` is none.
     ///
     /// A number rather than a tree of parents, because a figure is a handful
@@ -79,7 +88,7 @@ pub struct Mark {
 impl Mark {
     /// A stroke as the pen made it.
     pub fn new(pts: impl Into<Vec<Cx>>, nib: Nib, colour: u32) -> Mark {
-        Mark { pts: pts.into(), nib, taper: 0.0, colour, filled: true, closed: false, act: Act::still(), group: 0 }
+        Mark { pts: pts.into(), nib, taper: 0.0, colour, filled: true, closed: false, act: Act::still(), track: Track::new(), group: 0 }
     }
 
     pub fn taper(mut self, f: f64) -> Mark {
@@ -155,9 +164,26 @@ impl Mark {
         self.shape().map(move |z| pose.apply(z - here) + here)
     }
 
+    /// Where it is `t` seconds in.
+    ///
+    /// Keys if there are any, verbs otherwise. One or the other, never both —
+    /// see [`track`](Mark::track).
+    pub fn pose_at(&self, t: f64) -> shapes::Pose {
+        if self.track.is_empty() {
+            self.act.at(t)
+        } else {
+            self.track.at(t)
+        }
+    }
+
+    /// Whether anything at all makes it move.
+    pub fn moves(&self) -> bool {
+        !self.track.is_empty() || !self.act.steps.is_empty()
+    }
+
     /// What it looks like `t` seconds in.
     pub fn at(&self, t: f64) -> Shape {
-        self.posed(self.act.at(t))
+        self.posed(self.pose_at(t))
     }
 
     /// Everything the mark covers, for hit testing and for framing the page.

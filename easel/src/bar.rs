@@ -66,6 +66,12 @@ pub enum Cmd {
     Group,
     /// Break a figure up again.
     Ungroup,
+    /// Leave a key at the clock.
+    Key,
+    /// Take the key at the clock away.
+    Unkey,
+    /// Step the clock to the next key, or the previous one.
+    Step(bool),
     Play,
     Pause,
     Rewind,
@@ -227,6 +233,16 @@ impl Bar {
         }
         y += CELL;
 
+        // --- keyframes --------------------------------------------------------
+        for (k, (name, cmd)) in
+            [("|<", Cmd::Step(false)), ("key", Cmd::Key), (">|", Cmd::Step(true))].into_iter().enumerate()
+        {
+            b.buttons.push(Button { x: PAD + k as i32 * CELL, y, w: TAP, h: ROW, label: name, swatch: None, cmd });
+        }
+        y += CELL;
+        b.buttons.push(Button { x: PAD, y, w: TAP, h: ROW, label: "unkey", swatch: None, cmd: Cmd::Unkey });
+        y += CELL;
+
         // --- gathering strokes into a figure ----------------------------------
         for (k, (name, cmd)) in
             [("group", Cmd::Group), ("split", Cmd::Ungroup), ("no act", Cmd::Stop)].into_iter().enumerate()
@@ -300,6 +316,7 @@ impl Bar {
             Cmd::Pause => !board.playing,
             Cmd::Group => board.selected.len() >= 2,
             Cmd::Ungroup => board.chosen_groups() > 0,
+            Cmd::Key | Cmd::Unkey => board.on_a_key(),
             _ => false,
         }
     }
@@ -469,7 +486,8 @@ mod tests {
         let has = |c: Cmd| bar.buttons.iter().any(|b| b.cmd == c);
         for c in [
             Cmd::Play, Cmd::Pause, Cmd::Rewind, Cmd::Undo, Cmd::Redo, Cmd::Save, Cmd::Open, Cmd::Clear,
-            Cmd::Smooth, Cmd::Stop, Cmd::Group, Cmd::Ungroup,
+            Cmd::Smooth, Cmd::Stop, Cmd::Group, Cmd::Ungroup, Cmd::Key, Cmd::Unkey,
+            Cmd::Step(true), Cmd::Step(false),
         ] {
             assert!(has(c), "{c:?} is not on the bar");
         }

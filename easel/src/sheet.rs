@@ -40,6 +40,8 @@ use std::fmt::Write as _;
 
 use crate::action::{Action, Step};
 use crate::mark::Mark;
+use crate::track::Ease;
+use shapes::Pose;
 
 /// The format's version, written as the first line.
 pub const VERSION: u32 = 1;
@@ -81,17 +83,23 @@ impl Sheet {
         })
     }
 
-    /// Which mark is at this point, if any.
+    /// Which mark is at this point, if any, **at time `t`**.
+    ///
+    /// The time matters and its absence was a real bug. An animated mark is
+    /// drawn wherever its pose puts it, while its points stay where they were
+    /// made — so hit testing the points means you cannot grab a moving thing
+    /// where you can see it, only where it was originally drawn. Which is
+    /// nowhere in particular, and invisible.
     ///
     /// **Searched from the top down**, because the mark you can see is the one
     /// drawn last, and that is the one a person means when they point at an
     /// overlap.
-    pub fn at(&self, p: Cx, tolerance: f64) -> Option<usize> {
+    pub fn at(&self, p: Cx, tolerance: f64, t: f64) -> Option<usize> {
         let lo = Cx::new(p.re - 1e4, p.im - 1e4);
         let hi = Cx::new(p.re + 1e4, p.im + 1e4);
         (0..self.marks.len()).rev().find(|k| {
             let m = &self.marks[*k];
-            let shape = m.shape();
+            let shape = m.at(t);
             // A filled mark is hit anywhere inside it; a traced one only near
             // its line, because its middle is not part of it.
             (m.filled && shape.contains(p, lo, hi, 800)) || shape.touches(p, tolerance, lo, hi, 800)
@@ -125,6 +133,21 @@ impl Sheet {
                 }
                 out.push('\n');
             }
+            if !m.track.is_empty() {
+                let _ = writeln!(out, "track {}", if m.track.looping { "loop" } else { "once" });
+                for k in &m.track.keys {
+                    let _ = writeln!(
+                        out,
+                        "key {:.4} {:.5} {:.5} {:.4} {:.4} {}",
+                        k.at,
+                        k.pose.a.re,
+                        k.pose.a.im,
+                        k.pose.b.re,
+                        k.pose.b.im,
+                        k.ease.name()
+                    );
+                }
+            }
             if !m.act.steps.is_empty() {
                 let _ = writeln!(out, "act {}", if m.act.looping { "loop" } else { "once" });
                 for step in &m.act.steps {
@@ -156,6 +179,14 @@ impl Sheet {
                 Some("mark") => match read_mark(&mut word) {
                     Some(m) => sheet.marks.push(m),
                     None => confused += 1,
+                },
+                Some("track") => match sheet.marks.last_mut() {
+                    Some(m) => m.track.looping = word.next() != Some("once"),
+                    None => confused += 1,
+                },
+                Some("key") => match (sheet.marks.last_mut(), read_key(&mut word)) {
+                    (Some(m), Some((at, pose, ease))) => m.track.set(at, pose, ease),
+                    _ => confused += 1,
                 },
                 Some("group") => match (sheet.marks.last_mut(), word.next().and_then(|w| w.parse().ok())) {
                     (Some(m), Some(g)) => m.group = g,
@@ -197,6 +228,17 @@ impl Sheet {
     pub fn load(path: &str) -> std::io::Result<(Sheet, usize)> {
         Ok(Sheet::from_text(&std::fs::read_to_string(path)?))
     }
+}
+
+/// The rest of a `key` line, after the word `key`.
+fn read_key<'a>(word: &mut impl Iterator<Item = &'a str>) -> Option<(f64, Pose, Ease)> {
+    let mut number = || word.next()?.parse::<f64>().ok();
+    let at = number()?;
+    let (are, aim, bre, bim) = (number()?, number()?, number()?, number()?);
+    // An unnamed ease is the default rather than a lost key -- an earlier
+    // version of the format might not have written one.
+    let ease = word.next().and_then(Ease::spell).unwrap_or(Ease::Smooth);
+    Some((at, Pose::new(Cx::new(are, aim), Cx::new(bre, bim)), ease))
 }
 
 /// The rest of a `do` line, after the word `do`.
@@ -286,6 +328,7 @@ mod tests {
             assert!((a.taper - b.taper).abs() < 1e-4);
             assert_eq!(a.act, b.act, "what it does must survive too");
             assert_eq!(a.group, b.group, "and which figure it belongs to");
+            assert_eq!(a.track, b.track, "and every keyframe");
             assert_eq!(a.pts.len(), b.pts.len());
             for (p, q) in a.pts.iter().zip(&b.pts) {
                 // Four decimal places is the format's promise, and at the
@@ -379,6 +422,43 @@ mod tests {
         assert_eq!(back.marks[2].group, 0, "and belonging to nothing must survive as nothing");
     }
 
+    /// ★ Keyframes are the part of a drawing that takes longest to get right,
+    /// so they had better survive the file exactly — a pose that came back a
+    /// hair different at every key would show as a wobble nobody could find.
+    #[test]
+    fn keyframes_survive_the_file_exactly() {
+        use crate::track::Ease;
+        let mut m = Mark::new(ring(12, 1.0, Cx::ZERO), Nib::Round(0.2), 0xFFFFFF);
+        m.track.set(0.0, Pose::STILL, Ease::Smooth);
+        m.track.set(1.25, Pose::new(Cx::polar(1.5, 0.9), Cx::new(3.0, -2.0)), Ease::Linear);
+        m.track.set(2.5, Pose::new(Cx::polar(0.6, -2.2), Cx::new(-1.0, 4.0)), Ease::Hold);
+        m.track.looping = false;
+        let mut s = Sheet::new();
+        s.add(m.clone());
+
+        let (back, confused) = Sheet::from_text(&s.to_text());
+        assert_eq!(confused, 0);
+        let got = &back.marks[0].track;
+        assert_eq!(got.len(), 3);
+        assert!(!got.looping, "and whether it repeats");
+        for (a, b) in got.keys.iter().zip(&m.track.keys) {
+            assert!((a.at - b.at).abs() < 1e-4);
+            assert!((a.pose.a - b.pose.a).abs() < 1e-4, "the turn moved: {:?} vs {:?}", a.pose.a, b.pose.a);
+            assert!((a.pose.b - b.pose.b).abs() < 1e-4);
+            assert_eq!(a.ease, b.ease);
+        }
+    }
+
+    /// A key with no ease named is the default, not a lost key — an earlier
+    /// version of this format might not have written one.
+    #[test]
+    fn a_key_with_no_ease_named_still_reads() {
+        let text = "easel 1\nmark round 0.3 colour FFFFFF fill open\np 0 0 1 1\nkey 1.0 1 0 2 3\n";
+        let (sheet, confused) = Sheet::from_text(text);
+        assert_eq!(confused, 0);
+        assert_eq!(sheet.marks[0].track.len(), 1);
+    }
+
     /// An empty drawing writes and reads as an empty drawing rather than as
     /// nothing at all — saving before you have drawn is an ordinary thing.
     #[test]
@@ -408,8 +488,8 @@ mod tests {
         // an annulus, and the hole in the middle is genuinely not part of the
         // mark -- which is even-odd being right, and is also why a letter O
         // cannot be picked up by its centre.
-        assert_eq!(s.at(Cx::new(2.0, 0.0), 0.1), Some(1), "the top one");
-        assert_eq!(s.at(Cx::new(0.0, 0.0), 0.05), None, "and the hole is a hole");
+        assert_eq!(s.at(Cx::new(2.0, 0.0), 0.1, 0.0), Some(1), "the top one");
+        assert_eq!(s.at(Cx::new(0.0, 0.0), 0.05, 0.0), None, "and the hole is a hole");
     }
 
     /// A filled mark is hit anywhere inside it; a traced one only near its
@@ -418,15 +498,33 @@ mod tests {
     fn a_traced_mark_is_only_its_line() {
         let mut s = Sheet::new();
         s.add(Mark::new(ring(40, 2.0, Cx::ZERO), Nib::Round(0.1), 0xFFFFFF).closed(true).outlined());
-        assert_eq!(s.at(Cx::new(0.0, 0.0), 0.05), None, "the middle is not part of an outline");
-        assert_eq!(s.at(Cx::new(2.0, 0.0), 0.15), Some(0), "but the line itself is");
+        assert_eq!(s.at(Cx::new(0.0, 0.0), 0.05, 0.0), None, "the middle is not part of an outline");
+        assert_eq!(s.at(Cx::new(2.0, 0.0), 0.15, 0.0), Some(0), "but the line itself is");
+    }
+
+    /// ★ A moving mark must be catchable **where it is**, not where it was
+    /// drawn. Without the time, grabbing an animated shape means finding an
+    /// invisible copy of it somewhere else on the page.
+    #[test]
+    fn a_moving_mark_is_caught_where_it_has_moved_to() {
+        use crate::track::Ease;
+        let mut s = Sheet::new();
+        let mut m = Mark::new(ring(40, 0.6, Cx::ZERO), Nib::Round(0.2), 0xFFFFFF).closed(true);
+        m.track.looping = false;
+        m.track.set(0.0, Pose::STILL, Ease::Linear);
+        m.track.set(1.0, Pose::new(Cx::ONE, Cx::new(5.0, 0.0)), Ease::Linear);
+        s.add(m);
+
+        assert_eq!(s.at(Cx::new(0.6, 0.0), 0.1, 0.0), Some(0), "at the start, where it was drawn");
+        assert_eq!(s.at(Cx::new(5.6, 0.0), 0.1, 1.0), Some(0), "at one second, where it now is");
+        assert_eq!(s.at(Cx::new(0.6, 0.0), 0.1, 1.0), None, "and not where it used to be");
     }
 
     /// Pointing at nothing is nothing.
     #[test]
     fn pointing_at_empty_paper_finds_nothing() {
-        assert_eq!(a_sheet().at(Cx::new(40.0, 40.0), 0.1), None);
-        assert_eq!(Sheet::new().at(Cx::ZERO, 0.1), None);
+        assert_eq!(a_sheet().at(Cx::new(40.0, 40.0), 0.1, 0.0), None);
+        assert_eq!(Sheet::new().at(Cx::ZERO, 0.1, 0.0), None);
     }
 
     /// Bounds cover every mark, so the view can be framed on the work.

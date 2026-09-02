@@ -14,6 +14,7 @@ pub mod history;
 pub mod ink;
 pub mod mark;
 pub mod sheet;
+pub mod track;
 
 pub use action::{Act, Action, Step};
 pub use bar::{Bar, Button, Cmd};
@@ -22,3 +23,4 @@ pub use history::History;
 pub use ink::Ink;
 pub use mark::Mark;
 pub use sheet::Sheet;
+pub use track::{Ease, Key, Track};
