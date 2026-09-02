@@ -713,13 +713,17 @@ impl Keys {
 
     /// The button, held down.
     pub fn down(&self) -> bool {
-        self.down
+        // False while the graph is panning. Shift-drag means "talk to the
+        // graph", and a sketch that also saw the button down would lay a
+        // stroke across the page every time you moved the paper. Exactly the
+        // rule `arrows()` already follows, for exactly the same reason.
+        self.down && !self.panning()
     }
 
     /// The button, the moment it went down — once per click, not once per
     /// frame the finger is resting on it.
     pub fn clicked(&self) -> bool {
-        self.clicked
+        self.clicked && !self.panning()
     }
 
     /// A key state built by hand, for tests and for driving a sketch with no

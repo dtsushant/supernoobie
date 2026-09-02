@@ -1,0 +1,349 @@
+//! # sheet — the drawing, and the file it lives in
+//!
+//! ## The format is text, on purpose
+//!
+//! ```text
+//!     easel 1
+//!     mark round 0.35 taper 0.25 colour E3E9EF fill open
+//!     p -4.500 3.310 -4.400 3.352 -4.300 3.401
+//!     p -4.200 3.455 -4.100 3.512
+//!     mark broad 0.42 0.785 taper 0.000 colour E585AC fill closed
+//!     p 1.000 0.000 0.951 0.309
+//! ```
+//!
+//! Not a binary blob and not a database. A drawing you can open in a text
+//! editor is a drawing you can diff, grep, fix by hand when something goes
+//! wrong, and read in six months without this program. The same reasoning as
+//! [`studio::tape`](../studio/tape/index.html), and for the same reason: the
+//! file outlives the code that wrote it.
+//!
+//! It is also why the version number is the first word. A format with no
+//! version is a format that can never change.
+//!
+//! ## Why points wrap across several `p` lines
+//!
+//! A stroke can be five hundred points and one enormous line is unreadable
+//! and awkward to diff — a single changed point rewrites the whole line. Eight
+//! points to a line keeps a change local.
+//!
+//! ## What is refused, and why nothing is refused loudly
+//!
+//! A line that cannot be understood is **skipped**, not fatal. A drawing is
+//! somebody's work: recovering nine marks out of ten beats refusing to open
+//! the file because the tenth has a bad number in it. [`Sheet::load`] reports
+//! how many lines it could not make sense of, so a caller can say so without
+//! having lost anything.
+
+use plotkit::Cx;
+use shapes::Nib;
+use std::fmt::Write as _;
+
+use crate::mark::Mark;
+
+/// The format's version, written as the first line.
+pub const VERSION: u32 = 1;
+
+/// How many points go on one `p` line.
+const PER_LINE: usize = 8;
+
+/// A drawing: marks in the order they were made, which is the order they are
+/// painted.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Sheet {
+    pub marks: Vec<Mark>,
+}
+
+impl Sheet {
+    pub fn new() -> Sheet {
+        Sheet { marks: Vec::new() }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.marks.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.marks.len()
+    }
+
+    pub fn add(&mut self, m: Mark) {
+        self.marks.push(m);
+    }
+
+    /// Everything the drawing covers, for framing the view on it.
+    pub fn bounds(&self) -> Option<(Cx, Cx)> {
+        self.marks.iter().filter_map(Mark::bounds).reduce(|(alo, ahi), (blo, bhi)| {
+            (
+                Cx::new(alo.re.min(blo.re), alo.im.min(blo.im)),
+                Cx::new(ahi.re.max(bhi.re), ahi.im.max(bhi.im)),
+            )
+        })
+    }
+
+    /// Which mark is at this point, if any.
+    ///
+    /// **Searched from the top down**, because the mark you can see is the one
+    /// drawn last, and that is the one a person means when they point at an
+    /// overlap.
+    pub fn at(&self, p: Cx, tolerance: f64) -> Option<usize> {
+        let lo = Cx::new(p.re - 1e4, p.im - 1e4);
+        let hi = Cx::new(p.re + 1e4, p.im + 1e4);
+        (0..self.marks.len()).rev().find(|k| {
+            let m = &self.marks[*k];
+            let shape = m.shape();
+            // A filled mark is hit anywhere inside it; a traced one only near
+            // its line, because its middle is not part of it.
+            (m.filled && shape.contains(p, lo, hi, 800)) || shape.touches(p, tolerance, lo, hi, 800)
+        })
+    }
+
+    /// The whole drawing as text.
+    pub fn to_text(&self) -> String {
+        let mut out = format!("easel {VERSION}\n");
+        for m in &self.marks {
+            let nib = match m.nib {
+                Nib::Round(w) => format!("round {w:.4}"),
+                Nib::Quill { slow, fast, pace } => format!("quill {slow:.4} {fast:.4} {pace:.4}"),
+                Nib::Broad { width, angle } => format!("broad {width:.4} {angle:.4}"),
+            };
+            let _ = writeln!(
+                out,
+                "mark {nib} taper {:.4} colour {:06X} {} {}",
+                m.taper,
+                m.colour & 0xFF_FFFF,
+                if m.filled { "fill" } else { "line" },
+                if m.closed { "closed" } else { "open" }
+            );
+            for chunk in m.pts.chunks(PER_LINE) {
+                out.push('p');
+                for z in chunk {
+                    let _ = write!(out, " {:.4} {:.4}", z.re, z.im);
+                }
+                out.push('\n');
+            }
+        }
+        out
+    }
+
+    /// Read a drawing back, and say how many lines made no sense.
+    ///
+    /// Never fails on content. A drawing is somebody's work, and recovering
+    /// nine marks out of ten beats refusing to open the file because the tenth
+    /// has a bad number in it.
+    pub fn from_text(text: &str) -> (Sheet, usize) {
+        let mut sheet = Sheet::new();
+        let mut confused = 0;
+
+        for line in text.lines() {
+            let mut word = line.split_whitespace();
+            match word.next() {
+                None | Some("easel") | Some("#") => {}
+                Some("mark") => match read_mark(&mut word) {
+                    Some(m) => sheet.marks.push(m),
+                    None => confused += 1,
+                },
+                Some("p") => {
+                    let Some(m) = sheet.marks.last_mut() else {
+                        // Points before any mark to hang them on.
+                        confused += 1;
+                        continue;
+                    };
+                    let numbers: Vec<f64> = word.filter_map(|w| w.parse().ok()).collect();
+                    if numbers.len() % 2 != 0 {
+                        confused += 1;
+                    }
+                    for pair in numbers.chunks_exact(2) {
+                        m.pts.push(Cx::new(pair[0], pair[1]));
+                    }
+                }
+                Some(_) => confused += 1,
+            }
+        }
+        (sheet, confused)
+    }
+
+    pub fn save(&self, path: &str) -> std::io::Result<()> {
+        std::fs::write(path, self.to_text())
+    }
+
+    /// Load a drawing. A missing file is an error; a confusing one is not.
+    pub fn load(path: &str) -> std::io::Result<(Sheet, usize)> {
+        Ok(Sheet::from_text(&std::fs::read_to_string(path)?))
+    }
+}
+
+/// The rest of a `mark` line, after the word `mark`.
+fn read_mark<'a>(word: &mut impl Iterator<Item = &'a str>) -> Option<Mark> {
+    let mut next = || word.next();
+    let number = |w: Option<&str>| w?.parse::<f64>().ok();
+
+    let nib = match next()? {
+        "round" => Nib::Round(number(next())?),
+        "quill" => Nib::Quill { slow: number(next())?, fast: number(next())?, pace: number(next())? },
+        "broad" => Nib::Broad { width: number(next())?, angle: number(next())? },
+        _ => return None,
+    };
+
+    let mut m = Mark::new(Vec::new(), nib, 0xFFFFFF);
+    // The rest is keyword-and-value, so a later version can add a field
+    // without a reader of this one falling over.
+    while let Some(key) = next() {
+        match key {
+            "taper" => m.taper = number(next())?,
+            "colour" => m.colour = u32::from_str_radix(next()?, 16).ok()?,
+            "fill" => m.filled = true,
+            "line" => m.filled = false,
+            "closed" => m.closed = true,
+            "open" => m.closed = false,
+            // Something a later version wrote. Skip its value and carry on
+            // rather than losing the whole mark.
+            _ => {
+                let _ = next();
+            }
+        }
+    }
+    Some(m)
+}
+
+// ===========================================================================
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::f64::consts::TAU;
+
+    fn ring(n: usize, r: f64, at: Cx) -> Vec<Cx> {
+        (0..n).map(|k| at + Cx::polar(r, k as f64 / n as f64 * TAU)).collect()
+    }
+
+    fn a_sheet() -> Sheet {
+        let mut s = Sheet::new();
+        s.add(Mark::new(ring(24, 2.0, Cx::ZERO), Nib::Round(0.35), 0xE3E9EF).closed(true).taper(0.25));
+        s.add(Mark::new(ring(30, 1.0, Cx::new(5.0, 1.0)), Nib::Broad { width: 0.42, angle: 0.785 }, 0xE585AC));
+        s.add(Mark::new(vec![Cx::new(-3.0, -3.0), Cx::new(3.0, -3.0)], Nib::Round(0.1), 0x4FBCD4).outlined());
+        s
+    }
+
+    /// ★ Written and read back must be the same drawing. Everything else in
+    /// this module is in service of that one sentence, and a format that
+    /// almost round-trips silently loses somebody's work.
+    #[test]
+    fn a_drawing_survives_being_written_and_read() {
+        let before = a_sheet();
+        let (after, confused) = Sheet::from_text(&before.to_text());
+        assert_eq!(confused, 0, "nothing it wrote should confuse it");
+        assert_eq!(after.len(), before.len());
+
+        for (a, b) in after.marks.iter().zip(&before.marks) {
+            assert_eq!(a.nib, b.nib);
+            assert_eq!(a.colour, b.colour);
+            assert_eq!(a.filled, b.filled);
+            assert_eq!(a.closed, b.closed);
+            assert!((a.taper - b.taper).abs() < 1e-4);
+            assert_eq!(a.pts.len(), b.pts.len());
+            for (p, q) in a.pts.iter().zip(&b.pts) {
+                // Four decimal places is the format's promise, and at the
+                // scale a hand draws at, a ten-thousandth is far below a pixel.
+                assert!((*p - *q).abs() < 1e-4, "a point moved: {p:?} vs {q:?}");
+            }
+        }
+    }
+
+    /// ★ It is text a person can read, and the version is the first word — a
+    /// format with no version is a format that can never change.
+    #[test]
+    fn the_file_says_what_it_is_before_anything_else() {
+        let text = a_sheet().to_text();
+        assert!(text.starts_with("easel 1\n"), "it should announce itself: {:?}", &text[..20.min(text.len())]);
+        assert!(text.contains("round 0.3500"), "and be readable");
+        assert!(text.contains("colour E3E9EF"));
+        assert!(text.lines().count() > 6, "points should wrap rather than being one huge line");
+    }
+
+    /// ★ A bad line loses that line, not the drawing. Refusing to open a file
+    /// because one number in it is wrong throws away everything somebody did.
+    #[test]
+    fn one_broken_line_does_not_lose_the_others() {
+        let mut text = a_sheet().to_text();
+        text.push_str("mark spatula 3 4\n");
+        text.push_str("p not a number at all\n");
+        text.push_str("what even is this line\n");
+
+        let (sheet, confused) = Sheet::from_text(&text);
+        assert_eq!(sheet.len(), 3, "the three good marks should all be there");
+        assert!(confused >= 2, "and it should say it was confused: {confused}");
+    }
+
+    /// ★ A field a later version writes must not lose the mark that carries
+    /// it. Unknown keywords are skipped with their value, so version 2 can add
+    /// something and version 1 still opens the file.
+    #[test]
+    fn a_field_from_the_future_is_stepped_over() {
+        let text = "easel 2\nmark round 0.30 texture chalk taper 0.10 colour 00FF00 fill open\np 0 0 1 1\n";
+        let (sheet, confused) = Sheet::from_text(text);
+        assert_eq!(confused, 0, "an unknown field is not a broken line");
+        assert_eq!(sheet.len(), 1);
+        assert_eq!(sheet.marks[0].colour, 0x00FF00, "the fields after it must still be read");
+        assert!((sheet.marks[0].taper - 0.10).abs() < 1e-9);
+        assert_eq!(sheet.marks[0].pts.len(), 2);
+    }
+
+    /// An empty drawing writes and reads as an empty drawing rather than as
+    /// nothing at all — saving before you have drawn is an ordinary thing.
+    #[test]
+    fn an_empty_drawing_is_still_a_drawing() {
+        let (back, confused) = Sheet::from_text(&Sheet::new().to_text());
+        assert_eq!(confused, 0);
+        assert!(back.is_empty());
+    }
+
+    /// Nonsense is not a drawing, but it is not a crash either.
+    #[test]
+    fn opening_something_that_is_not_a_drawing_is_survivable() {
+        let (sheet, confused) = Sheet::from_text("\u{0}\u{1}binary rubbish\n\n\nmore rubbish");
+        assert!(sheet.is_empty());
+        assert!(confused > 0);
+    }
+
+    /// ★ The mark you point at is the one you can **see** — the last one
+    /// drawn. Searching from the bottom up picks whatever happens to be
+    /// underneath, which feels broken in a way people cannot describe.
+    #[test]
+    fn pointing_at_an_overlap_picks_the_one_on_top() {
+        let mut s = Sheet::new();
+        s.add(Mark::new(ring(40, 2.0, Cx::ZERO), Nib::Round(0.2), 0x111111).closed(true));
+        s.add(Mark::new(ring(40, 2.0, Cx::ZERO), Nib::Round(0.2), 0x222222).closed(true));
+        // Pointed AT the ring, not at the middle of it. A closed stroke sweeps
+        // an annulus, and the hole in the middle is genuinely not part of the
+        // mark -- which is even-odd being right, and is also why a letter O
+        // cannot be picked up by its centre.
+        assert_eq!(s.at(Cx::new(2.0, 0.0), 0.1), Some(1), "the top one");
+        assert_eq!(s.at(Cx::new(0.0, 0.0), 0.05), None, "and the hole is a hole");
+    }
+
+    /// A filled mark is hit anywhere inside it; a traced one only near its
+    /// line, because its middle is not part of it.
+    #[test]
+    fn a_traced_mark_is_only_its_line() {
+        let mut s = Sheet::new();
+        s.add(Mark::new(ring(40, 2.0, Cx::ZERO), Nib::Round(0.1), 0xFFFFFF).closed(true).outlined());
+        assert_eq!(s.at(Cx::new(0.0, 0.0), 0.05), None, "the middle is not part of an outline");
+        assert_eq!(s.at(Cx::new(2.0, 0.0), 0.15), Some(0), "but the line itself is");
+    }
+
+    /// Pointing at nothing is nothing.
+    #[test]
+    fn pointing_at_empty_paper_finds_nothing() {
+        assert_eq!(a_sheet().at(Cx::new(40.0, 40.0), 0.1), None);
+        assert_eq!(Sheet::new().at(Cx::ZERO, 0.1), None);
+    }
+
+    /// Bounds cover every mark, so the view can be framed on the work.
+    #[test]
+    fn bounds_cover_the_whole_drawing() {
+        let (lo, hi) = a_sheet().bounds().expect("it has marks");
+        // The traced line runs to -3 exactly: an unfilled mark is its
+        // centreline, so it has no nib width to add.
+        assert!(lo.re <= -3.0 && hi.re > 5.0, "from {lo:?} to {hi:?}");
+        assert!(Sheet::new().bounds().is_none(), "empty paper has no bounds");
+    }
+}

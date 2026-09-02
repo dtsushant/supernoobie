@@ -153,17 +153,52 @@ impl Stroke {
         self
     }
 
-    /// The direction of travel at each point, as a unit complex number.
+    /// Does the path come back to exactly where it started?
+    ///
+    /// If it does there is no "end" anywhere on it, and the two neighbours of
+    /// every point — including the first and the last — are found by going
+    /// round.
+    pub fn is_ring(&self) -> bool {
+        self.pts.len() > 3 && (self.pts[0] - self.pts[self.pts.len() - 1]).abs() < 1e-9
+    }
+
+    /// The points either side of `k`, and how many steps apart they are.
     ///
     /// Central differences in the middle — `(next − previous)/2`, which is
-    /// symmetric and so does not lean the estimate one way — and one-sided at
-    /// the two ends, where there is nothing on the other side to average with.
-    pub fn headings(&self) -> Vec<Cx> {
+    /// symmetric and so does not lean the estimate one way.
+    ///
+    /// At the two ends of an **open** stroke there is nothing on the far side
+    /// to average with, so the difference is one-sided.
+    ///
+    /// On a **ring** there are no ends: the neighbours wrap round. Without
+    /// that, the first and last points of a closed stroke get one-sided
+    /// directions that do not quite agree, the outline is laid off at two
+    /// slightly different angles where it joins, and the mark has a small tick
+    /// sticking out of it at the seam. Very visible on a wide nib, and it
+    /// looks like a bug in the fill rather than in the path — which is where
+    /// I went looking first.
+    fn neighbours(&self, k: usize) -> (Cx, Cx, f64) {
         let n = self.pts.len();
-        (0..n)
+        if self.is_ring() {
+            // `pts[n − 1]` is a copy of `pts[0]`, so the real ring is
+            // `pts[0 .. n − 1]` and stepping wraps within that.
+            let last = n - 1;
+            let back = self.pts[(k + last - 1) % last];
+            let forward = self.pts[(k + 1) % last];
+            (back, forward, 2.0)
+        } else {
+            let back = self.pts[k.saturating_sub(1)];
+            let forward = self.pts[(k + 1).min(n - 1)];
+            let span = if k == 0 || k + 1 == n { 1.0 } else { 2.0 };
+            (back, forward, span)
+        }
+    }
+
+    /// The direction of travel at each point, as a unit complex number.
+    pub fn headings(&self) -> Vec<Cx> {
+        (0..self.pts.len())
             .map(|k| {
-                let back = self.pts[k.saturating_sub(1)];
-                let forward = self.pts[(k + 1).min(n - 1)];
+                let (back, forward, _) = self.neighbours(k);
                 let d = forward - back;
                 // A pen held still gives two identical points and no direction
                 // at all. Carry on along the last known heading rather than
@@ -182,12 +217,9 @@ impl Stroke {
     /// Which is simply how far apart the points are, because they arrive at a
     /// steady rate. The rate never appears in the arithmetic.
     pub fn pace(&self) -> Vec<f64> {
-        let n = self.pts.len();
-        (0..n)
+        (0..self.pts.len())
             .map(|k| {
-                let back = self.pts[k.saturating_sub(1)];
-                let forward = self.pts[(k + 1).min(n - 1)];
-                let span = if k == 0 || k + 1 == n { 1.0 } else { 2.0 };
+                let (back, forward, span) = self.neighbours(k);
                 (forward - back).abs() / span
             })
             .collect()
@@ -277,7 +309,7 @@ impl Stroke {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::f64::consts::PI;
+    use std::f64::consts::{PI, TAU};
 
     /// A straight run of `n` points along the real axis, `step` apart.
     fn straight(n: usize, step: f64) -> Vec<Cx> {
@@ -427,6 +459,50 @@ mod tests {
             let middle = (out[k] + out[out.len() - 1 - k]).scale(0.5);
             assert!((middle - curve[k]).abs() < 1e-9, "point {k} drifted to {middle:?}");
         }
+    }
+
+    /// ★ A closed stroke has **no seam**. Its neighbours wrap round, so the
+    /// first and last points get the same direction and the outline joins up
+    /// exactly. Without that they get one-sided estimates that do not quite
+    /// agree, and the mark has a small tick sticking out of it where it
+    /// closes -- very visible on a wide nib, and it looks like a bug in the
+    /// fill rather than in the path.
+    #[test]
+    fn a_closed_stroke_joins_up_without_a_tick() {
+        let mut pts: Vec<Cx> = (0..60).map(|k| Cx::polar(2.0, k as f64 / 60.0 * TAU)).collect();
+        pts.push(pts[0]);
+        let s = Stroke::new(pts).round(0.4);
+        assert!(s.is_ring());
+
+        let h = s.headings();
+        let first = h[0];
+        let last = h[h.len() - 1];
+        assert!((first - last).abs() < 1e-9, "the seam is laid off at two angles: {first:?} vs {last:?}");
+
+        // And the direction at the seam agrees with its neighbours, rather
+        // than being a spike between them.
+        assert!((h[0] - h[1]).abs() < 0.2, "the heading should turn smoothly through the join");
+
+        let out = s.outline();
+        let n = s.pts.len();
+        assert!((out[0] - out[n - 1]).abs() < 1e-9, "the two sides should meet exactly");
+    }
+
+    /// And an open stroke keeps its one-sided ends, because it genuinely has
+    /// ends -- wrapping there would bend the start of a stroke towards its
+    /// finish, which may be right across the page.
+    #[test]
+    fn an_open_stroke_still_has_ends() {
+        let s = Stroke::new(straight(9, 1.0)).round(0.4);
+        assert!(!s.is_ring());
+        let h = s.headings();
+        assert!((h[0] - Cx::new(1.0, 0.0)).abs() < 1e-9, "straight along the path");
+
+        // A path whose ends merely happen to be near each other is not a ring
+        // unless they are the SAME point.
+        let mut nearly: Vec<Cx> = (0..30).map(|k| Cx::polar(2.0, k as f64 / 30.0 * TAU * 0.97)).collect();
+        nearly.push(nearly[0] + Cx::new(0.01, 0.0));
+        assert!(!Stroke::new(nearly).round(0.2).is_ring());
     }
 
     /// A mark turning a corner keeps its width round the bend, rather than

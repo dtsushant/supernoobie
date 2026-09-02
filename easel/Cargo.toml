@@ -1,0 +1,12 @@
+[package]
+name = "easel"
+version = "0.1.0"
+edition = "2021"
+description = "A drawing that can be edited and saved — the whole editor except the window."
+
+# No window, and deliberately no `studio`. Everything here is decided by
+# arithmetic on a pointer position and a list of marks, so all of it can be
+# tested in the dark.
+[dependencies]
+plotkit = { path = "../plotkit" }
+shapes = { path = "../shapes" }
