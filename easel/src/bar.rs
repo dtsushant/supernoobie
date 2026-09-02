@@ -24,6 +24,20 @@
 //! surest way to make two pieces of arithmetic agree is for there to be only
 //! one of them.
 //!
+//! ## How big a button has to be
+//!
+//! Bigger than looks necessary. A pen tip covers a couple of pixels and a
+//! fingertip covers forty, and neither lands where you think it did — a pen
+//! held at an angle reports a point offset from where the nib appears to be,
+//! and a finger reports the middle of a contact patch you cannot see. The
+//! usual guidance for a touch target is about 9 mm square, which on an
+//! ordinary screen is around **44 pixels**.
+//!
+//! The first version of this bar had 22-pixel rows, and the complaint was
+//! immediate and correct: too many taps to hit the right thing. Everything
+//! here is now at least [`TAP`] across, which costs width and is worth it —
+//! a button you miss is worse than a button you have to scroll to.
+//!
 //! ## Why it is a flat list
 //!
 //! No rows, no groups, no layout engine. The buttons are built with their
@@ -48,6 +62,10 @@ pub enum Cmd {
     Do(Action),
     /// Take away everything the selected mark does.
     Stop,
+    /// Bind the chosen marks into one figure.
+    Group,
+    /// Break a figure up again.
+    Ungroup,
     Play,
     Pause,
     Rewind,
@@ -87,8 +105,16 @@ pub const INKS: [u32; 8] =
 /// The three nibs, by the index [`Cmd::Nib`] carries.
 pub const NIBS: [&str; 3] = ["quill", "round", "broad"];
 
+/// The smallest a button may be, in pixels.
+///
+/// About 9 mm on an ordinary screen, which is the usual guidance for
+/// something meant to be hit with a finger. A pen is more precise but not as
+/// much more as it feels: held at an angle it reports a point offset from
+/// where the nib looks to be.
+pub const TAP: i32 = 44;
+
 /// How wide the bar is, in pixels. The window keeps the drawing clear of it.
-pub const WIDTH: i32 = 132;
+pub const WIDTH: i32 = 3 * (TAP + 6) + 2 * PAD - 6;
 
 /// How long one press of an action button lasts, in seconds.
 ///
@@ -96,9 +122,13 @@ pub const WIDTH: i32 = 132;
 /// an act loops and a cycle that does not close jerks every time round.
 pub const STEP: f64 = 2.0;
 
-const PAD: i32 = 8;
-const ROW: i32 = 22;
-const SWATCH: i32 = 26;
+const PAD: i32 = 10;
+const ROW: i32 = TAP;
+const SWATCH: i32 = TAP;
+/// Gap between buttons: enough that a near miss lands on nothing rather than
+/// on the neighbour, which is the worse of the two failures.
+const GAP: i32 = 6;
+const CELL: i32 = TAP + GAP;
 
 /// The toolbar.
 #[derive(Clone, Debug, Default)]
@@ -117,23 +147,23 @@ impl Bar {
         for (k, ink) in INKS.iter().enumerate() {
             let (col, row) = (k % 4, k / 4);
             b.buttons.push(Button {
-                x: PAD + col as i32 * (SWATCH + 4),
-                y: y + row as i32 * (SWATCH + 4),
-                w: SWATCH,
+                x: PAD + col as i32 * (SWATCH * 3 / 4 + GAP),
+                y: y + row as i32 * CELL,
+                w: SWATCH * 3 / 4,
                 h: SWATCH,
                 label: "",
                 swatch: Some(*ink),
                 cmd: Cmd::Colour(*ink),
             });
         }
-        y += 2 * (SWATCH + 4) + PAD;
+        y += 2 * CELL - GAP + PAD;
 
         // --- the nib ---------------------------------------------------------
         for (k, name) in NIBS.iter().enumerate() {
             b.buttons.push(Button {
-                x: PAD + k as i32 * 39,
+                x: PAD + k as i32 * CELL,
                 y,
-                w: 37,
+                w: TAP,
                 h: ROW,
                 label: name,
                 swatch: None,
@@ -147,9 +177,9 @@ impl Bar {
             [("draw", Tool::Draw), ("pick", Tool::Pick), ("rub", Tool::Erase)].into_iter().enumerate()
         {
             b.buttons.push(Button {
-                x: PAD + k as i32 * 39,
+                x: PAD + k as i32 * CELL,
                 y,
-                w: 37,
+                w: TAP,
                 h: ROW,
                 label: name,
                 swatch: None,
@@ -178,33 +208,31 @@ impl Bar {
         for (k, (name, action)) in acts.into_iter().enumerate() {
             let (col, row) = (k % 3, k / 3);
             b.buttons.push(Button {
-                x: PAD + col as i32 * 39,
-                y: y + row as i32 * (ROW + 4),
-                w: 37,
+                x: PAD + col as i32 * CELL,
+                y: y + row as i32 * CELL,
+                w: TAP,
                 h: ROW,
                 label: name,
                 swatch: None,
                 cmd: Cmd::Do(action),
             });
         }
-        y += 2 * (ROW + 4) + PAD;
+        y += 2 * CELL - GAP + PAD;
 
         // --- the clock --------------------------------------------------------
         for (k, (name, cmd)) in
             [("play", Cmd::Play), ("stop", Cmd::Pause), ("|<<", Cmd::Rewind)].into_iter().enumerate()
         {
-            b.buttons.push(Button { x: PAD + k as i32 * 39, y, w: 37, h: ROW, label: name, swatch: None, cmd });
+            b.buttons.push(Button { x: PAD + k as i32 * CELL, y, w: TAP, h: ROW, label: name, swatch: None, cmd });
         }
-        y += ROW + 4;
-        b.buttons.push(Button {
-            x: PAD,
-            y,
-            w: 37 + 39,
-            h: ROW,
-            label: "no act",
-            swatch: None,
-            cmd: Cmd::Stop,
-        });
+        y += CELL;
+
+        // --- gathering strokes into a figure ----------------------------------
+        for (k, (name, cmd)) in
+            [("group", Cmd::Group), ("split", Cmd::Ungroup), ("no act", Cmd::Stop)].into_iter().enumerate()
+        {
+            b.buttons.push(Button { x: PAD + k as i32 * CELL, y, w: TAP, h: ROW, label: name, swatch: None, cmd });
+        }
         y += ROW + PAD;
 
         // --- the page ---------------------------------------------------------
@@ -221,9 +249,9 @@ impl Bar {
         {
             let (col, row) = (k % 3, k / 3);
             b.buttons.push(Button {
-                x: PAD + col as i32 * 39,
-                y: y + row as i32 * (ROW + 4),
-                w: 37,
+                x: PAD + col as i32 * CELL,
+                y: y + row as i32 * CELL,
+                w: TAP,
                 h: ROW,
                 label: name,
                 swatch: None,
@@ -270,6 +298,8 @@ impl Bar {
             Cmd::Nib(k) => k == Bar::nib_index(board.nib),
             Cmd::Play => board.playing,
             Cmd::Pause => !board.playing,
+            Cmd::Group => board.selected.len() >= 2,
+            Cmd::Ungroup => board.chosen_groups() > 0,
             _ => false,
         }
     }
@@ -362,6 +392,37 @@ mod tests {
         }
     }
 
+    /// ★ Every button must be big enough to hit. The first version of this bar
+    /// had 22-pixel rows and the complaint was immediate: too many taps to
+    /// land on the right thing. A pen held at an angle reports a point offset
+    /// from where its nib appears to be, and a finger reports the middle of a
+    /// contact patch you cannot see.
+    #[test]
+    fn every_button_is_big_enough_to_hit() {
+        for b in &Bar::new().buttons {
+            assert!(b.h >= TAP, "{:?} is only {} tall", b.cmd, b.h);
+            // Swatches are narrower, because a colour needs no room for a
+            // word and eight of them have to fit across.
+            let least = if b.swatch.is_some() { TAP * 3 / 4 } else { TAP };
+            assert!(b.w >= least, "{:?} is only {} wide", b.cmd, b.w);
+        }
+    }
+
+    /// And they are spaced, so a near miss lands on nothing rather than on the
+    /// neighbour — which is much the worse of the two failures, because it
+    /// does something you did not ask for.
+    #[test]
+    fn a_near_miss_lands_on_nothing_rather_than_the_neighbour() {
+        let bar = Bar::new();
+        for (k, a) in bar.buttons.iter().enumerate() {
+            for b in &bar.buttons[k + 1..] {
+                let gap_x = (a.x + a.w <= b.x && b.x - (a.x + a.w) >= 4) || (b.x + b.w <= a.x && a.x - (b.x + b.w) >= 4);
+                let gap_y = (a.y + a.h <= b.y && b.y - (a.y + a.h) >= 4) || (b.y + b.h <= a.y && a.y - (b.y + b.h) >= 4);
+                assert!(gap_x || gap_y, "{:?} and {:?} are touching", a.cmd, b.cmd);
+            }
+        }
+    }
+
     /// Just outside a button is nothing, rather than the neighbour.
     #[test]
     fn just_outside_a_button_is_nothing_in_particular() {
@@ -406,7 +467,10 @@ mod tests {
     fn the_bar_can_reach_every_command() {
         let bar = Bar::new();
         let has = |c: Cmd| bar.buttons.iter().any(|b| b.cmd == c);
-        for c in [Cmd::Play, Cmd::Pause, Cmd::Rewind, Cmd::Undo, Cmd::Redo, Cmd::Save, Cmd::Open, Cmd::Clear, Cmd::Smooth, Cmd::Stop] {
+        for c in [
+            Cmd::Play, Cmd::Pause, Cmd::Rewind, Cmd::Undo, Cmd::Redo, Cmd::Save, Cmd::Open, Cmd::Clear,
+            Cmd::Smooth, Cmd::Stop, Cmd::Group, Cmd::Ungroup,
+        ] {
             assert!(has(c), "{c:?} is not on the bar");
         }
         for k in 0..NIBS.len() {

@@ -15,6 +15,29 @@
 //!                                                             stroke in progress
 //! ```
 //!
+//! ## A tap chooses, a drag does
+//!
+//! The one rule that took the most taps out of the studio.
+//!
+//! ```text
+//!     drag        draw / move / rub out, according to the tool
+//!     tap         choose that mark -- whatever the tool is
+//!     tap again   let go of it
+//!     tap paper   choose nothing
+//! ```
+//!
+//! Choosing used to mean *switch to the pick tool, tap, switch back*, which is
+//! three deliberate acts to say one thing. And a tap while drawing was already
+//! being thrown away — [`Ink::lift`] refuses anything under two points,
+//! because a one-point mark is an invisible speck that can still be clicked
+//! on. So the gesture was free: nothing had to be given up to have it.
+//!
+//! Tapping **toggles**, so a selection can be several marks without a modifier
+//! key. That matters here more than in most editors: this program is used with
+//! a pen, where there is no second button and no comfortable way to hold shift
+//! — and shift already means *"talk to the graph"* everywhere in this
+//! repository.
+//!
 //! ## Decide on the press
 //!
 //! What a drag *means* is settled the instant the pointer goes down and is not
@@ -90,11 +113,18 @@ pub struct Board {
     /// Whether the pointer was down last frame, so a press can be told from a
     /// drag without the window having to say.
     was_down: bool,
+    /// Where the pointer went down, and whether it has moved since — which is
+    /// the whole of telling a tap from a drag.
+    pressed_at: Option<Cx>,
+    wandered: bool,
     past: History,
 
     // --- the clock ----------------------------------------------------------
-    /// Which mark the commands apply to. Set by picking one up.
-    pub selected: Option<usize>,
+    /// Which marks the commands apply to.
+    ///
+    /// A list, not one: a figure is several strokes, and telling six of them
+    /// to walk one at a time is the thing that made this tiring.
+    pub selected: Vec<usize>,
     /// Where the animation has got to, in seconds.
     ///
     /// Held here rather than taken from the wall clock, so that stopping means
@@ -124,8 +154,10 @@ impl Board {
             ink: None,
             holding: None,
             was_down: false,
+            pressed_at: None,
+            wandered: false,
             past: History::new(),
-            selected: None,
+            selected: Vec::new(),
             clock: 0.0,
             playing: false,
         }
@@ -149,6 +181,8 @@ impl Board {
     }
 
     fn press(&mut self, at: Cx) {
+        self.pressed_at = Some(at);
+        self.wandered = false;
         match self.tool {
             Tool::Draw => {
                 let mut ink = Ink::new(self.nib, self.colour).with_pull(self.pull).with_taper(self.taper);
@@ -156,13 +190,10 @@ impl Board {
                 self.ink = Some(ink);
             }
             Tool::Pick => {
-                // Selecting happens even when nothing is grabbed, because
-                // clicking empty paper meaning "select nothing" is how every
-                // editor behaves and its absence is felt immediately.
-                self.selected = self.sheet.at(at, self.touch);
-                if let Some(k) = self.selected {
+                if let Some(k) = self.sheet.at(at, self.touch) {
                     // Remembered on the press, so the whole drag is one step
-                    // back rather than sixty.
+                    // back rather than sixty. Choosing is left to the release,
+                    // where a tap can be told from a drag.
                     self.past.remember(&self.sheet);
                     self.holding = Some((k, at));
                 }
@@ -175,6 +206,14 @@ impl Board {
     }
 
     fn drag(&mut self, at: Cx) {
+        // Once it has wandered further than a fingertip it is a drag, and it
+        // stays one. Deciding afresh every frame would let a slow, careful
+        // drag flicker back into being a tap.
+        if let Some(from) = self.pressed_at {
+            if (at - from).abs() > self.touch {
+                self.wandered = true;
+            }
+        }
         match self.tool {
             Tool::Draw => {
                 if let Some(ink) = self.ink.as_mut() {
@@ -183,8 +222,16 @@ impl Board {
             }
             Tool::Pick => {
                 if let Some((k, was)) = self.holding {
-                    if let Some(m) = self.sheet.marks.get_mut(k) {
-                        *m = m.shifted(at - was);
+                    // Dragging one of the chosen marks moves all of them, so a
+                    // figure is moved as a figure. Dragging something that is
+                    // not chosen moves only it, which is what you meant if you
+                    // reached past a selection to grab something else.
+                    let moving: Vec<usize> =
+                        if self.selected.contains(&k) { self.selected.clone() } else { vec![k] };
+                    for j in moving {
+                        if let Some(m) = self.sheet.marks.get_mut(j) {
+                            *m = m.shifted(at - was);
+                        }
                     }
                     self.holding = Some((k, at));
                 }
@@ -197,13 +244,52 @@ impl Board {
     }
 
     fn release(&mut self, at: Cx) {
+        let tapped = !self.wandered;
         if let Some(ink) = self.ink.take() {
+            // A tap makes no mark anyway -- `Ink::lift` refuses anything under
+            // two points -- so the gesture was going spare.
             if let Some(mark) = ink.lift(at) {
                 self.past.remember(&self.sheet);
                 self.sheet.add(mark);
             }
         }
+        // Not with the eraser. Rubbing out is destructive and single-minded,
+        // and a tap that both removed a mark and then changed what was chosen
+        // would be doing two things to one gesture.
+        if tapped && self.tool != Tool::Erase {
+            self.tap(at);
+        }
         self.holding = None;
+        self.pressed_at = None;
+    }
+
+    /// A tap: choose what is under it, or let go of it if it was already
+    /// chosen. Nothing under it means choose nothing.
+    fn tap(&mut self, at: Cx) {
+        let Some(k) = self.sheet.at(at, self.touch) else {
+            self.selected.clear();
+            return;
+        };
+        // Tapping any member of a figure takes the whole figure, which is the
+        // point of having grouped it.
+        let family = self.family_of(k);
+        if family.iter().all(|j| self.selected.contains(j)) {
+            self.selected.retain(|j| !family.contains(j));
+        } else {
+            for j in family {
+                if !self.selected.contains(&j) {
+                    self.selected.push(j);
+                }
+            }
+        }
+    }
+
+    /// The mark, and everything grouped with it.
+    fn family_of(&self, k: usize) -> Vec<usize> {
+        match self.sheet.marks.get(k).map(|m| m.group) {
+            Some(0) | None => vec![k],
+            Some(g) => (0..self.sheet.len()).filter(|j| self.sheet.marks[*j].group == g).collect(),
+        }
     }
 
     /// Take out whatever is under the pointer.
@@ -214,11 +300,12 @@ impl Board {
             // pointing at an index rather than at a mark would silently start
             // meaning a different shape — and then a walk gets given to the
             // wrong one.
-            self.selected = match self.selected {
-                Some(s) if s == k => None,
-                Some(s) if s > k => Some(s - 1),
-                other => other,
-            };
+            self.selected.retain(|s| *s != k);
+            for s in self.selected.iter_mut() {
+                if *s > k {
+                    *s -= 1;
+                }
+            }
         }
     }
 
@@ -238,6 +325,7 @@ impl Board {
                 // hand.
                 closed: false,
                 act: crate::Act::still(),
+                group: 0,
             }
         })
     }
@@ -266,46 +354,80 @@ impl Board {
 
     // ---- what things do ----------------------------------------------------
 
-    /// The mark the commands apply to.
+    /// The first chosen mark, for showing what is going on.
     pub fn chosen(&self) -> Option<&Mark> {
-        self.sheet.marks.get(self.selected?)
+        self.sheet.marks.get(*self.selected.first()?)
     }
 
-    /// Add a step to what the selected mark does.
+    pub fn any_chosen(&self) -> bool {
+        !self.selected.is_empty()
+    }
+
+    /// Add a step to what **every** chosen mark does.
+    ///
+    /// All of them, in one press. A figure is several strokes, and giving them
+    /// a walk one at a time was the thing that made this tiring.
     ///
     /// `None` for `seconds` means forever, which is what a single looping
-    /// motion is and is the common case — `spin`, and nothing after it.
+    /// motion is — `spin`, and nothing after it.
     pub fn give(&mut self, action: Action, seconds: Option<f64>) -> bool {
-        let Some(k) = self.selected else { return false };
-        if self.sheet.marks.get(k).is_none() {
-            return false;
-        }
-        self.past.remember(&self.sheet);
-        let m = &mut self.sheet.marks[k];
-        m.act.steps.push(crate::action::Step { action, seconds: seconds.unwrap_or(f64::INFINITY) });
-        true
+        self.to_each(|m| m.act.steps.push(crate::action::Step { action, seconds: seconds.unwrap_or(f64::INFINITY) }))
     }
 
-    /// Take away everything the selected mark does.
+    /// Take away everything the chosen marks do.
     pub fn stop_doing(&mut self) -> bool {
-        let Some(k) = self.selected else { return false };
-        if self.sheet.marks.get(k).is_none() {
+        self.to_each(|m| m.act = Act::still())
+    }
+
+    /// Whether the chosen marks start again at the end.
+    pub fn set_looping(&mut self, yes: bool) -> bool {
+        self.to_each(|m| m.act.looping = yes)
+    }
+
+    /// Do something to every chosen mark, as **one** step back.
+    fn to_each(&mut self, mut f: impl FnMut(&mut Mark)) -> bool {
+        let chosen: Vec<usize> = self.selected.iter().copied().filter(|k| *k < self.sheet.len()).collect();
+        if chosen.is_empty() {
             return false;
         }
         self.past.remember(&self.sheet);
-        self.sheet.marks[k].act = Act::still();
+        for k in chosen {
+            f(&mut self.sheet.marks[k]);
+        }
         true
     }
 
-    /// Whether the selected mark starts again at the end.
-    pub fn set_looping(&mut self, yes: bool) -> bool {
-        let Some(k) = self.selected else { return false };
-        if self.sheet.marks.get(k).is_none() {
+    /// Bind the chosen marks into one figure, so a single tap takes them all
+    /// and a single press tells them all to walk.
+    pub fn group(&mut self) -> bool {
+        if self.selected.len() < 2 {
             return false;
         }
-        self.past.remember(&self.sheet);
-        self.sheet.marks[k].act.looping = yes;
-        true
+        // The next number nobody is using. Reusing a freed number would
+        // silently adopt any mark that still carried it.
+        let next = self.sheet.marks.iter().map(|m| m.group).max().unwrap_or(0) + 1;
+        self.to_each(|m| m.group = next)
+    }
+
+    /// Break the figure up again.
+    pub fn ungroup(&mut self) -> bool {
+        if !self.selected.iter().any(|k| self.sheet.marks.get(*k).is_some_and(|m| m.group != 0)) {
+            return false;
+        }
+        self.to_each(|m| m.group = 0)
+    }
+
+    /// How many separate figures the chosen marks belong to, for saying so.
+    pub fn chosen_groups(&self) -> usize {
+        let mut seen: Vec<u32> = Vec::new();
+        for k in &self.selected {
+            if let Some(m) = self.sheet.marks.get(*k) {
+                if m.group != 0 && !seen.contains(&m.group) {
+                    seen.push(m.group);
+                }
+            }
+        }
+        seen.len()
     }
 
     /// Does anything on the page move at all?
@@ -400,17 +522,22 @@ impl Board {
     /// A ring round whatever is selected, so you can see what a command will
     /// act on. Separate from [`frame`](Board::frame) because it is furniture
     /// rather than drawing, and must not be saved or exported.
-    pub fn selection(&self) -> Option<Shape> {
-        let m = self.chosen()?;
-        let pose = m.act.at(self.clock);
-        let here = m.anchor();
-        let (lo, hi) = m.bounds()?;
-        let pad = 0.08 + (hi - lo).abs() * 0.03;
-        let (a, b) = (lo - Cx::new(pad, pad), hi + Cx::new(pad, pad));
-        let corners = vec![a, Cx::new(b.re, a.im), b, Cx::new(a.re, b.im)];
-        // Moved with the mark, or the ring stays behind while the thing it is
-        // pointing at walks away.
-        Some(Shape::polygon(corners).map(move |z| pose.apply(z - here) + here))
+    pub fn selection(&self) -> Vec<Shape> {
+        self.selected
+            .iter()
+            .filter_map(|k| {
+                let m = self.sheet.marks.get(*k)?;
+                let pose = m.act.at(self.clock);
+                let here = m.anchor();
+                let (lo, hi) = m.bounds()?;
+                let pad = 0.08 + (hi - lo).abs() * 0.03;
+                let (a, b) = (lo - Cx::new(pad, pad), hi + Cx::new(pad, pad));
+                let corners = vec![a, Cx::new(b.re, a.im), b, Cx::new(a.re, b.im)];
+                // Moved with the mark, or the ring stays behind while the
+                // thing it is pointing at walks away.
+                Some(Shape::polygon(corners).map(move |z| pose.apply(z - here) + here))
+            })
+            .collect()
     }
 }
 
@@ -627,32 +754,212 @@ mod tests {
         assert_eq!(b.sheet, before);
     }
 
-    /// ★ Erasing a mark below the selected one must move the selection with
-    /// it. An index that quietly starts meaning a different shape is how a
-    /// walk gets given to the wrong thing, and it would look like the action
-    /// buttons being broken.
+    /// Tap a point: press and release without moving.
+    fn tap(b: &mut Board, at: Cx) {
+        b.pointer(at, true);
+        b.pointer(at, false);
+    }
+
+    /// ★ Erasing a mark below a chosen one must move the choice with it. An
+    /// index that quietly starts meaning a different shape is how a walk gets
+    /// given to the wrong thing, and it would look like the action buttons
+    /// being broken.
     #[test]
     fn erasing_does_not_leave_the_selection_pointing_at_the_wrong_mark() {
         let mut b = Board::new();
         for k in 0..3 {
             draw(&mut b, &ring(0.4, Cx::new(k as f64 * 2.0, 0.0), 40));
         }
-        b.tool = Tool::Pick;
-        b.pointer(Cx::new(4.0 - 0.4, 0.0), true);
-        b.pointer(Cx::new(4.0 - 0.4, 0.0), false);
-        assert_eq!(b.selected, Some(2), "the third one");
+        tap(&mut b, Cx::new(4.0 - 0.4, 0.0));
+        assert_eq!(b.selected, vec![2], "the third one");
 
         // Rub out the first.
         b.tool = Tool::Erase;
         b.pointer(Cx::new(-0.4, 0.0), true);
-        b.pointer(Cx::new(-0.4, 0.0), false);
-        assert_eq!(b.selected, Some(1), "it should still be the same shape");
+        b.pointer(Cx::new(-0.35, 0.0), true);
+        b.pointer(Cx::new(-0.35, 0.0), false);
+        assert_eq!(b.selected, vec![1], "it should still be the same shape");
 
-        // And rubbing out the selected one deselects rather than pointing at
+        // And rubbing out a chosen one drops it rather than pointing at
         // whatever slid into its place.
         b.pointer(Cx::new(4.0 - 0.4, 0.0), true);
-        b.pointer(Cx::new(4.0 - 0.4, 0.0), false);
-        assert_eq!(b.selected, None);
+        b.pointer(Cx::new(4.0 - 0.35, 0.0), true);
+        b.pointer(Cx::new(4.0 - 0.35, 0.0), false);
+        assert!(b.selected.is_empty());
+    }
+
+    /// ★ **A tap chooses, a drag draws.** The gesture was free: a tap already
+    /// made no mark, because `Ink::lift` refuses anything under two points. So
+    /// choosing no longer costs a trip to the pick tool and back — which was
+    /// three deliberate acts to say one thing.
+    #[test]
+    fn a_tap_chooses_without_changing_tool() {
+        let mut b = Board::new();
+        draw(&mut b, &ring(1.0, Cx::ZERO, 60));
+        assert_eq!(b.tool, Tool::Draw);
+
+        tap(&mut b, Cx::new(1.0, 0.0));
+        assert_eq!(b.selected, vec![0], "a tap should choose it");
+        assert_eq!(b.sheet.len(), 1, "and must not leave a speck of ink");
+    }
+
+    /// ★ And tapping **toggles**, so a selection can be several marks with no
+    /// modifier key — which matters here, because this is used with a pen,
+    /// where there is no second button and shift already means "talk to the
+    /// graph".
+    #[test]
+    fn tapping_toggles_so_several_things_can_be_chosen() {
+        let mut b = Board::new();
+        for k in 0..3 {
+            draw(&mut b, &ring(0.4, Cx::new(k as f64 * 2.0, 0.0), 40));
+        }
+        tap(&mut b, Cx::new(-0.4, 0.0));
+        tap(&mut b, Cx::new(2.0 - 0.4, 0.0));
+        assert_eq!(b.selected, vec![0, 1], "both");
+
+        tap(&mut b, Cx::new(-0.4, 0.0));
+        assert_eq!(b.selected, vec![1], "tapping again lets go");
+
+        tap(&mut b, Cx::new(40.0, 40.0));
+        assert!(b.selected.is_empty(), "and tapping the paper chooses nothing");
+    }
+
+    /// A drag is not a tap, however slowly it is made — and once it has
+    /// wandered it stays a drag, or a careful hand flickers between the two.
+    #[test]
+    fn a_slow_deliberate_drag_never_becomes_a_tap() {
+        let mut b = Board::new();
+        draw(&mut b, &ring(1.0, Cx::ZERO, 60));
+        let before = b.sheet.len();
+
+        // Out and back, ending exactly where it began.
+        b.pointer(Cx::new(3.0, 3.0), true);
+        for k in 1..=30 {
+            b.pointer(Cx::new(3.0 + k as f64 * 0.05, 3.0), true);
+        }
+        for k in (0..=30).rev() {
+            b.pointer(Cx::new(3.0 + k as f64 * 0.05, 3.0), true);
+        }
+        b.pointer(Cx::new(3.0, 3.0), false);
+
+        assert_eq!(b.sheet.len(), before + 1, "it should have drawn");
+        assert!(b.selected.is_empty(), "and not also chosen something");
+    }
+
+    /// ★ One press gives a whole figure a walk. Telling six strokes one at a
+    /// time is the thing that made this tiring.
+    #[test]
+    fn a_grouped_figure_is_chosen_and_told_all_at_once() {
+        let mut b = Board::new();
+        for k in 0..4 {
+            draw(&mut b, &ring(0.4, Cx::new(k as f64 * 2.0, 0.0), 40));
+        }
+        for k in 0..3 {
+            tap(&mut b, Cx::new(k as f64 * 2.0 - 0.4, 0.0));
+        }
+        assert!(b.group(), "three chosen should make a figure");
+
+        // One tap now takes all three.
+        b.selected.clear();
+        tap(&mut b, Cx::new(2.0 - 0.4, 0.0));
+        assert_eq!(b.selected.len(), 3, "tapping one member takes the figure");
+
+        assert!(b.give(Action::Walk(Cx::new(1.0, 0.0)), Some(2.0)));
+        for k in 0..3 {
+            assert_eq!(b.sheet.marks[k].act.steps.len(), 1, "mark {k} should have been told");
+        }
+        assert!(b.sheet.marks[3].act.steps.is_empty(), "and the one left out should not");
+    }
+
+    /// Giving a whole figure a walk is **one** step back, not one per stroke.
+    #[test]
+    fn telling_a_figure_to_walk_is_one_step_back() {
+        let mut b = Board::new();
+        for k in 0..3 {
+            draw(&mut b, &ring(0.4, Cx::new(k as f64 * 2.0, 0.0), 40));
+        }
+        for k in 0..3 {
+            tap(&mut b, Cx::new(k as f64 * 2.0 - 0.4, 0.0));
+        }
+        b.give(Action::Spin(0.5), Some(2.0));
+        assert!(b.undo());
+        assert!(b.sheet.marks.iter().all(|m| m.act.steps.is_empty()));
+    }
+
+    /// A group needs two. One mark on its own is already a figure of one, and
+    /// giving it a number would only use one up.
+    #[test]
+    fn one_thing_is_not_a_group() {
+        let mut b = Board::new();
+        draw(&mut b, &ring(1.0, Cx::ZERO, 60));
+        tap(&mut b, Cx::new(1.0, 0.0));
+        assert!(!b.group());
+        assert_eq!(b.sheet.marks[0].group, 0);
+    }
+
+    /// ★ Group numbers are never reused. A freed number handed out again would
+    /// silently adopt any mark still carrying it — a stroke you ungrouped
+    /// months ago rejoining a figure it has nothing to do with.
+    #[test]
+    fn a_group_number_is_never_handed_out_twice() {
+        let mut b = Board::new();
+        for k in 0..4 {
+            draw(&mut b, &ring(0.4, Cx::new(k as f64 * 2.0, 0.0), 40));
+        }
+        tap(&mut b, Cx::new(-0.4, 0.0));
+        tap(&mut b, Cx::new(2.0 - 0.4, 0.0));
+        b.group();
+        let first = b.sheet.marks[0].group;
+
+        b.selected.clear();
+        tap(&mut b, Cx::new(4.0 - 0.4, 0.0));
+        tap(&mut b, Cx::new(6.0 - 0.4, 0.0));
+        b.group();
+        assert_ne!(b.sheet.marks[2].group, first, "the second figure must be its own");
+    }
+
+    /// Ungrouping breaks it up, and a tap then takes only what was tapped.
+    #[test]
+    fn ungrouping_lets_the_strokes_go_their_own_way() {
+        let mut b = Board::new();
+        for k in 0..2 {
+            draw(&mut b, &ring(0.4, Cx::new(k as f64 * 2.0, 0.0), 40));
+        }
+        tap(&mut b, Cx::new(-0.4, 0.0));
+        tap(&mut b, Cx::new(2.0 - 0.4, 0.0));
+        b.group();
+        assert!(b.ungroup());
+
+        b.selected.clear();
+        tap(&mut b, Cx::new(-0.4, 0.0));
+        assert_eq!(b.selected, vec![0], "only the one tapped");
+    }
+
+    /// ★ Dragging one member of a figure moves the whole figure. Moving a
+    /// head off its body is the single most annoying thing an editor can do.
+    #[test]
+    fn dragging_a_figure_moves_all_of_it() {
+        let mut b = Board::new();
+        for k in 0..3 {
+            draw(&mut b, &ring(0.4, Cx::new(k as f64 * 2.0, 0.0), 40));
+        }
+        for k in 0..3 {
+            tap(&mut b, Cx::new(k as f64 * 2.0 - 0.4, 0.0));
+        }
+        b.group();
+        let was: Vec<Cx> = b.sheet.marks.iter().map(|m| m.anchor()).collect();
+
+        b.tool = Tool::Pick;
+        b.pointer(Cx::new(-0.4, 0.0), true);
+        for k in 1..=20 {
+            b.pointer(Cx::new(-0.4, k as f64 * 0.15), true);
+        }
+        b.pointer(Cx::new(-0.4, 3.0), false);
+
+        for k in 0..3 {
+            let moved = b.sheet.marks[k].anchor() - was[k];
+            assert!((moved.im - 3.0).abs() < 0.01, "mark {k} moved {moved:?}, not 3 up");
+        }
     }
 
     /// ★ A drawing with nothing animated in it draws exactly as it was made.
@@ -679,9 +986,7 @@ mod tests {
         assert!(!b.give(Action::Spin(1.0), None), "nothing is selected yet");
         assert!(b.sheet.marks.iter().all(|m| m.act.steps.is_empty()));
 
-        b.tool = Tool::Pick;
-        b.pointer(Cx::new(5.0 + 1.0, 0.0), true);
-        b.pointer(Cx::new(5.0 + 1.0, 0.0), false);
+        tap(&mut b, Cx::new(5.0 + 1.0, 0.0));
         assert!(b.give(Action::Spin(1.0), None));
         assert!(b.sheet.marks[0].act.steps.is_empty(), "the other one must be untouched");
         assert_eq!(b.sheet.marks[1].act.steps.len(), 1);
@@ -692,9 +997,7 @@ mod tests {
     fn actions_stack_up_into_a_sequence() {
         let mut b = Board::new();
         draw(&mut b, &ring(1.0, Cx::ZERO, 60));
-        b.tool = Tool::Pick;
-        b.pointer(Cx::new(1.0, 0.0), true);
-        b.pointer(Cx::new(1.0, 0.0), false);
+        tap(&mut b, Cx::new(1.0, 0.0));
 
         b.give(Action::Walk(Cx::new(1.0, 0.0)), Some(2.0));
         b.give(Action::Jump { height: 1.0, rate: 1.0 }, Some(1.0));
@@ -738,9 +1041,7 @@ mod tests {
     fn an_animation_can_be_saved_and_run_again() {
         let mut b = Board::new();
         draw(&mut b, &ring(1.0, Cx::ZERO, 60));
-        b.tool = Tool::Pick;
-        b.pointer(Cx::new(1.0, 0.0), true);
-        b.pointer(Cx::new(1.0, 0.0), false);
+        tap(&mut b, Cx::new(1.0, 0.0));
         b.give(Action::Walk(Cx::new(2.0, 0.0)), Some(2.0));
         b.give(Action::Jump { height: 1.5, rate: 2.0 }, Some(1.0));
 
@@ -763,8 +1064,7 @@ mod tests {
     #[test]
     fn a_tap_on_the_page_leaves_nothing_behind() {
         let mut b = Board::new();
-        b.pointer(Cx::new(1.0, 1.0), true);
-        b.pointer(Cx::new(1.0, 1.0), false);
+        tap(&mut b, Cx::new(1.0, 1.0));
         assert!(b.sheet.is_empty());
         assert!(!b.can_undo(), "and nothing to undo either");
     }

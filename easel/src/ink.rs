@@ -182,7 +182,7 @@ impl Ink {
             // closed mark sweeps round to its start by itself.
             pts.pop();
         }
-        Some(Mark { pts, nib: self.nib, taper: self.taper, colour: self.colour, filled: true, closed, act: crate::Act::still() })
+        Some(Mark { pts, nib: self.nib, taper: self.taper, colour: self.colour, filled: true, closed, act: crate::Act::still(), group: 0 })
     }
 
     /// Did the stroke come back to where it started?

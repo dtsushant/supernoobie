@@ -4,7 +4,7 @@
 //! tests.
 
 use easel::bar::Bar;
-use easel::{Action, Board, Tool};
+use easel::{Action, Board};
 use plotkit::{Canvas, Cx, View};
 use shapes::Nib;
 use std::f64::consts::TAU;
@@ -34,10 +34,9 @@ fn line(from: Cx, to: Cx) -> Vec<Cx> {
 
 /// Pick up whatever is at this point.
 fn choose(b: &mut Board, at: Cx) {
-    b.tool = Tool::Pick;
+    b.selected.clear();
     b.pointer(at, true);
     b.pointer(at, false);
-    b.tool = Tool::Draw;
 }
 
 #[test]
@@ -56,16 +55,14 @@ fn studio() {
     draw(&mut b, &line(Cx::new(-3.4, 0.0), Cx::new(-3.75, -0.7)));
     draw(&mut b, &line(Cx::new(-3.4, 0.0), Cx::new(-3.05, -0.7)));
 
-    // The figure walks, then jumps. Each mark carries its OWN act, so all six
-    // strokes have to be given the same one or the head walks off and leaves
-    // the body standing. That is what grouping is for, and its absence is the
-    // clearest thing this picture says.
-    for k in 0..b.sheet.len() {
-        b.selected = Some(k);
-        b.give(Action::Walk(Cx::new(1.1, 0.0)), Some(2.0));
-        b.give(Action::Jump { height: 1.0, rate: 1.5 }, Some(2.0));
-    }
-    b.selected = None;
+    // The figure walks, then jumps. Its six strokes are bound into one figure
+    // first, so all of it is told at once -- otherwise the head walks off and
+    // leaves the body standing.
+    b.selected = (0..b.sheet.len()).collect();
+    b.group();
+    b.give(Action::Walk(Cx::new(1.1, 0.0)), Some(2.0));
+    b.give(Action::Jump { height: 1.0, rate: 1.5 }, Some(2.0));
+    b.selected.clear();
 
     // --- a ball that bounces, and a square that spins ---------------------
     b.colour = 0x4FBCD4;
@@ -100,25 +97,25 @@ fn studio() {
 
     // --- four moments, side by side ---------------------------------------
     let bar = Bar::new();
-    let (w, h) = (1180, 760);
+    let (w, h) = (1280, 860);
     let mut sheet = Canvas::new(w, h);
     sheet.clear(0x0B1017);
 
     for (k, t) in [0.0, 0.9, 2.3, 3.4].into_iter().enumerate() {
         b.clock = t;
-        let mut tile = Canvas::new(w - 140, h / 4);
+        let mut tile = Canvas::new(w - 190, h / 4);
         tile.clear(if k % 2 == 0 { 0x0B1017 } else { 0x0D131B });
-        let view = View::centred(w - 140, h / 4, 40.0);
+        let view = View::centred(w - 190, h / 4, 40.0);
         b.frame().draw(&mut tile, &view);
         // Copy the strip into place.
         let top = k * (h / 4);
         for y in 0..h / 4 {
-            for x in 0..w - 140 {
-                let p = tile.buf[y * (w - 140) + x];
-                sheet.px((140 + x) as i32, (top + y) as i32, p);
+            for x in 0..w - 190 {
+                let p = tile.buf[y * (w - 190) + x];
+                sheet.px((190 + x) as i32, (top + y) as i32, p);
             }
         }
-        sheet.text(150, (top + 6) as i32, &format!("t = {t:.1}s"), 0x6B7987, 2);
+        sheet.text(200, (top + 6) as i32, &format!("t = {t:.1}s"), 0x6B7987, 2);
     }
 
     // The toolbar, painted by the same code the window uses.

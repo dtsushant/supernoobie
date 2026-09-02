@@ -66,12 +66,20 @@ pub struct Mark {
     /// What it does when the clock is running. Numbers, like everything else
     /// here, so an animation is a few extra words in the file.
     pub act: Act,
+    /// Which group it belongs to. `0` is none.
+    ///
+    /// A number rather than a tree of parents, because a figure is a handful
+    /// of strokes that move together and nothing more. A tree would need
+    /// re-parenting, cycle checks and a way to write nesting into the file,
+    /// all to express something nobody has asked for yet. When nesting is
+    /// genuinely needed this becomes a path, and the file gains one word.
+    pub group: u32,
 }
 
 impl Mark {
     /// A stroke as the pen made it.
     pub fn new(pts: impl Into<Vec<Cx>>, nib: Nib, colour: u32) -> Mark {
-        Mark { pts: pts.into(), nib, taper: 0.0, colour, filled: true, closed: false, act: Act::still() }
+        Mark { pts: pts.into(), nib, taper: 0.0, colour, filled: true, closed: false, act: Act::still(), group: 0 }
     }
 
     pub fn taper(mut self, f: f64) -> Mark {

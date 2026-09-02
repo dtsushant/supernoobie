@@ -115,6 +115,9 @@ impl Sheet {
                 if m.filled { "fill" } else { "line" },
                 if m.closed { "closed" } else { "open" }
             );
+            if m.group != 0 {
+                let _ = writeln!(out, "group {}", m.group);
+            }
             for chunk in m.pts.chunks(PER_LINE) {
                 out.push('p');
                 for z in chunk {
@@ -153,6 +156,10 @@ impl Sheet {
                 Some("mark") => match read_mark(&mut word) {
                     Some(m) => sheet.marks.push(m),
                     None => confused += 1,
+                },
+                Some("group") => match (sheet.marks.last_mut(), word.next().and_then(|w| w.parse().ok())) {
+                    (Some(m), Some(g)) => m.group = g,
+                    _ => confused += 1,
                 },
                 Some("act") => match sheet.marks.last_mut() {
                     Some(m) => m.act.looping = word.next() != Some("once"),
@@ -278,6 +285,7 @@ mod tests {
             assert_eq!(a.closed, b.closed);
             assert!((a.taper - b.taper).abs() < 1e-4);
             assert_eq!(a.act, b.act, "what it does must survive too");
+            assert_eq!(a.group, b.group, "and which figure it belongs to");
             assert_eq!(a.pts.len(), b.pts.len());
             for (p, q) in a.pts.iter().zip(&b.pts) {
                 // Four decimal places is the format's promise, and at the
@@ -351,6 +359,24 @@ mod tests {
         assert_eq!(confused, 1, "and it should say one line was lost");
         assert_eq!(sheet.marks[0].act.steps.len(), 1, "the step it understood should be there");
         assert_eq!(sheet.marks[0].act.steps[0].action, Action::Spin(0.5));
+    }
+
+    /// ★ A figure is several strokes that belong together, and that belonging
+    /// has to survive the file — or a drawing reopens as a heap of unrelated
+    /// lines and every figure has to be gathered up again by hand.
+    #[test]
+    fn belonging_to_a_figure_survives_the_file() {
+        let mut s = Sheet::new();
+        for k in 0..3 {
+            let mut m = Mark::new(ring(12, 0.5, Cx::new(k as f64, 0.0)), Nib::Round(0.2), 0xFFFFFF);
+            m.group = if k < 2 { 7 } else { 0 };
+            s.add(m);
+        }
+        let (back, confused) = Sheet::from_text(&s.to_text());
+        assert_eq!(confused, 0);
+        assert_eq!(back.marks[0].group, 7);
+        assert_eq!(back.marks[1].group, 7);
+        assert_eq!(back.marks[2].group, 0, "and belonging to nothing must survive as nothing");
     }
 
     /// An empty drawing writes and reads as an empty drawing rather than as

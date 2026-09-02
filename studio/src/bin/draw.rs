@@ -21,11 +21,25 @@
 //! means *"talk to the graph rather than to the drawing"* everywhere else in
 //! this repository.
 //!
+//! ## Choosing things
+//!
+//! ```text
+//!     drag        draw / move / rub out, according to the tool
+//!     tap         choose that shape -- whatever the tool is
+//!     tap again   let go of it
+//!     tap paper   choose nothing
+//! ```
+//!
+//! No trip to the pick tool and back. A tap already made no mark, so the
+//! gesture was going spare, and tapping **toggles** so several things can be
+//! chosen without a modifier key — which matters with a pen, where there is
+//! no second button.
+//!
 //! ## Making something move
 //!
 //! ```text
-//!     1.  pick        and tap a shape           -- a ring shows what is chosen
-//!     2.  walk / run / jump / spin / bob        -- each press adds a step
+//!     1.  tap the strokes of a figure, then group    -- one tap takes it after that
+//!     2.  walk / run / jump / spin / bob             -- each press adds a step
 //!     3.  play
 //! ```
 //!
@@ -44,7 +58,8 @@
 //!     1 2 3        nib: quill, round, broad        D E P   draw, rub, pick
 //!     [ ]          thinner / thicker               SPACE   play or stop
 //!     , .          the broad nib's angle           B       back to the start
-//!     - =          more / less spring              N       do nothing (clear the act)
+//!     - =          more / less spring              G H     group, split up
+//!                                                  N       do nothing (clear the act)
 //!     T            taper on and off                U R     undo, redo
 //!     C            the next colour                 F       even out the shakes
 //!                                                  S O     save, open
@@ -178,6 +193,16 @@ impl Studio {
                     "choose a shape first: press pick, then tap one".into()
                 };
             }
+            Cmd::Group => {
+                self.say = if self.board.group() {
+                    "one figure now -- tap any part to take it all".into()
+                } else {
+                    "tap two or more shapes first".into()
+                };
+            }
+            Cmd::Ungroup => {
+                self.say = if self.board.ungroup() { "split up".into() } else { "nothing grouped".into() };
+            }
             Cmd::Stop => {
                 self.say = if self.board.stop_doing() { "it does nothing now".into() } else { "nothing chosen".into() };
             }
@@ -277,6 +302,8 @@ fn main() {
         .on(' ', |s| s.obey(if s.board.playing { Cmd::Pause } else { Cmd::Play }))
         .on('b', |s| s.obey(Cmd::Rewind))
         .on('n', |s| s.obey(Cmd::Stop))
+        .on('g', |s| s.obey(Cmd::Group))
+        .on('h', |s| s.obey(Cmd::Ungroup))
         // --- the page ---------------------------------------------------------
         .on('u', |s| s.obey(Cmd::Undo))
         .on('r', |s| s.obey(Cmd::Redo))
@@ -291,7 +318,7 @@ fn page(s: &Studio) -> Frame {
     let mut f = s.board.frame();
 
     // What is chosen, so the action buttons have something visible to act on.
-    if let Some(ring) = s.board.selection() {
+    for ring in s.board.selection() {
         f.add(ring).color(0x6FCF97).width(1);
     }
 
@@ -308,12 +335,15 @@ fn page(s: &Studio) -> Frame {
 
     // --- what is going on ----------------------------------------------------
     let doing = match s.board.chosen() {
-        None => "nothing chosen".to_string(),
-        Some(m) if m.act.steps.is_empty() => "chosen -- give it something to do".to_string(),
+        None => "tap a shape to choose it".to_string(),
+        Some(_) if s.board.chosen().is_some_and(|m| m.act.steps.is_empty()) => {
+            format!("{} chosen -- give it something to do", s.board.selected.len())
+        }
         Some(m) => {
             let now = m.act.step_at(s.board.clock).and_then(|k| m.act.steps.get(k));
             format!(
-                "{} step(s){}",
+                "{} chosen, {} step(s){}",
+                s.board.selected.len(),
                 m.act.steps.len(),
                 now.map_or(String::new(), |st| format!(", now: {}", st.action.name()))
             )
