@@ -1,9 +1,18 @@
 //! # draw — the studio
 //!
 //! ```text
-//!     cargo run -p studio --release --bin draw
-//!     cargo run -p studio --release --bin draw -- mine.easel
+//!     cargo run -p studio --release --bin draw                    drawing.easel
+//!     cargo run -p studio --release --bin draw -- mine.easel      a drawing
+//!     cargo run -p studio --release --bin draw -- some.rec        a plain script
 //! ```
+//!
+//! The file named is the one `save` and `open` use — there is no "save as",
+//! deliberately: one window, one file, and no dialog to get wrong. Start
+//! another window for another drawing.
+//!
+//! A `.rec` is **imported**: its rows come in and saving goes to a `.easel`
+//! beside it, so a script you were only borrowing from is never overwritten.
+//! Samples to try are in `samples/` — see `cargo run -p studio --bin sample`.
 //!
 //! Draw shapes with the pen, give them something to do, press **play**, and
 //! save the lot to a file that opens again and runs.
@@ -167,7 +176,27 @@ impl Studio {
         s
     }
 
+    /// Open whatever was named on the command line.
+    ///
+    /// `.easel` is a whole drawing — marks, keys, script. `.rec` is a plain
+    /// script, which is what the older live-reload playground has always used,
+    /// and it is **imported** rather than opened: the rows come in and saving
+    /// goes to a `.easel` beside it. Opening a file that quietly becomes the
+    /// thing you then overwrite is how people lose work they were only
+    /// borrowing from.
     fn open(&mut self) {
+        if self.file.ends_with(".rec") {
+            self.say = match std::fs::read_to_string(&self.file) {
+                Ok(text) => {
+                    self.board.sheet.script = easel::Script::from_rec(&text);
+                    self.board.forget_history();
+                    self.file = self.file.replace(".rec", ".easel");
+                    format!("imported {} rows -- saving goes to {}", self.board.sheet.script.len(), self.file)
+                }
+                Err(e) => format!("could not read: {e}"),
+            };
+            return;
+        }
         self.say = match self.board.load(&self.file) {
             Ok(0) => format!("opened {} -- {} marks", self.file, self.board.sheet.len()),
             Ok(bad) => format!("opened {} -- {} marks, {bad} lines lost", self.file, self.board.sheet.len()),

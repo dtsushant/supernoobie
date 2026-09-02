@@ -1,0 +1,13 @@
+easel 1
+row on # move r and n -- everything below follows
+row on r = 3
+row on n = 6
+row on circle(0, r)
+row on ngon(0, r, n)
+row on 
+row on # a rose. time is the clock, so this turns when you play
+row on color(0xE585AC)
+row on param(r * cos(n*t) * exp(i*(t + 0.3*time)), 0, tau)
+row on 
+row on # x^2 + y^2 = r^2, marched over a grid. switch it on with the tick
+row off implicit(x*x + y*y, r*r)

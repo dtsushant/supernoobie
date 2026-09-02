@@ -203,6 +203,31 @@ impl Script {
             .collect()
     }
 
+    /// Read a plain script file — one row per line.
+    ///
+    /// The `.rec` files this repository already has are exactly this: a
+    /// program, one statement to a line. Comments and blank lines become rows
+    /// too, kept as they are, because a comment explaining a row belongs next
+    /// to it and losing it on the way in would be rude.
+    pub fn from_rec(text: &str) -> Script {
+        Script { rows: text.lines().map(|l| Row::new(l.trim_end())).collect() }
+    }
+
+    /// The rows back out as a plain script file.
+    pub fn to_rec(&self) -> String {
+        let mut out = String::new();
+        for r in &self.rows {
+            // A switched-off row is written commented out, which is what off
+            // means in a file that has no notion of off.
+            if !r.on && !r.text.trim().is_empty() {
+                out.push_str("# ");
+            }
+            out.push_str(&r.text);
+            out.push('\n');
+        }
+        out
+    }
+
     /// Move a dial, by rewriting the row that binds it.
     ///
     /// The **text stays the only truth**. An overriding table beside it would
@@ -462,6 +487,39 @@ mod tests {
         blanks.add("   ");
         assert!(blanks.is_empty());
         assert!(blanks.run(0.0).errors.is_empty(), "blank rows are not mistakes");
+    }
+
+    /// ★ A plain script file comes in as rows, comments and all -- a comment
+    /// explaining a row belongs next to it, and losing it on the way in would
+    /// be rude.
+    #[test]
+    fn a_plain_script_file_comes_in_as_rows() {
+        let text = "# the radius
+r = 2
+
+circle(0, r)
+";
+        let s = Script::from_rec(text);
+        assert_eq!(s.len(), 4, "including the comment and the blank line");
+        assert_eq!(s.rows[0].text, "# the radius");
+        assert_eq!(s.rows[3].text, "circle(0, r)");
+        assert_eq!(s.run(0.0).shapes.len(), 1);
+    }
+
+    /// And goes back out again, with a switched-off row commented -- which is
+    /// what "off" means in a file that has no notion of off.
+    #[test]
+    fn rows_go_back_out_as_a_script_file() {
+        let mut s = Script::new();
+        s.add("r = 2");
+        s.rows.push(Row::new("ngon(0, r, 5)").off());
+        let text = s.to_rec();
+        assert!(text.contains("r = 2"));
+        assert!(text.contains("# ngon(0, r, 5)"), "off means commented: {text}");
+
+        // And a round trip keeps the shapes that were on.
+        let back = Script::from_rec(&text);
+        assert_eq!(back.run(0.0).shapes.len(), s.run(0.0).shapes.len());
     }
 
     /// Colours cycle so a script of bare shapes is still readable, and

@@ -663,6 +663,15 @@ impl Board {
         }
     }
 
+    /// Forget every step back, for when a different drawing is opened.
+    ///
+    /// Without it, undo after opening walks back into the drawing you had
+    /// before — which looks exactly like data loss even though nothing was
+    /// lost.
+    pub fn forget_history(&mut self) {
+        self.past.forget();
+    }
+
     pub fn can_undo(&self) -> bool {
         self.past.can_undo()
     }
