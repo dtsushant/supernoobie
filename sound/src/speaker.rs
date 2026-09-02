@@ -28,10 +28,26 @@
 //!
 //! ## What is given up
 //!
-//! Sample-accurate timing, and synthesising while it plays. Neither is needed
-//! to hear the note you are looking at, and both can be added later by
-//! bringing back a real audio library **in a crate of its own**, so that the
-//! build cost lands only on whoever wants it.
+//! **The sound is a separate process playing a recording.** It starts while
+//! the animation carries on — [`play_file`] does not wait, or a two-second
+//! note would freeze the window — but the two are not connected. The file was
+//! rendered at the instant you asked for it, so:
+//!
+//! * nothing can change once it has started. Turn up the wind while a note is
+//!   playing and the note does not know.
+//! * nothing can be triggered *on a frame*. A ball landing cannot click at
+//!   the moment it lands, only a few milliseconds after somebody notices.
+//! * two sounds at once are two processes, and nothing keeps them in step.
+//!
+//! That is the honest cost of not linking anything, and for hearing the note
+//! you are looking at it costs nothing that matters.
+//!
+//! **Live sound is a different shape of program.** The card asks for the next
+//! few hundred samples on its own thread and will not wait, so the synthesiser
+//! has to run inside that callback, next to the animation loop rather than
+//! after it. That needs a real audio library — and the way to have it without
+//! putting a C library in everybody's build is a **crate outside this
+//! workspace**, so the cost lands only on whoever wants it.
 
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -84,7 +100,13 @@ fn command_for(player: &str, path: &str) -> Option<Command> {
         // can see, which is why the file wants to be under /mnt/c.
         "powershell.exe" => {
             let win = windows_path(path);
-            cmd.arg("-NoProfile").arg("-Command").arg(format!("(New-Object Media.SoundPlayer '{win}').PlaySync()"));
+            // Hidden, or a console window flashes up over whatever you were
+            // watching every time a note plays.
+            cmd.arg("-NoProfile")
+                .arg("-WindowStyle")
+                .arg("Hidden")
+                .arg("-Command")
+                .arg(format!("(New-Object Media.SoundPlayer '{win}').PlaySync()"));
         }
         // Play and quit, without opening a window to show a blank video.
         "ffplay" => {
