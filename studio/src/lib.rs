@@ -433,6 +433,7 @@ enum Binding<S> {
     Click(Box<dyn FnMut(&mut S, Cx)>),
     /// The pointer every frame: where it is, and whether the button is down.
     Pointer(Box<dyn FnMut(&mut S, Cx, bool)>),
+    PointerPx(Box<dyn FnMut(&mut S, Cx, (f64, f64), bool)>),
 }
 
 impl<S: 'static> Sketch<S> {
@@ -505,6 +506,24 @@ impl<S: 'static> Sketch<S> {
     /// ```
     pub fn on_pointer(mut self, f: impl FnMut(&mut S, Cx, bool) + 'static) -> Self {
         self.bindings.push(Binding::Pointer(Box::new(f)));
+        self
+    }
+
+    /// The pointer in **both** coordinate systems at once: world, and pixels
+    /// from the top left.
+    ///
+    /// Almost nothing wants the pixels — a sketch works in the numbers the
+    /// scene is written in, and that is the point of [`Sketch::on_pointer`].
+    /// Furniture is the exception. A toolbar stays the same size when you zoom
+    /// and does not move when you pan, so a button is a rectangle in pixels,
+    /// and whoever paints one must be able to say whether a tap landed on it.
+    ///
+    /// Handed both together rather than as two bindings, because they must
+    /// describe the *same instant*: taking the position from one frame and the
+    /// button from the next is a press that lands in the wrong place, rarely,
+    /// and only when the hand is moving fast.
+    pub fn on_pointer_px(mut self, f: impl FnMut(&mut S, Cx, (f64, f64), bool) + 'static) -> Self {
+        self.bindings.push(Binding::PointerPx(Box::new(f)));
         self
     }
 
@@ -606,6 +625,7 @@ impl<S: 'static> Sketch<S> {
                     }
                 }
                 Binding::Pointer(f) => f(&mut self.state, keys.at(), keys.down()),
+                Binding::PointerPx(f) => f(&mut self.state, keys.at(), keys.at_px(), keys.down()),
             }
         }
     }

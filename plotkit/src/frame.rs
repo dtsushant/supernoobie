@@ -111,6 +111,8 @@ pub struct Frame {
     labels: Vec<(Cx, String, u32, i32)>,
     /// Text at window positions — captions that do not.
     pins: Vec<(Anchor, f64, f64, String, u32, i32)>,
+    /// Rectangles in **pixels from the top left**, painted over everything.
+    chips: Vec<(i32, i32, i32, i32, u32)>,
 }
 
 impl Default for Frame {
@@ -121,7 +123,7 @@ impl Default for Frame {
 
 impl Frame {
     pub fn new() -> Self {
-        Frame { items: Vec::new(), next_colour: 0, labels: Vec::new(), pins: Vec::new() }
+        Frame { items: Vec::new(), next_colour: 0, labels: Vec::new(), pins: Vec::new(), chips: Vec::new() }
     }
 
     /// Add a shape, taking the next palette colour. Returns its style so it
@@ -184,6 +186,22 @@ impl Frame {
     /// ```
     pub fn pin(&mut self, at: Anchor, dx: f64, dy: f64, text: impl Into<String>, colour: u32, scale: i32) {
         self.pins.push((at, dx, dy, text.into(), colour, scale.max(1)));
+    }
+
+    /// A filled rectangle in **pixels, from the top left of the window**.
+    ///
+    /// For furniture: toolbars, swatches, panels. Not part of the drawing —
+    /// it does not zoom, it does not pan, and it is painted over everything
+    /// else, because a button you can see through is not a button.
+    ///
+    /// Pixels rather than an anchor, and from the top left rather than from
+    /// wherever suits, because whoever paints a button must also decide
+    /// whether a tap landed on it. Two pieces of arithmetic that have to agree
+    /// will one day not, and the symptom is a button that misbehaves near its
+    /// edge. One coordinate system, measured from one corner, so there is
+    /// nothing to disagree about.
+    pub fn chip(&mut self, x: i32, y: i32, w: i32, h: i32, colour: u32) {
+        self.chips.push((x, y, w, h, colour));
     }
 
     pub fn len(&self) -> usize {
@@ -256,6 +274,10 @@ impl Frame {
         }
         for (at, text, colour, scale) in &self.labels {
             v.text_mid(c, *at, text, *colour, *scale);
+        }
+        // Furniture first, so text pinned on top of a panel is readable.
+        for (x, y, w, h, colour) in &self.chips {
+            c.fill_rect(*x, *y, *w, *h, *colour);
         }
         for (at, dx, dy, text, colour, scale) in &self.pins {
             // Straight to the canvas. The view is deliberately not consulted:

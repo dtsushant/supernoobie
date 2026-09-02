@@ -8,5 +8,6 @@ description = "A drawing that can be edited and saved — the whole editor excep
 # arithmetic on a pointer position and a list of marks, so all of it can be
 # tested in the dark.
 [dependencies]
+physics = { path = "../physics" }
 plotkit = { path = "../plotkit" }
 shapes = { path = "../shapes" }

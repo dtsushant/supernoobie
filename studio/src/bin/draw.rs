@@ -1,95 +1,113 @@
-//! # draw — the drawing program
+//! # draw — the studio
 //!
 //! ```text
 //!     cargo run -p studio --release --bin draw
 //!     cargo run -p studio --release --bin draw -- mine.easel
 //! ```
 //!
+//! Draw shapes with the pen, give them something to do, press **play**, and
+//! save the lot to a file that opens again and runs.
+//!
 //! ## The pen
 //!
 //! ```text
-//!     drag                 draw
+//!     drag                 draw, or pick up, or rub out
 //!     Shift + drag         move the paper
 //!     wheel                zoom about the pointer
 //! ```
 //!
-//! Nothing is bound to the right button, and nothing ever will be: on a pen
-//! and a trackpad it does not arrive at all. Shift is the modifier, and it
-//! already means *"talk to the graph rather than to the drawing"* everywhere
-//! else in this repository.
+//! Nothing is bound to the right button and nothing ever will be: on a pen and
+//! a trackpad it does not arrive at all. Shift is the modifier, and it already
+//! means *"talk to the graph rather than to the drawing"* everywhere else in
+//! this repository.
 //!
-//! ## The keys
+//! ## Making something move
 //!
 //! ```text
-//!     1 2 3        the nib: quill, round, broad
-//!     [ ]          thinner / thicker
-//!     , .          the broad nib's angle
-//!     - =          less / more spring -- how hard the ink follows your hand
-//!     T            taper on and off
-//!     C            the next colour
+//!     1.  pick        and tap a shape           -- a ring shows what is chosen
+//!     2.  walk / run / jump / spin / bob        -- each press adds a step
+//!     3.  play
+//! ```
 //!
-//!     D E P        draw, erase, pick things up
-//!     U R          undo, redo
-//!     F            smooth every closed mark -- press again to go further
-//!     X            clear the page (undoable)
-//!     S O          save, open
+//! Presses **stack**: walk, then jump, then spin is a sequence, and each step
+//! starts from wherever the last one left off — which is the only part of
+//! animating that has any real content in it, and it lives in
+//! [`easel::action`], tested without a window.
+//!
+//! Every step is two seconds and the whole act loops, so the buttons' rates
+//! are chosen to come round exactly in that time — otherwise a spin gets four
+//! fifths of the way and snaps back, for ever.
+//!
+//! ## The keys, for everything the bar can do
+//!
+//! ```text
+//!     1 2 3        nib: quill, round, broad        D E P   draw, rub, pick
+//!     [ ]          thinner / thicker               SPACE   play or stop
+//!     , .          the broad nib's angle           B       back to the start
+//!     - =          more / less spring              N       do nothing (clear the act)
+//!     T            taper on and off                U R     undo, redo
+//!     C            the next colour                 F       even out the shakes
+//!                                                  S O     save, open
 //! ```
 //!
 //! ## Where the work happens
 //!
-//! Not here. This file is a window and a set of key bindings; the drawing
-//! program is [`easel`], which has no window in it and is therefore tested in
-//! the dark — the press-drag-release logic, the spring on the ink, undo, the
-//! file format and the Fourier dial all have tests that never open anything.
+//! Not here. This file is a window: it paints what [`easel`] says and reports
+//! where the pen went. The toolbar is data — [`easel::Bar`] is a list of
+//! rectangles and what each one means — so the buttons are tested rather than
+//! clicked at, and the same arithmetic paints them and decides what was hit.
 //!
 //! ```text
-//!     easel/       what a drawing is and what editing it means
+//!     easel/       what a drawing is, what editing it means, what the buttons are
 //!     studio/      this: a window, a pointer and some keys
 //! ```
-//!
-//! Same arrangement as `world` and `live`, and for the same reason: the moment
-//! logic needs a window to run, it stops being checkable.
-//!
-//! ## What the pen can and cannot tell us
-//!
-//! No pressure and no tilt reach a program through this window, and none ever
-//! will. Weight comes from the stroke instead — the **quill** nib is thin when
-//! your hand is quick, because the points arrive one per frame and so the gap
-//! between them is the speed. The **broad** nib is a segment held at a fixed
-//! angle, which is calligraphy and needs no pressure at all.
 
+use easel::bar::{Bar, Cmd, INKS, STEP, WIDTH};
 use easel::{Board, Tool};
-use plotkit::{Anchor, Cx};
+use plotkit::{Anchor, Cx, Frame, Shape};
 use shapes::Nib;
 use studio::Graph;
 
-/// Somewhere to keep the things the window cares about but the board does not.
-struct Pad {
+/// The window's own concerns: the bar, the file, and what to say.
+struct Studio {
     board: Board,
-    /// How far the smoothing dial has been turned, in presses of `F`.
-    ///
-    /// It counts **down** from a lot of harmonics to a few, so each press
-    /// takes a little more of your hand out and you can stop where you like.
+    bar: Bar,
+    /// How far the evening-out dial has been turned, in presses.
     cut: usize,
     file: String,
     say: String,
+    /// The clock last frame, so the animation runs on real seconds.
+    was: f64,
+    /// Where the pointer is in pixels, for the toolbar.
+    px: (f64, f64),
+    /// Down last frame, so a press on the bar happens once.
+    was_down: bool,
 }
 
-const INKS: [u32; 7] = [0xE3E9EF, 0xE0A44A, 0x4FBCD4, 0xE585AC, 0x6FCF97, 0x9B7BD4, 0x46525E];
+const EDGE: u32 = 0x22303C;
 
-impl Pad {
-    fn new(file: String) -> Pad {
-        let mut pad = Pad { board: Board::new(), cut: 24, file, say: String::new() };
-        if std::path::Path::new(&pad.file).exists() {
-            pad.open();
+impl Studio {
+    fn new(file: String) -> Studio {
+        let mut s = Studio {
+            board: Board::new(),
+            bar: Bar::new(),
+            cut: 24,
+            file,
+            say: "draw with the pen. shift-drag moves the paper.".into(),
+            was: 0.0,
+            px: (-1.0, -1.0),
+            was_down: false,
+        };
+        if std::path::Path::new(&s.file).exists() {
+            s.open();
         }
-        pad
+        s
     }
 
     fn open(&mut self) {
         self.say = match self.board.load(&self.file) {
             Ok(0) => format!("opened {} -- {} marks", self.file, self.board.sheet.len()),
-            Ok(bad) => format!("opened {} -- {} marks, {bad} lines made no sense", self.file, self.board.sheet.len()),
+            Ok(bad) => format!("opened {} -- {} marks, {bad} lines lost", self.file, self.board.sheet.len()),
             Err(e) => format!("could not open {}: {e}", self.file),
         };
         self.cut = 24;
@@ -102,13 +120,21 @@ impl Pad {
         };
     }
 
-    /// Change the nib, keeping the width it already had.
     fn width(&self) -> f64 {
         match self.board.nib {
             Nib::Round(w) => w,
             Nib::Quill { slow, .. } => slow,
             Nib::Broad { width, .. } => width,
         }
+    }
+
+    fn set_nib(&mut self, which: usize) {
+        let w = self.width();
+        self.board.nib = match which {
+            1 => Nib::Round(w),
+            2 => Nib::Broad { width: w, angle: std::f64::consts::PI / 4.0 },
+            _ => Nib::Quill { slow: w, fast: w * 0.15, pace: 0.16 },
+        };
     }
 
     fn resize(&mut self, by: f64) {
@@ -123,113 +149,218 @@ impl Pad {
     fn nib_name(&self) -> String {
         match self.board.nib {
             Nib::Round(w) => format!("round {w:.2}"),
-            Nib::Quill { slow, .. } => format!("quill {slow:.2} -- thin when quick"),
+            Nib::Quill { slow, .. } => format!("quill {slow:.2}"),
             Nib::Broad { width, angle } => format!("broad {width:.2} at {:.0} deg", angle.to_degrees()),
         }
+    }
+
+    fn even_out(&mut self) {
+        self.cut = self.cut.saturating_sub(3).max(1);
+        self.board.smooth_all(self.cut);
+        self.say = format!("evened out: keeping waves up to pitch {}", self.cut);
+    }
+
+    /// Do what a button says.
+    fn obey(&mut self, cmd: Cmd) {
+        match cmd {
+            Cmd::Colour(c) => self.board.colour = c,
+            Cmd::Nib(k) => self.set_nib(k),
+            Cmd::Use(t) => self.board.tool = t,
+            Cmd::Do(action) => {
+                // Every step is the same length, and the bar's rates are
+                // chosen so a whole number of cycles fits in it -- an act
+                // loops, and a cycle that does not close jerks every time
+                // round.
+                self.say = if self.board.give(action, Some(STEP)) {
+                    let steps = self.board.chosen().map_or(0, |m| m.act.steps.len());
+                    format!("{} -- step {steps}. press play.", action.name())
+                } else {
+                    "choose a shape first: press pick, then tap one".into()
+                };
+            }
+            Cmd::Stop => {
+                self.say = if self.board.stop_doing() { "it does nothing now".into() } else { "nothing chosen".into() };
+            }
+            Cmd::Play => {
+                self.board.play(true);
+                self.say = if self.board.has_animation() {
+                    "playing".into()
+                } else {
+                    "nothing has been given anything to do yet".into()
+                };
+            }
+            Cmd::Pause => {
+                self.board.play(false);
+                self.say = "stopped".into();
+            }
+            Cmd::Rewind => {
+                self.board.rewind();
+                self.say = "back to the start".into();
+            }
+            Cmd::Undo => self.say = if self.board.undo() { "undone".into() } else { "nothing to undo".into() },
+            Cmd::Redo => self.say = if self.board.redo() { "redone".into() } else { "nothing to redo".into() },
+            Cmd::Smooth => self.even_out(),
+            Cmd::Clear => {
+                self.board.clear();
+                self.say = "cleared -- undo puts it back".into();
+            }
+            Cmd::Save => self.save(),
+            Cmd::Open => self.open(),
+        }
+    }
+
+    /// The pointer, every frame. **The bar gets first refusal.**
+    ///
+    /// A press that lands on the toolbar must not also reach the paper, or
+    /// every button press leaves a speck of ink under the button — invisible,
+    /// unreachable, and slowly filling the file.
+    fn pointer(&mut self, at: Cx, px: (f64, f64), down: bool) {
+        self.px = px;
+        let on_bar = self.bar.covers(self.px.0, self.px.1);
+        if on_bar {
+            if down && !self.was_down {
+                if let Some(cmd) = self.bar.at(self.px.0, self.px.1) {
+                    self.obey(cmd);
+                }
+            }
+            // Tell the board the pen is up, so a stroke in progress is
+            // finished properly rather than left hanging when the hand
+            // wanders over the toolbar.
+            self.board.pointer(at, false);
+        } else {
+            self.board.pointer(at, down);
+        }
+        self.was_down = down;
     }
 }
 
 fn main() {
     let file = std::env::args().nth(1).unwrap_or_else(|| "drawing.easel".to_string());
 
-    Graph::new("draw")
+    Graph::new("studio")
         .scale(70.0)
-        .with(Pad::new(file))
-        // The pen. `down` is already false while the graph is panning, so
-        // shift-dragging the paper does not leave a stroke across it.
-        .on_pointer(|p, at, down| p.board.pointer(at, down))
+        .with(Studio::new(file))
+        .each_frame(|s, t| {
+            let dt = (t - s.was).clamp(0.0, 1.0 / 15.0);
+            s.was = t;
+            s.board.tick(dt);
+        })
+        .on_pointer_px(|s, at, px, down| s.pointer(at, px, down))
         // --- the nib ---------------------------------------------------------
-        .on('1', |p| {
-            let w = p.width();
-            p.board.nib = Nib::Quill { slow: w, fast: w * 0.15, pace: 0.16 };
-        })
-        .on('2', |p| p.board.nib = Nib::Round(p.width()))
-        .on('3', |p| {
-            let w = p.width();
-            p.board.nib = Nib::Broad { width: w, angle: std::f64::consts::PI / 4.0 };
-        })
-        .on_hold('[', |p| p.resize(0.97))
-        .on_hold(']', |p| p.resize(1.03))
-        .on_hold(',', |p| {
-            if let Nib::Broad { width, angle } = p.board.nib {
-                p.board.nib = Nib::Broad { width, angle: angle - 0.03 };
+        .on('1', |s| s.set_nib(0))
+        .on('2', |s| s.set_nib(1))
+        .on('3', |s| s.set_nib(2))
+        .on_hold('[', |s| s.resize(0.97))
+        .on_hold(']', |s| s.resize(1.03))
+        .on_hold(',', |s| {
+            if let Nib::Broad { width, angle } = s.board.nib {
+                s.board.nib = Nib::Broad { width, angle: angle - 0.03 };
             }
         })
-        .on_hold('.', |p| {
-            if let Nib::Broad { width, angle } = p.board.nib {
-                p.board.nib = Nib::Broad { width, angle: angle + 0.03 };
+        .on_hold('.', |s| {
+            if let Nib::Broad { width, angle } = s.board.nib {
+                s.board.nib = Nib::Broad { width, angle: angle + 0.03 };
             }
         })
-        .on_hold('-', |p| p.board.pull = (p.board.pull * 1.03).min(1.0))
-        .on_hold('=', |p| p.board.pull = (p.board.pull * 0.97).max(0.03))
-        .on('t', |p| p.board.taper = if p.board.taper > 0.0 { 0.0 } else { 0.15 })
-        .on('c', |p| {
-            let next = INKS.iter().position(|c| *c == p.board.colour).map_or(0, |k| (k + 1) % INKS.len());
-            p.board.colour = INKS[next];
+        .on_hold('-', |s| s.board.pull = (s.board.pull * 1.03).min(1.0))
+        .on_hold('=', |s| s.board.pull = (s.board.pull * 0.97).max(0.03))
+        .on('t', |s| s.board.taper = if s.board.taper > 0.0 { 0.0 } else { 0.15 })
+        .on('c', |s| {
+            let next = INKS.iter().position(|c| *c == s.board.colour).map_or(0, |k| (k + 1) % INKS.len());
+            s.board.colour = INKS[next];
         })
-        // --- what a drag means ----------------------------------------------
-        .on('d', |p| p.board.tool = Tool::Draw)
-        .on('e', |p| p.board.tool = Tool::Erase)
-        .on('p', |p| p.board.tool = Tool::Pick)
-        // --- the page --------------------------------------------------------
-        .on('u', |p| {
-            p.say = if p.board.undo() { "undone".into() } else { "nothing left to undo".into() };
-        })
-        .on('r', |p| {
-            p.say = if p.board.redo() { "redone".into() } else { "nothing to redo".into() };
-        })
-        .on('f', |p| {
-            // Each press takes a little more of your hand out. It stops at 1,
-            // which is a single harmonic -- a perfect circle, and as far as
-            // this dial goes.
-            p.cut = p.cut.saturating_sub(3).max(1);
-            p.board.smooth_all(p.cut);
-            p.say = format!("smoothed: keeping waves up to pitch {}", p.cut);
-        })
-        .on('x', |p| {
-            p.board.clear();
-            p.say = "cleared -- U puts it back".into();
-        })
-        .on('s', Pad::save)
-        .on('o', Pad::open)
+        // --- what a drag does -------------------------------------------------
+        .on('d', |s| s.obey(Cmd::Use(Tool::Draw)))
+        .on('e', |s| s.obey(Cmd::Use(Tool::Erase)))
+        .on('p', |s| s.obey(Cmd::Use(Tool::Pick)))
+        // --- the clock --------------------------------------------------------
+        .on(' ', |s| s.obey(if s.board.playing { Cmd::Pause } else { Cmd::Play }))
+        .on('b', |s| s.obey(Cmd::Rewind))
+        .on('n', |s| s.obey(Cmd::Stop))
+        // --- the page ---------------------------------------------------------
+        .on('u', |s| s.obey(Cmd::Undo))
+        .on('r', |s| s.obey(Cmd::Redo))
+        .on('f', |s| s.obey(Cmd::Smooth))
+        .on('x', |s| s.obey(Cmd::Clear))
+        .on('s', |s| s.obey(Cmd::Save))
+        .on('o', |s| s.obey(Cmd::Open))
         .run(page);
 }
 
-fn page(p: &Pad) -> plotkit::Frame {
-    let mut f = p.board.frame();
+fn page(s: &Studio) -> Frame {
+    let mut f = s.board.frame();
 
-    let tool = match p.board.tool {
-        Tool::Draw => "draw",
-        Tool::Erase => "erase",
-        Tool::Pick => "pick up",
+    // What is chosen, so the action buttons have something visible to act on.
+    if let Some(ring) = s.board.selection() {
+        f.add(ring).color(0x6FCF97).width(1);
+    }
+
+    // A cross at the origin, so there is somewhere to be on a blank page.
+    if s.board.sheet.is_empty() {
+        f.add(Shape::path(vec![Cx::new(-0.2, 0.0), Cx::new(0.2, 0.0)])).color(EDGE).width(1);
+        f.add(Shape::path(vec![Cx::new(0.0, -0.2), Cx::new(0.0, 0.2)])).color(EDGE).width(1);
+    }
+
+    // --- the toolbar ---------------------------------------------------------
+    // One call. The rectangles are `easel`'s, and the same ones decide what a
+    // tap hit, so painting and hitting cannot drift apart.
+    s.bar.paint(&mut f, &s.board, 620);
+
+    // --- what is going on ----------------------------------------------------
+    let doing = match s.board.chosen() {
+        None => "nothing chosen".to_string(),
+        Some(m) if m.act.steps.is_empty() => "chosen -- give it something to do".to_string(),
+        Some(m) => {
+            let now = m.act.step_at(s.board.clock).and_then(|k| m.act.steps.get(k));
+            format!(
+                "{} step(s){}",
+                m.act.steps.len(),
+                now.map_or(String::new(), |st| format!(", now: {}", st.action.name()))
+            )
+        }
     };
-    f.pin(Anchor::TopLeft, 14.0, 14.0, format!("{tool}   {}", p.nib_name()), p.board.colour, 2);
     f.pin(
         Anchor::TopLeft,
+        (WIDTH + 14) as f64,
         14.0,
+        format!("{}   {}   {}", tool_name(s), s.nib_name(), doing),
+        s.board.colour,
+        2,
+    );
+    f.pin(
+        Anchor::TopLeft,
+        (WIDTH + 14) as f64,
         32.0,
         format!(
-            "spring {:.2}   taper {}   {} marks   {}{}",
-            p.board.pull,
-            if p.board.taper > 0.0 { "on" } else { "off" },
-            p.board.sheet.len(),
-            if p.board.can_undo() { "U" } else { "-" },
-            if p.board.can_redo() { "R" } else { "-" },
+            "{}  t {:.1}s   spring {:.2}   taper {}   {} marks   {}{}",
+            if s.board.playing { "PLAYING" } else { "stopped" },
+            s.board.clock,
+            s.board.pull,
+            if s.board.taper > 0.0 { "on" } else { "off" },
+            s.board.sheet.len(),
+            if s.board.can_undo() { "U" } else { "-" },
+            if s.board.can_redo() { "R" } else { "-" },
         ),
         0x94A1AE,
         2,
     );
-    f.pin(Anchor::BottomLeft, 14.0, -34.0, "1 2 3 nib   [ ] size   , . angle   - = spring   T taper   C colour", 0x6B7987, 2);
-    f.pin(Anchor::BottomLeft, 14.0, -16.0, "D draw  E erase  P pick   U undo  R redo  F smooth  X clear  S save  O open   shift-drag moves the paper", 0x6B7987, 2);
-    if !p.say.is_empty() {
-        f.pin(Anchor::BottomRight, -14.0, -16.0, &p.say, 0x6FCF97, 2);
-    }
-
-    // A cross at the origin, so there is somewhere to be when the page is
-    // blank and you have panned away from everything.
-    if p.board.sheet.is_empty() {
-        f.add(plotkit::Shape::path(vec![Cx::new(-0.2, 0.0), Cx::new(0.2, 0.0)])).color(0x22303C).width(1);
-        f.add(plotkit::Shape::path(vec![Cx::new(0.0, -0.2), Cx::new(0.0, 0.2)])).color(0x22303C).width(1);
-    }
+    f.pin(Anchor::BottomLeft, (WIDTH + 14) as f64, -16.0, &s.say, 0x6FCF97, 2);
+    f.pin(
+        Anchor::BottomRight,
+        -14.0,
+        -16.0,
+        "pick a shape, then walk / jump / spin, then play   --   shift-drag moves the paper",
+        0x46525E,
+        2,
+    );
     f
 }
+
+fn tool_name(s: &Studio) -> &'static str {
+    match s.board.tool {
+        Tool::Draw => "draw",
+        Tool::Erase => "rub out",
+        Tool::Pick => "pick up",
+    }
+}
+

@@ -41,9 +41,10 @@
 //! knew about pixels would have to know about zoom, and then about panning,
 //! and then it would be the window.
 
-use plotkit::{Cx, Frame};
+use plotkit::{Cx, Frame, Shape};
 use shapes::Nib;
 
+use crate::action::{Act, Action};
 use crate::history::History;
 use crate::ink::Ink;
 use crate::mark::Mark;
@@ -90,6 +91,18 @@ pub struct Board {
     /// drag without the window having to say.
     was_down: bool,
     past: History,
+
+    // --- the clock ----------------------------------------------------------
+    /// Which mark the commands apply to. Set by picking one up.
+    pub selected: Option<usize>,
+    /// Where the animation has got to, in seconds.
+    ///
+    /// Held here rather than taken from the wall clock, so that stopping means
+    /// *going back to the beginning* and pausing means staying put — neither
+    /// of which is possible if every mark works out its own pose from whatever
+    /// time it happens to be.
+    pub clock: f64,
+    pub playing: bool,
 }
 
 impl Default for Board {
@@ -112,6 +125,9 @@ impl Board {
             holding: None,
             was_down: false,
             past: History::new(),
+            selected: None,
+            clock: 0.0,
+            playing: false,
         }
     }
 
@@ -140,7 +156,11 @@ impl Board {
                 self.ink = Some(ink);
             }
             Tool::Pick => {
-                if let Some(k) = self.sheet.at(at, self.touch) {
+                // Selecting happens even when nothing is grabbed, because
+                // clicking empty paper meaning "select nothing" is how every
+                // editor behaves and its absence is felt immediately.
+                self.selected = self.sheet.at(at, self.touch);
+                if let Some(k) = self.selected {
                     // Remembered on the press, so the whole drag is one step
                     // back rather than sixty.
                     self.past.remember(&self.sheet);
@@ -190,6 +210,15 @@ impl Board {
     fn rub(&mut self, at: Cx) {
         if let Some(k) = self.sheet.at(at, self.touch) {
             self.sheet.marks.remove(k);
+            // Everything above it has just shifted down one. A selection left
+            // pointing at an index rather than at a mark would silently start
+            // meaning a different shape — and then a walk gets given to the
+            // wrong one.
+            self.selected = match self.selected {
+                Some(s) if s == k => None,
+                Some(s) if s > k => Some(s - 1),
+                other => other,
+            };
         }
     }
 
@@ -208,11 +237,81 @@ impl Board {
                 // makes the mark flicker between open and closed under your
                 // hand.
                 closed: false,
+                act: crate::Act::still(),
             }
         })
     }
 
     // ---- commands ----------------------------------------------------------
+
+    // ---- the clock ---------------------------------------------------------
+
+    /// Move the animation on by `dt` seconds, if it is running.
+    pub fn tick(&mut self, dt: f64) {
+        if self.playing {
+            self.clock += dt.max(0.0);
+        }
+    }
+
+    /// Run, or stop running and stay where you are.
+    pub fn play(&mut self, yes: bool) {
+        self.playing = yes;
+    }
+
+    /// Back to the beginning, and stop.
+    pub fn rewind(&mut self) {
+        self.clock = 0.0;
+        self.playing = false;
+    }
+
+    // ---- what things do ----------------------------------------------------
+
+    /// The mark the commands apply to.
+    pub fn chosen(&self) -> Option<&Mark> {
+        self.sheet.marks.get(self.selected?)
+    }
+
+    /// Add a step to what the selected mark does.
+    ///
+    /// `None` for `seconds` means forever, which is what a single looping
+    /// motion is and is the common case — `spin`, and nothing after it.
+    pub fn give(&mut self, action: Action, seconds: Option<f64>) -> bool {
+        let Some(k) = self.selected else { return false };
+        if self.sheet.marks.get(k).is_none() {
+            return false;
+        }
+        self.past.remember(&self.sheet);
+        let m = &mut self.sheet.marks[k];
+        m.act.steps.push(crate::action::Step { action, seconds: seconds.unwrap_or(f64::INFINITY) });
+        true
+    }
+
+    /// Take away everything the selected mark does.
+    pub fn stop_doing(&mut self) -> bool {
+        let Some(k) = self.selected else { return false };
+        if self.sheet.marks.get(k).is_none() {
+            return false;
+        }
+        self.past.remember(&self.sheet);
+        self.sheet.marks[k].act = Act::still();
+        true
+    }
+
+    /// Whether the selected mark starts again at the end.
+    pub fn set_looping(&mut self, yes: bool) -> bool {
+        let Some(k) = self.selected else { return false };
+        if self.sheet.marks.get(k).is_none() {
+            return false;
+        }
+        self.past.remember(&self.sheet);
+        self.sheet.marks[k].act.looping = yes;
+        true
+    }
+
+    /// Does anything on the page move at all?
+    pub fn has_animation(&self) -> bool {
+        self.sheet.marks.iter().any(|m| !m.act.steps.is_empty())
+    }
 
     pub fn undo(&mut self) -> bool {
         match self.past.undo(&self.sheet) {
@@ -277,11 +376,17 @@ impl Board {
 
     // ---- drawing -----------------------------------------------------------
 
-    /// The page as it should look, including the stroke in progress.
+    /// The page as it should look **now** — every mark posed at the clock,
+    /// plus the stroke in progress.
+    ///
+    /// The clock is zero until something plays, and a still mark's pose at
+    /// zero is the identity, so a drawing with no animation in it draws
+    /// exactly as it was made. There is no separate "editing" path to keep in
+    /// step with the "playing" one, which is the kind of pair that drifts.
     pub fn frame(&self) -> Frame {
         let mut f = Frame::new();
         for m in &self.sheet.marks {
-            let item = f.add(m.shape()).color(m.colour);
+            let item = f.add(m.at(self.clock)).color(m.colour);
             if m.filled {
                 item.fill();
             }
@@ -290,6 +395,22 @@ impl Board {
             f.add(wet.shape()).color(wet.colour).fill();
         }
         f
+    }
+
+    /// A ring round whatever is selected, so you can see what a command will
+    /// act on. Separate from [`frame`](Board::frame) because it is furniture
+    /// rather than drawing, and must not be saved or exported.
+    pub fn selection(&self) -> Option<Shape> {
+        let m = self.chosen()?;
+        let pose = m.act.at(self.clock);
+        let here = m.anchor();
+        let (lo, hi) = m.bounds()?;
+        let pad = 0.08 + (hi - lo).abs() * 0.03;
+        let (a, b) = (lo - Cx::new(pad, pad), hi + Cx::new(pad, pad));
+        let corners = vec![a, Cx::new(b.re, a.im), b, Cx::new(a.re, b.im)];
+        // Moved with the mark, or the ring stays behind while the thing it is
+        // pointing at walks away.
+        Some(Shape::polygon(corners).map(move |z| pose.apply(z - here) + here))
     }
 }
 
@@ -504,6 +625,138 @@ mod tests {
         assert_ne!(b.sheet, before, "it should have changed something");
         assert!(b.undo());
         assert_eq!(b.sheet, before);
+    }
+
+    /// ★ Erasing a mark below the selected one must move the selection with
+    /// it. An index that quietly starts meaning a different shape is how a
+    /// walk gets given to the wrong thing, and it would look like the action
+    /// buttons being broken.
+    #[test]
+    fn erasing_does_not_leave_the_selection_pointing_at_the_wrong_mark() {
+        let mut b = Board::new();
+        for k in 0..3 {
+            draw(&mut b, &ring(0.4, Cx::new(k as f64 * 2.0, 0.0), 40));
+        }
+        b.tool = Tool::Pick;
+        b.pointer(Cx::new(4.0 - 0.4, 0.0), true);
+        b.pointer(Cx::new(4.0 - 0.4, 0.0), false);
+        assert_eq!(b.selected, Some(2), "the third one");
+
+        // Rub out the first.
+        b.tool = Tool::Erase;
+        b.pointer(Cx::new(-0.4, 0.0), true);
+        b.pointer(Cx::new(-0.4, 0.0), false);
+        assert_eq!(b.selected, Some(1), "it should still be the same shape");
+
+        // And rubbing out the selected one deselects rather than pointing at
+        // whatever slid into its place.
+        b.pointer(Cx::new(4.0 - 0.4, 0.0), true);
+        b.pointer(Cx::new(4.0 - 0.4, 0.0), false);
+        assert_eq!(b.selected, None);
+    }
+
+    /// ★ A drawing with nothing animated in it draws exactly as it was made.
+    /// There is one drawing path rather than an "editing" one and a "playing"
+    /// one, because that is the kind of pair that drifts apart.
+    #[test]
+    fn a_still_drawing_is_unaffected_by_the_clock() {
+        let mut b = Board::new();
+        draw(&mut b, &ring(1.0, Cx::ZERO, 60));
+        let at_rest = b.sheet.marks[0].at(0.0);
+        let much_later = b.sheet.marks[0].at(500.0);
+        let (lo, hi) = (Cx::new(-9.0, -9.0), Cx::new(9.0, 9.0));
+        assert_eq!(at_rest.polylines(lo, hi, 400).len(), much_later.polylines(lo, hi, 400).len());
+    }
+
+    /// ★ An action goes to the mark that is selected, and to no mark at all if
+    /// none is.
+    #[test]
+    fn an_action_goes_to_the_chosen_mark() {
+        let mut b = Board::new();
+        draw(&mut b, &ring(1.0, Cx::ZERO, 60));
+        draw(&mut b, &ring(1.0, Cx::new(5.0, 0.0), 60));
+
+        assert!(!b.give(Action::Spin(1.0), None), "nothing is selected yet");
+        assert!(b.sheet.marks.iter().all(|m| m.act.steps.is_empty()));
+
+        b.tool = Tool::Pick;
+        b.pointer(Cx::new(5.0 + 1.0, 0.0), true);
+        b.pointer(Cx::new(5.0 + 1.0, 0.0), false);
+        assert!(b.give(Action::Spin(1.0), None));
+        assert!(b.sheet.marks[0].act.steps.is_empty(), "the other one must be untouched");
+        assert_eq!(b.sheet.marks[1].act.steps.len(), 1);
+    }
+
+    /// Actions build up in order, which is how "walk, then jump" is said.
+    #[test]
+    fn actions_stack_up_into_a_sequence() {
+        let mut b = Board::new();
+        draw(&mut b, &ring(1.0, Cx::ZERO, 60));
+        b.tool = Tool::Pick;
+        b.pointer(Cx::new(1.0, 0.0), true);
+        b.pointer(Cx::new(1.0, 0.0), false);
+
+        b.give(Action::Walk(Cx::new(1.0, 0.0)), Some(2.0));
+        b.give(Action::Jump { height: 1.0, rate: 1.0 }, Some(1.0));
+        let act = &b.sheet.marks[0].act;
+        assert_eq!(act.steps.len(), 2);
+        assert_eq!(act.steps[0].action, Action::Walk(Cx::new(1.0, 0.0)));
+        assert_eq!(act.steps[1].action, Action::Jump { height: 1.0, rate: 1.0 });
+
+        assert!(b.undo(), "and giving something an action is undoable");
+        assert_eq!(b.sheet.marks[0].act.steps.len(), 1);
+    }
+
+    /// ★ The clock only moves while it is playing, and rewinding goes back to
+    /// the beginning. Taking the time from the wall clock instead would make
+    /// pause impossible — everything would jump forward by however long you
+    /// paused for.
+    #[test]
+    fn the_clock_stands_still_unless_it_is_playing() {
+        let mut b = Board::new();
+        b.tick(1.0);
+        assert_eq!(b.clock, 0.0, "it should not run before you press play");
+
+        b.play(true);
+        b.tick(0.5);
+        b.tick(0.5);
+        assert!((b.clock - 1.0).abs() < 1e-9);
+
+        b.play(false);
+        b.tick(5.0);
+        assert!((b.clock - 1.0).abs() < 1e-9, "pausing should stay put, not skip ahead");
+
+        b.rewind();
+        assert_eq!(b.clock, 0.0);
+        assert!(!b.playing);
+    }
+
+    /// ★ And the animation survives a file. A studio that reopened a drawing
+    /// as a set of motionless shapes would have lost the part that took
+    /// longest.
+    #[test]
+    fn an_animation_can_be_saved_and_run_again() {
+        let mut b = Board::new();
+        draw(&mut b, &ring(1.0, Cx::ZERO, 60));
+        b.tool = Tool::Pick;
+        b.pointer(Cx::new(1.0, 0.0), true);
+        b.pointer(Cx::new(1.0, 0.0), false);
+        b.give(Action::Walk(Cx::new(2.0, 0.0)), Some(2.0));
+        b.give(Action::Jump { height: 1.5, rate: 2.0 }, Some(1.0));
+
+        let path = std::env::temp_dir().join("easel-animation.easel");
+        let path = path.to_str().expect("a path");
+        b.save(path).expect("saved");
+
+        let mut opened = Board::new();
+        opened.load(path).expect("loaded");
+        assert!(opened.has_animation());
+        for t in [0.0, 0.5, 1.9, 2.1, 2.9] {
+            let there = b.sheet.marks[0].act.at(t);
+            let here = opened.sheet.marks[0].act.at(t);
+            assert!((there.b - here.b).abs() < 1e-3, "at t={t} it moved differently");
+        }
+        let _ = std::fs::remove_file(path);
     }
 
     /// A tap leaves nothing — no invisible speck that can still be clicked on.

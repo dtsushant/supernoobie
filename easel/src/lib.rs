@@ -7,12 +7,16 @@
 //!
 //! Same split as `world` and `live`.
 
+pub mod action;
+pub mod bar;
 pub mod board;
 pub mod history;
 pub mod ink;
 pub mod mark;
 pub mod sheet;
 
+pub use action::{Act, Action, Step};
+pub use bar::{Bar, Button, Cmd};
 pub use board::{Board, Tool};
 pub use history::History;
 pub use ink::Ink;

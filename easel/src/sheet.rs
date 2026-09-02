@@ -38,6 +38,7 @@ use plotkit::Cx;
 use shapes::Nib;
 use std::fmt::Write as _;
 
+use crate::action::{Action, Step};
 use crate::mark::Mark;
 
 /// The format's version, written as the first line.
@@ -121,6 +122,17 @@ impl Sheet {
                 }
                 out.push('\n');
             }
+            if !m.act.steps.is_empty() {
+                let _ = writeln!(out, "act {}", if m.act.looping { "loop" } else { "once" });
+                for step in &m.act.steps {
+                    let (word, n) = step.action.spelt();
+                    // `inf` for a step that never ends, which is what
+                    // `Act::just` makes and is the common case.
+                    let secs =
+                        if step.seconds.is_finite() { format!("{:.4}", step.seconds) } else { "inf".to_string() };
+                    let _ = writeln!(out, "do {word} {:.4} {:.4} {secs}", n[0], n[1]);
+                }
+            }
         }
         out
     }
@@ -141,6 +153,14 @@ impl Sheet {
                 Some("mark") => match read_mark(&mut word) {
                     Some(m) => sheet.marks.push(m),
                     None => confused += 1,
+                },
+                Some("act") => match sheet.marks.last_mut() {
+                    Some(m) => m.act.looping = word.next() != Some("once"),
+                    None => confused += 1,
+                },
+                Some("do") => match (sheet.marks.last_mut(), read_step(&mut word)) {
+                    (Some(m), Some(step)) => m.act.steps.push(step),
+                    _ => confused += 1,
                 },
                 Some("p") => {
                     let Some(m) = sheet.marks.last_mut() else {
@@ -170,6 +190,16 @@ impl Sheet {
     pub fn load(path: &str) -> std::io::Result<(Sheet, usize)> {
         Ok(Sheet::from_text(&std::fs::read_to_string(path)?))
     }
+}
+
+/// The rest of a `do` line, after the word `do`.
+fn read_step<'a>(word: &mut impl Iterator<Item = &'a str>) -> Option<Step> {
+    let name = word.next()?;
+    let a = word.next()?.parse().ok()?;
+    let b = word.next()?.parse().ok()?;
+    let secs = word.next()?;
+    let seconds = if secs == "inf" { f64::INFINITY } else { secs.parse().ok()? };
+    Some(Step { action: Action::spell(name, [a, b])?, seconds })
 }
 
 /// The rest of a `mark` line, after the word `mark`.
@@ -209,15 +239,23 @@ fn read_mark<'a>(word: &mut impl Iterator<Item = &'a str>) -> Option<Mark> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::action::Act;
     use std::f64::consts::TAU;
 
     fn ring(n: usize, r: f64, at: Cx) -> Vec<Cx> {
         (0..n).map(|k| at + Cx::polar(r, k as f64 / n as f64 * TAU)).collect()
     }
 
+    fn an_act() -> Act {
+        Act::still()
+            .then(Action::Walk(Cx::new(1.5, 0.0)), 2.0)
+            .then(Action::Jump { height: 1.2, rate: 1.5 }, 1.5)
+            .looping(true)
+    }
+
     fn a_sheet() -> Sheet {
         let mut s = Sheet::new();
-        s.add(Mark::new(ring(24, 2.0, Cx::ZERO), Nib::Round(0.35), 0xE3E9EF).closed(true).taper(0.25));
+        s.add(Mark::new(ring(24, 2.0, Cx::ZERO), Nib::Round(0.35), 0xE3E9EF).closed(true).taper(0.25).doing(an_act()));
         s.add(Mark::new(ring(30, 1.0, Cx::new(5.0, 1.0)), Nib::Broad { width: 0.42, angle: 0.785 }, 0xE585AC));
         s.add(Mark::new(vec![Cx::new(-3.0, -3.0), Cx::new(3.0, -3.0)], Nib::Round(0.1), 0x4FBCD4).outlined());
         s
@@ -239,6 +277,7 @@ mod tests {
             assert_eq!(a.filled, b.filled);
             assert_eq!(a.closed, b.closed);
             assert!((a.taper - b.taper).abs() < 1e-4);
+            assert_eq!(a.act, b.act, "what it does must survive too");
             assert_eq!(a.pts.len(), b.pts.len());
             for (p, q) in a.pts.iter().zip(&b.pts) {
                 // Four decimal places is the format's promise, and at the
@@ -285,6 +324,33 @@ mod tests {
         assert_eq!(sheet.marks[0].colour, 0x00FF00, "the fields after it must still be read");
         assert!((sheet.marks[0].taper - 0.10).abs() < 1e-9);
         assert_eq!(sheet.marks[0].pts.len(), 2);
+    }
+
+    /// ★ An animation is part of the drawing, so it has to survive the file
+    /// too. A drawing that reopened as a set of motionless shapes would have
+    /// lost the part that took longest to get right.
+    #[test]
+    fn what_a_mark_does_survives_the_file() {
+        let mut s = Sheet::new();
+        s.add(Mark::new(ring(12, 1.0, Cx::ZERO), Nib::Round(0.2), 0xFFFFFF).doing(an_act()));
+        s.add(Mark::new(ring(12, 1.0, Cx::new(4.0, 0.0)), Nib::Round(0.2), 0xFFFFFF).doing(Act::just(Action::Spin(0.5))));
+
+        let (back, confused) = Sheet::from_text(&s.to_text());
+        assert_eq!(confused, 0);
+        assert_eq!(back.marks[0].act, s.marks[0].act);
+        assert_eq!(back.marks[1].act.steps[0].seconds, f64::INFINITY, "forever must survive as forever");
+    }
+
+    /// An action word this version does not know loses that step, not the
+    /// mark and not the drawing.
+    #[test]
+    fn an_action_from_the_future_loses_only_itself() {
+        let text = "easel 1\nmark round 0.3 colour FFFFFF fill open\np 0 0 1 1\nact loop\ndo cartwheel 1 2 3\ndo spin 0.5 0 4\n";
+        let (sheet, confused) = Sheet::from_text(text);
+        assert_eq!(sheet.len(), 1, "the mark should survive");
+        assert_eq!(confused, 1, "and it should say one line was lost");
+        assert_eq!(sheet.marks[0].act.steps.len(), 1, "the step it understood should be there");
+        assert_eq!(sheet.marks[0].act.steps[0].action, Action::Spin(0.5));
     }
 
     /// An empty drawing writes and reads as an empty drawing rather than as

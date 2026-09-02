@@ -43,7 +43,9 @@
 
 use plotkit::{Cx, Shape};
 use shapes::fourier::Series;
-use shapes::{Nib, Stroke};
+use shapes::{Nib, Pose, Stroke};
+
+use crate::action::Act;
 
 /// One mark on the page.
 #[derive(Clone, Debug, PartialEq)]
@@ -61,12 +63,15 @@ pub struct Mark {
     /// Whether the ends join up. A closed mark can be simplified by
     /// [`Series`], and an open one cannot be, honestly.
     pub closed: bool,
+    /// What it does when the clock is running. Numbers, like everything else
+    /// here, so an animation is a few extra words in the file.
+    pub act: Act,
 }
 
 impl Mark {
     /// A stroke as the pen made it.
     pub fn new(pts: impl Into<Vec<Cx>>, nib: Nib, colour: u32) -> Mark {
-        Mark { pts: pts.into(), nib, taper: 0.0, colour, filled: true, closed: false }
+        Mark { pts: pts.into(), nib, taper: 0.0, colour, filled: true, closed: false, act: Act::still() }
     }
 
     pub fn taper(mut self, f: f64) -> Mark {
@@ -108,6 +113,43 @@ impl Mark {
         } else {
             Shape::path(self.pts.clone())
         }
+    }
+
+    /// Give it something to do.
+    pub fn doing(mut self, act: Act) -> Mark {
+        self.act = act;
+        self
+    }
+
+    /// The middle of the mark, which is what it turns and grows about.
+    ///
+    /// The centre of its bounding box, not the average of its points. A
+    /// hand-drawn stroke has its points bunched wherever the hand was slow, so
+    /// the average sits nearer the dawdling end — and a shape that spun about
+    /// a point slightly off its middle would wobble like a buckled wheel.
+    pub fn anchor(&self) -> Cx {
+        match self.bounds() {
+            Some((lo, hi)) => (lo + hi).scale(0.5),
+            None => Cx::ZERO,
+        }
+    }
+
+    /// The mark as it looks under a pose — **turned and grown about its own
+    /// middle**, and moved wherever the pose says.
+    ///
+    /// The `about` part is the whole of it. A pose from
+    /// [`Motion::spin`](shapes::Motion::spin) turns about the **origin**, so a
+    /// figure drawn off to one side would not spin at all — it would be flung
+    /// round the middle of the page on the end of a rope. Turning about its
+    /// own middle is what "spin" means to anybody watching.
+    pub fn posed(&self, pose: Pose) -> Shape {
+        let here = self.anchor();
+        self.shape().map(move |z| pose.apply(z - here) + here)
+    }
+
+    /// What it looks like `t` seconds in.
+    pub fn at(&self, t: f64) -> Shape {
+        self.posed(self.act.at(t))
     }
 
     /// Everything the mark covers, for hit testing and for framing the page.
