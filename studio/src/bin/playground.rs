@@ -50,6 +50,16 @@
 //! about that point rather than shifting it, because shifting a thing with no
 //! ends drags the samples sideways and leaves a bare strip at one edge.
 //!
+//! ## There is no speaker
+//!
+//! This draws sound and can save it. It does not **play** it, and nothing in
+//! this repository does. Getting audio out of a machine needs a platform
+//! library and a callback thread running at a rate nothing else here cares
+//! about — a real dependency, and the first one past a window.
+//!
+//! Press `5` and it writes `playground.wav` into the working directory, which
+//! any player will open. That is the whole of the audio output for now.
+//!
 //! ## One screen, six ideas
 //!
 //! This has outgrown a single view, and that is a fair sign it is working. If
@@ -183,10 +193,17 @@ fn main() {
         .on('2', |a| a.voice = 1)
         .on('3', |a| a.voice = 2)
         .on('4', |a| a.voice = 3)
+        // NOTE: this writes a file. Nothing here plays audio — see the header.
         .on('5', |a| {
             let note = a.tone();
             match wav::write("playground.wav", &note.samples(2.0, RATE), RATE) {
-                Ok(()) => println!("wrote playground.wav -- the note you are looking at"),
+                Ok(()) => {
+                    let full = std::env::current_dir()
+                        .map(|d| d.join("playground.wav").display().to_string())
+                        .unwrap_or_else(|_| "playground.wav".to_string());
+                    println!("wrote {full}");
+                    println!("  nothing here plays it -- open it with any player to hear the note you are looking at");
+                }
                 Err(e) => eprintln!("could not write it: {e}"),
             }
         })
@@ -330,7 +347,14 @@ fn scene(a: &Air) -> Frame {
     );
     f.pin(plotkit::Anchor::BottomLeft, 14.0, -74.0, "s = 1/2 g t^2 -- Galileo. Mass does not come into it.", BALL, 2);
     f.pin(plotkit::Anchor::BottomLeft, 14.0, -114.0, format!("1-4 timbre: {voice}"), TONE, 2);
-    f.pin(plotkit::Anchor::BottomLeft, 14.0, -94.0, "bars are the harmonics, the curve is their sum -- 5 writes it as a WAV", SPEC, 2);
+    f.pin(
+        plotkit::Anchor::BottomLeft,
+        14.0,
+        -94.0,
+        "bars are the harmonics, the curve is their sum -- 5 SAVES a wav (nothing here plays it)",
+        SPEC,
+        2,
+    );
 
     f
 }

@@ -7,14 +7,21 @@
 //! About eight seconds: a pure tone, the same note on three timbres, the notes
 //! of a chord one at a time, and then the chord. Play it with anything.
 //!
-//! There is no speaker here, on purpose. Getting audio out of a machine means
-//! a platform library and a callback thread, and none of that would teach
-//! anything about sound. A file can be listened to, looked at, and checked.
+//! ```text
+//!     cargo run -p sound --release -- out.wav                 just writes it
+//!     cargo run -p sound --features play --release -- --play  and plays it
+//! ```
+//!
+//! Playing is behind a feature because it is the one part that needs a sound
+//! card and a C library. A file, by contrast, can be listened to, looked at,
+//! and checked.
 
 use sound::{after, mix, pitch, wav, Timbre, Tone, RATE};
 
 fn main() {
-    let path = std::env::args().nth(1).unwrap_or_else(|| "sound.wav".to_string());
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let wants_sound = args.iter().any(|a| a == "--play");
+    let path = args.iter().find(|a| !a.starts_with("--")).cloned().unwrap_or_else(|| "sound.wav".to_string());
     let note = |name: &str| pitch::named(name).unwrap_or(pitch::A4);
 
     // One sine and nothing else, so you know what "pure" sounds like before
@@ -55,4 +62,23 @@ fn main() {
         }
         Err(e) => eprintln!("could not write {path}: {e}"),
     }
+
+    if wants_sound {
+        play_it(&all);
+    } else {
+        println!("  (add --play to hear it, with: cargo run -p sound --features play)");
+    }
+}
+
+#[cfg(feature = "play")]
+fn play_it(samples: &[f64]) {
+    println!("playing...");
+    if let Err(e) = sound::speaker::play(samples, RATE) {
+        eprintln!("could not play it: {e}");
+    }
+}
+
+#[cfg(not(feature = "play"))]
+fn play_it(_: &[f64]) {
+    eprintln!("this build cannot play sound. Rebuild with:  --features play");
 }
