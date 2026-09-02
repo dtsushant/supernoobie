@@ -752,6 +752,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sound"
+version = "0.1.0"
+dependencies = [
+ "physics",
+ "plotkit",
+ "shapes",
+]
+
+[[package]]
 name = "studio"
 version = "0.1.0"
 dependencies = [

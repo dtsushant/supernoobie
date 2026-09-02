@@ -1,0 +1,17 @@
+[package]
+name = "sound"
+version = "0.1.0"
+edition = "2021"
+description = "Sound as a function of time. Pitch, timbre and envelope — the same Fourier and Laplace, pointed at the ear."
+
+[dependencies]
+# The envelope of a plucked note IS a damped oscillator, so it comes from
+# there rather than being written again.
+physics = { path = "../physics" }
+# Harmonics are a sum of waves, which already exists.
+shapes = { path = "../shapes" }
+plotkit = { path = "../plotkit" }
+
+[[bin]]
+name = "sound"
+path = "src/bin/sound.rs"

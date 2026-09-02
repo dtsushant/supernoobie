@@ -279,6 +279,7 @@ cargo run -p studio --release --bin stage        # grouping and motion
 cargo run -p studio --release --bin waves        # adding sine waves
 
 cargo run -p shapes  --release -- seven --steps  # any shape, in the terminal
+cargo run -p sound   --release -- out.wav        # a WAV you can listen to
 ```
 
 and to tape a run of the game:
@@ -290,7 +291,7 @@ cargo run -p studio --release -- --replay run.tape
 
 ---
 
-## The four crates
+## The five crates
 
 ```
   plotkit    the paper.  Cx, View, Shape, Frame, plot, pen, raster, expr, script.
@@ -303,6 +304,9 @@ cargo run -p studio --release -- --replay run.tape
   physics    how things MOVE, as opposed to what they look like.
              oscillators that settle, bodies that fall. No window, so every
              claim in it can be checked in the dark.
+      |
+  sound      the same mathematics, pointed at the ear. pitch, timbre,
+             envelope. Fourier makes the timbre, Laplace makes the decay.
       |
   studio     the applications. depends on shapes + physics + a window.
              contains no geometry at all — only state, layout, and a loop.
