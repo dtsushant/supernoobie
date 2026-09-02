@@ -129,8 +129,12 @@ pub enum Expr {
 }
 
 /// Names that parse as function calls rather than implicit multiplication.
-pub const FUNCS: [&str; 13] = [
+pub const FUNCS: [&str; 16] = [
     "exp", "ln", "sin", "cos", "tan", "sqrt", "abs", "arg", "conj", "re", "im", "polar", "pow",
+    // Whole numbers. A language with no way to say "the integer part" cannot
+    // say "a number between 1 and 9", which is most of what a counting game
+    // needs.
+    "floor", "round", "mod",
 ];
 
 /// Names that draw something.
@@ -171,6 +175,21 @@ impl Expr {
                     a.get(n).copied().ok_or_else(|| format!("'{f}' needs more arguments"))
                 };
                 match f.as_str() {
+                    "floor" => Cx::new(one(0)?.re.floor(), 0.0),
+                    "round" => Cx::new(one(0)?.re.round(), 0.0),
+                    "mod" => {
+                        if args.len() != 2 {
+                            return Err("mod takes two numbers".into());
+                        }
+                        let (a, b) = (args[0].eval(env)?.re, args[1].eval(env)?.re);
+                        if b.abs() < 1e-300 {
+                            return Err("mod by nothing".into());
+                        }
+                        // Euclidean, so `mod(-1, 9)` is 8 rather than -1. A
+                        // counting game that stepped past zero into negative
+                        // answers would be a strange kind of counting game.
+                        Cx::new(a.rem_euclid(b), 0.0)
+                    }
                     "exp" => cexp(one(0)?),
                     "ln" => cln(one(0)?)?,
                     "sin" => csin(one(0)?),
@@ -573,6 +592,25 @@ pub fn env_of(p: &Program) -> HashMap<String, Cx> {
 // ===========================================================================
 #[cfg(test)]
 mod tests {
+    /// ★ Whole numbers. Without a way to say "the integer part" the language
+    /// cannot say "a number between 1 and 9", which is most of what a counting
+    /// game needs.
+    #[test]
+    fn it_can_do_whole_numbers() {
+        let val = |src: &str| {
+            let p = run(&format!("a = {src}"));
+            assert!(p.errors.is_empty(), "{src}: {:?}", p.errors);
+            p.vars.iter().find(|(n, _)| n == "a").expect("a").1.re
+        };
+        assert_eq!(val("floor(3.7)"), 3.0);
+        assert_eq!(val("round(3.7)"), 4.0);
+        assert_eq!(val("mod(11, 9)"), 2.0);
+        // Euclidean: a counting game that stepped past zero into negative
+        // answers would be a strange kind of counting game.
+        assert_eq!(val("mod(-1, 9)"), 8.0);
+        assert!(!run("a = mod(1, 0)").errors.is_empty(), "mod by nothing should say so");
+    }
+
     /// ★ Hex numbers, for colours. `color(14722122)` is a number nobody can
     /// read or check against anything; `color(0xE0A44A)` is the same colour
     /// written the way every other tool writes it.

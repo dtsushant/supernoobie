@@ -66,6 +66,8 @@ use std::collections::HashMap;
 use plotkit::expr::{env_of, eval_with, Cmd, Expr};
 use plotkit::{plot, Cx, Shape};
 
+use crate::rule::{self, Rule, Tally};
+
 /// Colours a script cycles through when it does not say.
 pub const PALETTE: [u32; 6] = [0x4FBCD4, 0xE0A44A, 0xE585AC, 0x6FCF97, 0x9B7BD4, 0xE0704A];
 
@@ -139,12 +141,27 @@ impl Script {
 
     /// The rows as one program.
     ///
-    /// Rows that are switched off become blank lines rather than disappearing,
-    /// so the line numbers in an error still point at the row you can see.
-    fn source(&self, time: f64) -> String {
+    /// Rows that are switched off become blank lines rather than
+    /// disappearing, so the line numbers in an error still point at the row
+    /// you can see. So do rows this crate handles itself — rules, and
+    /// [`digits`](crate::script) — since `plotkit::expr` has never heard of
+    /// them and would report every one as a mistake.
+    fn source(&self, time: f64, tally: &Tally) -> String {
         let mut out = format!("time = {time}\n");
+        // What the game has got to goes first, because `expr` evaluates
+        // commands where it finds them: a binding written *after* a `circle`
+        // never reaches that circle. So the live values have to be in place
+        // before anything is drawn.
+        //
+        // Which means shadowing cannot be "last one wins" — it has to be the
+        // row **standing down**. A row the tally has a value for is skipped,
+        // so `score = 0` says where the game starts and stops saying anything
+        // the moment play has moved on. Left in, it would reset the score on
+        // every single frame.
+        out.push_str(&tally.as_rows());
         for r in &self.rows {
-            if r.on {
+            let shadowed = r.binds().is_some_and(|n| tally.values.contains_key(n));
+            if r.on && !mine(&r.text) && !shadowed {
                 out.push_str(&r.text);
             }
             out.push('\n');
@@ -152,15 +169,30 @@ impl Script {
         out
     }
 
+    /// Every rule in the script.
+    pub fn rules(&self) -> Vec<Rule> {
+        self.rows.iter().filter(|r| r.on).filter_map(|r| rule::read(&r.text)).collect()
+    }
+
     /// Run it, with the clock bound as `time`.
     pub fn run(&self, time: f64) -> Made {
-        let program = plotkit::expr::run(&self.source(time));
+        self.play(time, &Tally::new())
+    }
+
+    /// Run it as a game that has got somewhere.
+    pub fn play(&self, time: f64, tally: &Tally) -> Made {
+        let program = plotkit::expr::run(&self.source(time, tally));
         let env = env_of(&program);
 
         let mut made = Made {
-            // The prepended `time =` line means every reported line number is
-            // one further down than the row it came from.
-            errors: program.errors.iter().map(|(line, msg)| (line.saturating_sub(1), msg.clone())).collect(),
+            // The `time =` line and the tally's rows come before the rows, so
+            // every reported line number is that much further down than the
+            // row it came from.
+            errors: program
+                .errors
+                .iter()
+                .map(|(line, msg)| (line.saturating_sub(1 + tally.values.len()), msg.clone()))
+                .collect(),
             vars: program.vars.clone(),
             shapes: Vec::new(),
         };
@@ -186,7 +218,40 @@ impl Script {
                 made.shapes.push((shape, col));
             }
         }
+        made.shapes.extend(self.shown(&env));
         made
+    }
+
+    /// The numbers this script asks to be shown, as shapes.
+    ///
+    /// `digits(value, at, size)` — a number written out where you say, at the
+    /// size you say. Not part of [`plotkit::expr`], because the digits are
+    /// drawn by [`shapes::digit`] and `plotkit` has never heard of `shapes`;
+    /// the dependency only runs one way and it should stay that way.
+    ///
+    /// So this crate reads those rows itself, evaluates their arguments
+    /// against everything else, and leaves the rest of the line to `expr`.
+    fn shown(&self, env: &std::collections::HashMap<String, Cx>) -> Vec<(Shape, u32)> {
+        let mut out = Vec::new();
+        for r in &self.rows {
+            if !r.on {
+                continue;
+            }
+            let Some(args) = r.text.trim().strip_prefix("digits(").and_then(|a| a.strip_suffix(')')) else {
+                continue;
+            };
+            let mut arg = args.split(',');
+            let mut number = |fallback: f64| {
+                arg.next()
+                    .and_then(|a| plotkit::expr::parse(a.trim()).ok())
+                    .and_then(|e| e.eval(env).ok())
+                    .map_or(fallback, |z| z.re)
+            };
+            let value = number(0.0);
+            let (x, y, size) = (number(0.0), number(0.0), number(1.0));
+            out.push((number_shape(value, Cx::new(x, y), size), 0xE3E9EF));
+        }
+        out
     }
 
     /// The bindings that are plain real numbers, which are the ones a slider
@@ -244,6 +309,38 @@ impl Script {
     }
 }
 
+/// Is this row one this crate handles rather than `plotkit::expr`?
+fn mine(text: &str) -> bool {
+    let t = text.trim();
+    rule::is_rule(t) || t.starts_with("digits(")
+}
+
+/// A whole number written out, about a point.
+///
+/// Negative numbers get a bar in front, and a number too long to be a number
+/// anybody meant is cut off rather than drawn across the whole page.
+fn number_shape(value: f64, at: Cx, size: f64) -> Shape {
+    let size = size.abs().max(0.05);
+    let n = value.round();
+    let text = format!("{}", n.abs().min(1e9) as u64);
+    let mut parts = Vec::new();
+    let step = size * 1.35;
+    let mut x = 0.0;
+    if n < 0.0 {
+        parts.push(Shape::path(vec![Cx::new(-size * 0.4, 0.0), Cx::new(size * 0.4, 0.0)]).at(at + Cx::new(x, 0.0)));
+        x += step;
+    }
+    for c in text.chars() {
+        let d = c.to_digit(10).unwrap_or(0);
+        parts.push(shapes::digit::glyph(d, 40).sized(size).at(at + Cx::new(x, 0.0)));
+        x += step;
+    }
+    // Centred on the point given, which is what anybody means by "put the
+    // number here" -- a number that grew to the right as it got bigger would
+    // walk out of its own box.
+    Shape::group(parts).at(Cx::new(-x * 0.5 + step * 0.5, 0.0))
+}
+
 /// A command as a drawable shape.
 ///
 /// The deferred ones — `plot`, `param`, `implicit` — carry an expression with
@@ -291,6 +388,7 @@ fn bind(e: &Expr, name: &str, v: Cx, env: &HashMap<String, Cx>) -> Option<Cx> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rule::Tally;
 
     fn ink(shapes: &[(Shape, u32)]) -> usize {
         let (lo, hi) = (Cx::new(-10.0, -10.0), Cx::new(10.0, 10.0));
@@ -520,6 +618,82 @@ circle(0, r)
         // And a round trip keeps the shapes that were on.
         let back = Script::from_rec(&text);
         assert_eq!(back.run(0.0).shapes.len(), s.run(0.0).shapes.len());
+    }
+
+    /// ★ A rule is a row like any other, and `expr` has never heard of it --
+    /// so it must be kept out of the program rather than reported as a
+    /// mistake on every frame.
+    #[test]
+    fn a_rule_row_is_not_a_mistake() {
+        let mut s = Script::new();
+        s.add("score = 0");
+        s.add("when tap 1: score = score + 1");
+        s.add("circle(0, 2)");
+
+        let made = s.run(0.0);
+        assert!(made.errors.is_empty(), "a rule should not be an error: {:?}", made.errors);
+        assert_eq!(made.shapes.len(), 1);
+        assert_eq!(s.rules().len(), 1);
+    }
+
+    /// ★ What the game has got to shadows what the rows say, so the rows are
+    /// the STARTING position and the tally is where play has reached.
+    #[test]
+    fn the_tally_shadows_the_rows() {
+        let mut s = Script::new();
+        s.add("score = 0");
+        s.add("circle(0, 1 + score)");
+
+        let radius = |made: &Made| {
+            let (lo, hi) = (Cx::new(-50.0, -50.0), Cx::new(50.0, 50.0));
+            made.shapes[0].0.polylines(lo, hi, 400).into_iter().flatten().map(|z| z.abs()).fold(0.0, f64::max)
+        };
+        assert!((radius(&s.run(0.0)) - 1.0).abs() < 0.05, "the row says nought");
+
+        let mut t = Tally::new();
+        t.values.insert("score".into(), 4.0);
+        assert!((radius(&s.play(0.0, &t)) - 5.0).abs() < 0.05, "and the game says four");
+
+        t.clear();
+        assert!((radius(&s.play(0.0, &t)) - 1.0).abs() < 0.05, "rewinding gets the starting position back");
+    }
+
+    /// ★ `digits(...)` writes a number out. Not part of `expr`, because the
+    /// digits are drawn by `shapes` and `plotkit` has never heard of `shapes`.
+    #[test]
+    fn a_number_can_be_written_out() {
+        let mut s = Script::new();
+        s.add("a = 3");
+        s.add("b = 4");
+        s.add("digits(a + b, 0, 0, 1)");
+        let made = s.run(0.0);
+        assert!(made.errors.is_empty(), "{:?}", made.errors);
+        assert_eq!(made.shapes.len(), 1, "one number");
+
+        // Seven is one digit; seventy-seven is two, and wider.
+        let width = |src: &str| {
+            let mut s = Script::new();
+            s.add(src);
+            let (lo, hi) = (Cx::new(-50.0, -50.0), Cx::new(50.0, 50.0));
+            let pts: Vec<Cx> = s.run(0.0).shapes[0].0.polylines(lo, hi, 500).into_iter().flatten().collect();
+            let (a, b) = pts.iter().fold((f64::MAX, f64::MIN), |(a, b), z| (a.min(z.re), b.max(z.re)));
+            b - a
+        };
+        assert!(width("digits(77, 0, 0, 1)") > width("digits(7, 0, 0, 1)") * 1.5, "two digits should be wider");
+    }
+
+    /// And the numbers actually differ, so it is writing the number and not
+    /// the same glyph every time.
+    #[test]
+    fn different_numbers_look_different() {
+        let ink = |n: i32| {
+            let mut s = Script::new();
+            s.add(&format!("digits({n}, 0, 0, 1)"));
+            let (lo, hi) = (Cx::new(-9.0, -9.0), Cx::new(9.0, 9.0));
+            let pts: Vec<Cx> = s.run(0.0).shapes[0].0.polylines(lo, hi, 400).into_iter().flatten().collect();
+            pts.iter().fold(0.0, |a: f64, z| a + z.abs())
+        };
+        assert!((ink(1) - ink(8)).abs() > 1e-6, "a one and an eight should not be the same drawing");
     }
 
     /// Colours cycle so a script of bare shapes is still readable, and

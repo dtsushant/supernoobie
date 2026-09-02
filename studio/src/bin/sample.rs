@@ -37,6 +37,7 @@ fn main() {
         ("dials", dials as fn() -> Board),
         ("bouncing", bouncing as fn() -> Board),
         ("walker", walker as fn() -> Board),
+        ("adding", adding as fn() -> Board),
     ] {
         let path = dir.join(format!("{name}.easel"));
         let board = build();
@@ -159,5 +160,94 @@ fn walker() -> Board {
     b.sheet.script.add("# tap any part of the figure and the whole of it is chosen");
     b.sheet.script.add("color(0x46525E)");
     b.sheet.script.add("line(-7 - 2i, 7 - 2i)");
+    b
+}
+
+/// **A game.** Two numbers to add, three answers to tap, and a score.
+///
+/// The whole of it is nine rows and three grouped shapes. Nothing about it is
+/// special-cased anywhere: the questions are arithmetic, the answers are
+/// ordinary figures, and tapping one runs a rule.
+///
+/// ## Where the questions come from
+///
+/// ```text
+///     a = 1 + floor(5*abs(sin(37*(score+1))))
+/// ```
+///
+/// `sin` of a big multiple of a whole number wanders about the interval
+/// without ever settling into a pattern a child would spot, and `floor` makes
+/// it a whole number. **No random number generator** — the same game replays
+/// identically, which is what the tapes in this repository have always needed,
+/// and it means a wrong answer can be looked at again rather than lost.
+///
+/// ## Where the wrong answers come from
+///
+/// One too many and one too few. That is deliberate: an obviously wrong answer
+/// teaches a child to spot obviously wrong answers, and a near-miss makes them
+/// count. It also means the three boxes never collide, since they are always
+/// three consecutive numbers.
+///
+/// ## What is still missing, honestly
+///
+/// The answers are in a fixed order — right one in the middle — because a rule
+/// can change a number but cannot yet move a shape. That wants a deed which
+/// sets a mark's pose, and it is the obvious next thing.
+fn adding() -> Board {
+    let mut b = Board::new();
+    b.nib = Nib::Round(0.1);
+    b.taper = 0.0;
+
+    // Three boxes to tap. Each is one figure, so a rule can name it.
+    for (k, x) in [-3.4f64, 0.0, 3.4].into_iter().enumerate() {
+        b.colour = [0xE0704A, 0x6FCF97, 0x4FBCD4][k];
+        let at = Cx::new(x, -2.2);
+        let corners = [(-1.2, -1.0), (1.2, -1.0), (1.2, 1.0), (-1.2, 1.0), (-1.2, -1.0)];
+        let box_path: Vec<Cx> = corners
+            .windows(2)
+            .flat_map(|w| line(at + Cx::new(w[0].0, w[0].1), at + Cx::new(w[1].0, w[1].1)))
+            .collect();
+        stroke(&mut b, &box_path);
+        b.selected = vec![b.sheet.len() - 1];
+        // Each box is its own figure, numbered 1, 2, 3 -- which is what the
+        // rules below tap on.
+        b.group_alone();
+        b.selected.clear();
+    }
+
+    let rows = [
+        "# ADDING. press PLAY, then tap the box with the right answer.",
+        "score = 0",
+        "",
+        "# the question. no random numbers anywhere: sin of a big multiple of a",
+        "# whole number wanders without ever settling into a pattern, and floor",
+        "# makes it whole. So the same game replays exactly.",
+        "a = 1 + floor(5*abs(sin(37*(score+1))))",
+        "b = 1 + floor(5*abs(sin(53*(score+1))))",
+        "",
+        "digits(a, -3.0, 1.6, 0.9)",
+        "digits(b, 0.4, 1.6, 0.9)",
+        "color(0x46525E)",
+        "line(-1.9 + 1.6i, -1.1 + 1.6i)",
+        "line(-1.5 + 1.2i, -1.5 + 2.0i)",
+        "line(1.4 + 1.4i, 2.2 + 1.4i)",
+        "line(1.4 + 1.8i, 2.2 + 1.8i)",
+        "",
+        "# the three answers: one too few, the right one, one too many",
+        "digits(a + b - 1, -3.4, -2.2, 0.8)",
+        "digits(a + b, 0, -2.2, 0.8)",
+        "digits(a + b + 1, 3.4, -2.2, 0.8)",
+        "",
+        "# the score, up in the corner",
+        "digits(score, 5.0, 3.2, 0.55)",
+        "",
+        "# and the rules. the middle box is the right one.",
+        "when tap 1: score = score - 1",
+        "when tap 2: score = score + 1",
+        "when tap 3: score = score - 1",
+    ];
+    for r in rows {
+        b.sheet.script.add(r);
+    }
     b
 }

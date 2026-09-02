@@ -92,6 +92,7 @@ use crate::history::History;
 use crate::ink::Ink;
 use crate::mark::Mark;
 use crate::sheet::Sheet;
+use crate::rule::{self, Tally};
 use crate::track::Ease;
 use shapes::Pose;
 
@@ -173,6 +174,14 @@ pub struct Board {
     pub folded: Vec<u32>,
     /// The line a drop would land before, while something is being dragged.
     pub dropping: Option<usize>,
+    /// Where the game has got to. Empty until a rule has fired.
+    pub tally: Tally,
+    /// Whether tapping a figure sets its rules off, rather than choosing it.
+    ///
+    /// The same tap cannot mean both — choosing something to edit it and
+    /// playing with it are different intentions, and a program that guessed
+    /// would guess wrong at the worst moment.
+    pub playing_game: bool,
 }
 
 impl Default for Board {
@@ -203,6 +212,8 @@ impl Board {
             editing: None,
             folded: Vec::new(),
             dropping: None,
+            tally: Tally::new(),
+            playing_game: false,
         }
     }
 
@@ -330,9 +341,19 @@ impl Board {
     /// chosen. Nothing under it means choose nothing.
     fn tap(&mut self, at: Cx) {
         let Some(k) = self.sheet.at(at, self.touch, self.clock) else {
-            self.selected.clear();
+            if !self.playing_game {
+                self.selected.clear();
+            }
             return;
         };
+        if self.playing_game {
+            // While the game runs a tap is a move, not a choice. Nothing is
+            // selected and nothing is edited -- which is the point of it being
+            // a separate state rather than a guess.
+            let group = self.sheet.marks[k].group;
+            self.play_tap(group);
+            return;
+        }
         // Tapping any member of a figure takes the whole figure, which is the
         // point of having grouped it.
         let family = self.family_of(k);
@@ -472,6 +493,20 @@ impl Board {
         }
         // The next number nobody is using. Reusing a freed number would
         // silently adopt any mark that still carried it.
+        let next = self.sheet.marks.iter().map(|m| m.group).max().unwrap_or(0) + 1;
+        self.to_each(|m| m.group = next)
+    }
+
+    /// Make a figure of whatever is chosen, even if it is only one thing.
+    ///
+    /// [`group`](Board::group) refuses one on its own, because binding a lone
+    /// stroke into a figure is almost always a slip. A game is the exception:
+    /// a rule names a figure, so a single shape that has to be tappable needs
+    /// a number of its own.
+    pub fn group_alone(&mut self) -> bool {
+        if self.selected.is_empty() {
+            return false;
+        }
         let next = self.sheet.marks.iter().map(|m| m.group).max().unwrap_or(0) + 1;
         self.to_each(|m| m.group = next)
     }
@@ -857,6 +892,33 @@ impl Board {
         f
     }
 
+    /// Set off whatever rules a tap on this figure has.
+    ///
+    /// Returns whether any fired, so the studio can say nothing happened
+    /// rather than leaving somebody tapping a shape that has no rule.
+    pub fn play_tap(&mut self, group: u32) -> bool {
+        let rules = self.sheet.script.rules();
+        let wanted: Vec<_> = rules.iter().filter(|r| r.on == rule::On::Tap(group)).collect();
+        if wanted.is_empty() {
+            return false;
+        }
+        // The environment is taken **once, before any rule runs**, so all the
+        // rules of one tap see the same picture. Re-reading it between them
+        // would make the order of two unrelated rules matter, which is a thing
+        // nobody would ever think to check.
+        let env = plotkit::expr::env_of(&plotkit::expr::run(&self.sheet.script.to_rec()));
+        for r in wanted {
+            rule::carry_out(r, &mut self.tally, &env);
+        }
+        true
+    }
+
+    /// Start the game again from the beginning.
+    pub fn restart(&mut self) {
+        self.tally.clear();
+        self.clock = 0.0;
+    }
+
     /// Run the script at the current clock.
     ///
     /// Every frame, deliberately. A written shape may mention `time`, and
@@ -865,7 +927,7 @@ impl Board {
     /// other rows. Parsing a few dozen short lines is far cheaper than being
     /// wrong about it.
     pub fn written(&self) -> crate::script::Made {
-        self.sheet.script.run(self.clock)
+        self.sheet.script.play(self.clock, &self.tally)
     }
 
     /// A ring round whatever is selected, so you can see what a command will

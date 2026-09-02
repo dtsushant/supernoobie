@@ -317,7 +317,16 @@ impl Studio {
             }
             Cmd::Play => {
                 self.board.play(true);
-                self.say = if self.board.has_animation() {
+                // A drawing with rules in it is a game, so playing it means
+                // tapping things rather than choosing them. Deciding by what
+                // is written rather than with a separate switch: a drawing
+                // with no rules has nothing to tap, and one with rules has
+                // nothing else you would want play to mean.
+                let game = !self.board.sheet.script.rules().is_empty();
+                self.board.playing_game = game;
+                self.say = if game {
+                    "playing -- tap the shapes".into()
+                } else if self.board.has_animation() {
                     "playing".into()
                 } else {
                     "nothing has been given anything to do yet".into()
@@ -325,10 +334,13 @@ impl Studio {
             }
             Cmd::Pause => {
                 self.board.play(false);
-                self.say = "stopped".into();
+                self.board.playing_game = false;
+                self.say = "stopped -- tapping chooses again".into();
             }
             Cmd::Rewind => {
                 self.board.rewind();
+                self.board.restart();
+                self.board.playing_game = false;
                 self.say = "back to the start".into();
             }
             Cmd::Undo => self.say = if self.board.undo() { "undone".into() } else { "nothing to undo".into() },
