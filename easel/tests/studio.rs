@@ -96,8 +96,7 @@ fn studio() {
     assert!(b.has_animation(), "something should move");
 
     // --- four moments, side by side ---------------------------------------
-    let bar = Bar::new();
-    let (w, h) = (1280, 860);
+        let (w, h) = (1280, 860);
     let mut sheet = Canvas::new(w, h);
     sheet.clear(0x0B1017);
 
@@ -121,7 +120,8 @@ fn studio() {
     // The toolbar, painted by the same code the window uses.
     let mut furniture = plotkit::Frame::new();
     b.playing = true;
-    bar.paint(&mut furniture, &b, h as i32);
+    Bar::new(w as i32).paint(&mut furniture, &b, w as i32);
+    easel::Tree::new(&b).paint(&mut furniture, &b, h as i32);
     furniture.draw(&mut sheet, &View::centred(w, h, 60.0));
 
     let out = std::env::temp_dir().join("studio.png");

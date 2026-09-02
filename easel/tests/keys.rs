@@ -88,8 +88,7 @@ fn keys() {
 
     // --- render five moments, with the onion skin on the figure ----------
     b.selected = (0..5).collect();
-    let bar = Bar::new();
-    let (w, h) = (1280, 900);
+        let (w, h) = (1280, 900);
     let strip = h / 5;
     let mut sheet = Canvas::new(w, h);
     sheet.clear(0x0B1017);
@@ -121,7 +120,8 @@ fn keys() {
     }
 
     let mut furniture = plotkit::Frame::new();
-    bar.paint(&mut furniture, &b, h as i32);
+    Bar::new(w as i32).paint(&mut furniture, &b, w as i32);
+    easel::Tree::new(&b).paint(&mut furniture, &b, h as i32);
     furniture.draw(&mut sheet, &View::centred(w, h, 60.0));
 
     let out = std::env::temp_dir().join("keys.png");

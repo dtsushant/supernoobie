@@ -92,6 +92,32 @@
 //!                                                  S O     save, open
 //! ```
 //!
+//! ## The tree, down the left
+//!
+//! ```text
+//!     SHAPES                   [+]
+//!     v  figure 1                     tap the arrow to fold it away
+//!        [][][][][][][][]             its colour -- open because it is chosen
+//!        walk run jump spin           what it does
+//!        - head
+//!        - body
+//!     >  figure 2                     folded
+//!
+//!     FORMULAS                 [+]
+//!     [x] r = 2
+//!         --------o--------
+//!     [x] circle(0, r)
+//! ```
+//!
+//! Everything the drawing is made of, drawn and written alike, in the order it
+//! is painted — so dragging a line up and down is how one shape is put in
+//! front of another.
+//!
+//! **Colour and what a shape does are not on the toolbar.** They belong to a
+//! particular shape, so they open under whatever is chosen. A global "current
+//! colour" can only ever mean the colour of the *next* stroke, which is a
+//! strange thing to offer when what you want is to change one already drawn.
+//!
 //! ## The written half
 //!
 //! Down the right-hand side: a row of script each, Desmos-fashion.
@@ -126,8 +152,8 @@
 //!     studio/      this: a window, a pointer and some keys
 //! ```
 
-use easel::bar::{Bar, Cmd, INKS, STEP, WIDTH};
-use easel::panel::{Panel, Poke};
+use easel::bar::{Bar, Cmd};
+use easel::tree::{self, Half, Node, Poke, Tree, STEP};
 use easel::{Board, Tool};
 use plotkit::{Anchor, Cx, Frame, Shape};
 use shapes::Nib;
@@ -147,9 +173,11 @@ struct Studio {
     px: (f64, f64),
     /// Down last frame, so a press on the bar happens once.
     was_down: bool,
-    /// The rows down the right, laid out afresh each frame because their
-    /// number and heights change with what is in them.
-    panel: Panel,
+    /// The tree down the left, laid out afresh each frame because its lines
+    /// and their heights change with what is in the drawing.
+    tree: Tree,
+    /// What is being dragged in the tree, if anything.
+    lifting: Option<Node>,
     /// How wide and tall the window is, for laying the panel out.
     size: (i32, i32),
 }
@@ -160,14 +188,15 @@ impl Studio {
     fn new(file: String) -> Studio {
         let mut s = Studio {
             board: Board::new(),
-            bar: Bar::new(),
+            bar: Bar::new(1400),
             cut: 24,
             file,
             say: "draw with the pen. shift-drag moves the paper.".into(),
             was: 0.0,
             px: (-1.0, -1.0),
             was_down: false,
-            panel: Panel::default(),
+            tree: Tree::default(),
+            lifting: None,
             size: (1200, 780),
         };
         if std::path::Path::new(&s.file).exists() {
@@ -255,24 +284,11 @@ impl Studio {
     /// Do what a button says.
     fn obey(&mut self, cmd: Cmd) {
         match cmd {
-            Cmd::Colour(c) => self.board.colour = c,
             Cmd::Nib(k) => self.set_nib(k),
             Cmd::Use(t) => self.board.tool = t,
-            Cmd::Do(action) => {
-                // Every step is the same length, and the bar's rates are
-                // chosen so a whole number of cycles fits in it -- an act
-                // loops, and a cycle that does not close jerks every time
-                // round.
-                self.say = if self.board.give(action, Some(STEP)) {
-                    let steps = self.board.chosen().map_or(0, |m| m.act.steps.len());
-                    format!("{} -- step {steps}. press play.", action.name())
-                } else {
-                    "choose a shape first: press pick, then tap one".into()
-                };
-            }
             Cmd::Key => {
                 self.say = if self.board.key() {
-                    format!("key at {:.2}s -- drag it to where it should be then", self.board.clock)
+                    format!("key at {:.2}s -- now drag it where it should be then", self.board.clock)
                 } else {
                     "tap a shape first".into()
                 };
@@ -298,9 +314,6 @@ impl Studio {
             }
             Cmd::Ungroup => {
                 self.say = if self.board.ungroup() { "split up".into() } else { "nothing grouped".into() };
-            }
-            Cmd::Stop => {
-                self.say = if self.board.stop_doing() { "it does nothing now".into() } else { "nothing chosen".into() };
             }
             Cmd::Play => {
                 self.board.play(true);
@@ -330,6 +343,58 @@ impl Studio {
         }
     }
 
+    /// Paint what is chosen, or set the pen if nothing is.
+    fn paint_now(&mut self, colour: u32) {
+        self.board.paint(colour);
+    }
+
+    /// Do what a line in the tree says.
+    fn heed(&mut self, poke: Poke) {
+        match poke {
+            Poke::Fold(g) => self.board.fold(g),
+            Poke::Tick(k) => {
+                self.board.toggle_row(k);
+            }
+            Poke::Edit(k) => self.board.edit(Some(k)),
+            Poke::Dial(k, v) => {
+                self.board.set_dial(k, v);
+            }
+            Poke::Choose(Node::Group(g, _)) => {
+                self.board.edit(None);
+                self.board.choose_group(g);
+            }
+            Poke::Choose(Node::Mark(k)) => {
+                self.board.edit(None);
+                self.board.choose_only(k);
+            }
+            Poke::Choose(_) => {}
+            Poke::Add(Half::Formulas) => self.board.add_row(),
+            Poke::Add(Half::Shapes) => {
+                self.say = if self.board.new_group() {
+                    "one figure now -- tap any part to take it all".into()
+                } else {
+                    "choose two or more shapes first, then + makes them a figure".into()
+                };
+            }
+            Poke::Paint(c) => {
+                self.board.paint(c);
+                self.say = if self.board.any_chosen() { "painted".into() } else { "the pen is that colour now".into() };
+            }
+            Poke::Verb(None) => {
+                self.say = if self.board.stop_doing() { "it does nothing now".into() } else { "nothing chosen".into() };
+            }
+            Poke::Verb(Some(action)) => {
+                self.say = if self.board.give(action, Some(STEP)) {
+                    let steps = self.board.chosen().map_or(0, |m| m.act.steps.len());
+                    format!("{} -- step {steps}. press play.", action.name())
+                } else {
+                    "tap a shape first".into()
+                };
+            }
+            Poke::Drop(_) => {}
+        }
+    }
+
     /// The pointer, every frame. **The bar gets first refusal.**
     ///
     /// A press that lands on the toolbar must not also reach the paper, or
@@ -337,46 +402,96 @@ impl Studio {
     /// unreachable, and slowly filling the file.
     fn pointer(&mut self, at: Cx, px: (f64, f64), down: bool) {
         self.px = px;
-        self.panel = Panel::new(self.size.0, &self.board);
+        self.tree = Tree::new(&self.board);
+        self.bar = Bar::new(self.size.0);
         let pressed = down && !self.was_down;
-        let furniture = self.bar.covers(px.0, px.1) || self.panel.covers(px.0);
+        let released = !down && self.was_down;
+        let on_tree = Tree::covers(px.0);
+        let on_bar = self.bar.covers(px.0, px.1);
 
-        if furniture {
-            if let Some(cmd) = pressed.then(|| self.bar.at(px.0, px.1)).flatten() {
+        if pressed && on_bar {
+            if let Some(cmd) = self.bar.at(px.0, px.1) {
                 self.obey(cmd);
             }
-            match self.panel.at(px.0, px.1) {
-                // A slider is dragged, so it answers to being held, not only
-                // to the press. Remembered once, at the press, or a drag
-                // would leave a hundred steps to undo.
-                Some(Poke::Drag(row, value)) if down => {
+        }
+
+        if on_tree || on_bar {
+            match (pressed, self.tree.at(px.0, px.1)) {
+                // A slider answers to being held, not only to the press.
+                (_, Some(Poke::Dial(k, v))) if down => {
                     if pressed {
                         self.board.edit(None);
                     }
-                    self.board.set_dial(row, value);
+                    self.board.set_dial(k, v);
                 }
-                Some(poke) if pressed => match poke {
-                    Poke::Tick(row) => {
-                        self.board.toggle_row(row);
+                (true, Some(poke)) => {
+                    // A press on a movable line might be the start of a drag.
+                    // Which it is cannot be known until the pointer moves, so
+                    // the line is remembered and the poke is obeyed anyway --
+                    // choosing something and then dragging it is one gesture,
+                    // not two.
+                    if let Poke::Choose(node) = poke {
+                        self.lifting = node.movable().then_some(node);
                     }
-                    Poke::Edit(row) => self.board.edit(Some(row)),
-                    Poke::Add => self.board.add_row(),
-                    Poke::Drag(..) => {}
-                },
+                    self.heed(poke);
+                }
                 _ => {}
             }
-            // Tell the board the pen is up, so a stroke in progress is
-            // finished properly rather than left hanging when the hand
-            // wanders over the furniture.
+            // Where a drop would land, while something is being carried.
+            self.board.dropping = (down && self.lifting.is_some() && on_tree).then(|| self.tree.gap_at(px.1));
             self.board.pointer(at, false);
         } else {
-            // Tapping the drawing puts the keyboard back where it belongs.
             if pressed {
                 self.board.edit(None);
             }
+            self.board.dropping = None;
             self.board.pointer(at, down);
         }
+
+        if released {
+            self.land();
+        }
         self.was_down = down;
+    }
+
+    /// Let go of whatever was being dragged in the tree.
+    fn land(&mut self) {
+        let (Some(node), Some(before)) = (self.lifting.take(), self.board.dropping.take()) else {
+            self.board.dropping = None;
+            return;
+        };
+        // What is at the gap decides what the drop MEANS. Dropped among a
+        // figure's strokes, a mark joins that figure; dropped anywhere else it
+        // leaves whatever it was in. Asking "which figure is this gap inside?"
+        // is the whole rule, and it needs no separate drop targets.
+        let landing = self.tree.lines.get(before).or_else(|| self.tree.lines.last()).map(|l| l.node);
+        let into = match landing {
+            Some(Node::Mark(k)) => self.board.sheet.marks.get(k).map(|m| m.group).unwrap_or(0),
+            Some(Node::Group(g, _)) => g,
+            _ => 0,
+        };
+        match node {
+            Node::Mark(from) => {
+                let to = self
+                    .tree
+                    .lines
+                    .get(before)
+                    .and_then(|l| match l.node {
+                        Node::Mark(k) => Some(k),
+                        _ => None,
+                    })
+                    .unwrap_or(self.board.sheet.len());
+                if self.board.put_in_group(from, into) {
+                    self.board.move_mark(from, to);
+                    self.say = if into == 0 { "moved".into() } else { format!("moved into figure {into}") };
+                }
+            }
+            // A whole figure keeps its own order; only where it sits changes,
+            // and that is not something a flat list of marks can express
+            // without renumbering every group. Left for when it is asked for.
+            Node::Group(..) => self.say = "a whole figure cannot be reordered yet".into(),
+            _ => {}
+        }
     }
 }
 
@@ -432,8 +547,8 @@ fn main() {
         .on_hold('=', |s| s.board.pull = (s.board.pull * 0.97).max(0.03))
         .on('t', |s| s.board.taper = if s.board.taper > 0.0 { 0.0 } else { 0.15 })
         .on('c', |s| {
-            let next = INKS.iter().position(|c| *c == s.board.colour).map_or(0, |k| (k + 1) % INKS.len());
-            s.board.colour = INKS[next];
+            let next = tree::INKS.iter().position(|c| *c == s.board.colour).map_or(0, |k| (k + 1) % tree::INKS.len());
+            s.paint_now(tree::INKS[next]);
         })
         // --- what a drag does -------------------------------------------------
         .on('d', |s| s.obey(Cmd::Use(Tool::Draw)))
@@ -442,7 +557,7 @@ fn main() {
         // --- the clock --------------------------------------------------------
         .on(' ', |s| s.obey(if s.board.playing { Cmd::Pause } else { Cmd::Play }))
         .on('b', |s| s.obey(Cmd::Rewind))
-        .on('n', |s| s.obey(Cmd::Stop))
+        .on('n', |s| s.heed(Poke::Verb(None)))
         .on('g', |s| s.obey(Cmd::Group))
         .on('k', |s| s.obey(Cmd::Key))
         .on('l', |s| s.obey(Cmd::Unkey))
@@ -482,8 +597,8 @@ fn page(s: &Studio) -> Frame {
     // --- the toolbar ---------------------------------------------------------
     // One call. The rectangles are `easel`'s, and the same ones decide what a
     // tap hit, so painting and hitting cannot drift apart.
-    s.bar.paint(&mut f, &s.board, s.size.1);
-    s.panel.paint(&mut f, &s.board, s.size.1);
+    s.bar.paint(&mut f, &s.board, s.size.0);
+    s.tree.paint(&mut f, &s.board, s.size.1);
 
     // --- what is going on ----------------------------------------------------
     let doing = match s.board.chosen() {
@@ -503,7 +618,7 @@ fn page(s: &Studio) -> Frame {
     };
     f.pin(
         Anchor::TopLeft,
-        (WIDTH + 14) as f64,
+        (tree::WIDTH + 14) as f64,
         14.0,
         format!("{}   {}   {}", tool_name(s), s.nib_name(), doing),
         s.board.colour,
@@ -512,7 +627,7 @@ fn page(s: &Studio) -> Frame {
     let keys = s.board.keys_here();
     f.pin(
         Anchor::TopLeft,
-        (WIDTH + 14) as f64,
+        (tree::WIDTH + 14) as f64,
         50.0,
         if s.board.clock <= 0.0 {
             "at 0s: dragging moves the shape itself".to_string()
@@ -524,7 +639,7 @@ fn page(s: &Studio) -> Frame {
     );
     f.pin(
         Anchor::TopLeft,
-        (WIDTH + 14) as f64,
+        (tree::WIDTH + 14) as f64,
         32.0,
         format!(
             "{}  t {:.1}s   spring {:.2}   taper {}   {} marks   {}{}",
@@ -539,7 +654,7 @@ fn page(s: &Studio) -> Frame {
         0x94A1AE,
         2,
     );
-    f.pin(Anchor::BottomLeft, (WIDTH + 14) as f64, -16.0, &s.say, 0x6FCF97, 2);
+    f.pin(Anchor::BottomLeft, (tree::WIDTH + 14) as f64, -16.0, &s.say, 0x6FCF97, 2);
     f.pin(
         Anchor::BottomRight,
         -14.0,

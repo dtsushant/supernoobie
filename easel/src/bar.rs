@@ -10,6 +10,30 @@
 //!     bar.at(px, py)  ->  Some(Cmd::Colour(0xE0A44A))
 //! ```
 //!
+//! ## What is here, and what is not
+//!
+//! Here: things that are **modes of the program** — which nib, what a drag
+//! does, the clock, undo, saving.
+//!
+//! Not here: **colour**, and what a shape *does*. Those belong to a particular
+//! shape, and a shape is chosen in the tree, so they appear there beside it —
+//! see [`tree`](crate::tree). A global "current colour" can only ever mean
+//! *the colour of the next stroke*, which is a strange thing to have on a
+//! toolbar when what you usually want is to change the colour of one already
+//! drawn.
+//!
+//! ## Across the top, not down the side
+//!
+//! The left belongs to the [`tree`](crate::tree) — the list of what the
+//! drawing is made of, which is the thing you look at while working and the
+//! thing that grows. Tools are a fixed set that never grows, so they go across
+//! the top where a fixed set fits.
+//!
+//! The buttons **flow**: they are pushed in order and wrap when they run out
+//! of width, with a gap between one kind and the next. So the bar rearranges
+//! itself for a narrow window instead of running off the edge, and adding a
+//! button later needs no arithmetic redone.
+//!
 //! ## Pixels, in a crate that otherwise refuses to know about them
 //!
 //! Everywhere else in [`easel`](crate) the world is measured in world units,
@@ -46,22 +70,16 @@
 //! itself, and the symptom is a button that does the wrong thing near its
 //! edge, which nobody can reproduce on purpose.
 
-use plotkit::{Anchor, Canvas, Cx, Frame};
+use plotkit::{Anchor, Canvas, Frame};
 use shapes::Nib;
 
-use crate::action::Action;
 use crate::board::{Board, Tool};
 
 /// What pressing a button means.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Cmd {
-    Colour(u32),
     Nib(usize),
     Use(Tool),
-    /// Add this to what the selected mark does.
-    Do(Action),
-    /// Take away everything the selected mark does.
-    Stop,
     /// Bind the chosen marks into one figure.
     Group,
     /// Break a figure up again.
@@ -104,10 +122,6 @@ impl Button {
     }
 }
 
-/// The colours on offer.
-pub const INKS: [u32; 8] =
-    [0xE3E9EF, 0xE0A44A, 0x4FBCD4, 0xE585AC, 0x6FCF97, 0x9B7BD4, 0xE0704A, 0x46525E];
-
 /// The three nibs, by the index [`Cmd::Nib`] carries.
 pub const NIBS: [&str; 3] = ["quill", "round", "broad"];
 
@@ -117,10 +131,7 @@ pub const NIBS: [&str; 3] = ["quill", "round", "broad"];
 /// something meant to be hit with a finger. A pen is more precise but not as
 /// much more as it feels: held at an angle it reports a point offset from
 /// where the nib looks to be.
-pub const TAP: i32 = 44;
-
-/// How wide the bar is, in pixels. The window keeps the drawing clear of it.
-pub const WIDTH: i32 = 3 * (TAP + 6) + 2 * PAD - 6;
+pub const TAP: i32 = 40;
 
 /// How long one press of an action button lasts, in seconds.
 ///
@@ -128,154 +139,93 @@ pub const WIDTH: i32 = 3 * (TAP + 6) + 2 * PAD - 6;
 /// an act loops and a cycle that does not close jerks every time round.
 pub const STEP: f64 = 2.0;
 
-const PAD: i32 = 10;
-const ROW: i32 = TAP;
-const SWATCH: i32 = TAP;
+const PAD: i32 = 8;
 /// Gap between buttons: enough that a near miss lands on nothing rather than
 /// on the neighbour, which is the worse of the two failures.
-const GAP: i32 = 6;
-const CELL: i32 = TAP + GAP;
+const GAP: i32 = 5;
+/// The gap between one kind of button and the next.
+const BREAK: i32 = 18;
+const WIDE: i32 = 54;
 
 /// The toolbar.
 #[derive(Clone, Debug, Default)]
 pub struct Bar {
     pub buttons: Vec<Button>,
+    /// Where it starts and how far down it reaches.
+    pub x: i32,
+    pub depth: i32,
+}
+
+/// Lays buttons out left to right, wrapping.
+struct Flow {
+    x: i32,
+    y: i32,
+    left: i32,
+    right: i32,
+    out: Vec<Button>,
+}
+
+impl Flow {
+    fn put(&mut self, w: i32, label: &'static str, swatch: Option<u32>, cmd: Cmd) {
+        if self.x + w > self.right {
+            self.x = self.left;
+            self.y += TAP + GAP;
+        }
+        self.out.push(Button { x: self.x, y: self.y, w, h: TAP, label, swatch, cmd });
+        self.x += w + GAP;
+    }
+
+    /// A gap between one kind of button and the next.
+    fn gap(&mut self) {
+        self.x += BREAK;
+    }
 }
 
 impl Bar {
-    /// Build the bar. Positions are worked out **once**, here, and both the
-    /// painting and the hit testing read them.
-    pub fn new() -> Bar {
-        let mut b = Bar { buttons: Vec::new() };
-        let mut y = PAD;
+    /// Build the bar across the top, beside the tree. Positions are worked out
+    /// **once**, here, and both the painting and the hit testing read them.
+    pub fn new(window_w: i32) -> Bar {
+        let left = crate::tree::WIDTH + PAD;
+        let mut f = Flow { x: left, y: PAD, left, right: window_w - PAD, out: Vec::new() };
 
-        // --- colours, four to a row -----------------------------------------
-        for (k, ink) in INKS.iter().enumerate() {
-            let (col, row) = (k % 4, k / 4);
-            b.buttons.push(Button {
-                x: PAD + col as i32 * (SWATCH * 3 / 4 + GAP),
-                y: y + row as i32 * CELL,
-                w: SWATCH * 3 / 4,
-                h: SWATCH,
-                label: "",
-                swatch: Some(*ink),
-                cmd: Cmd::Colour(*ink),
-            });
-        }
-        y += 2 * CELL - GAP + PAD;
-
-        // --- the nib ---------------------------------------------------------
         for (k, name) in NIBS.iter().enumerate() {
-            b.buttons.push(Button {
-                x: PAD + k as i32 * CELL,
-                y,
-                w: TAP,
-                h: ROW,
-                label: name,
-                swatch: None,
-                cmd: Cmd::Nib(k),
-            });
+            f.put(WIDE, name, None, Cmd::Nib(k));
         }
-        y += ROW + PAD;
-
-        // --- what a drag does -------------------------------------------------
-        for (k, (name, tool)) in
-            [("draw", Tool::Draw), ("pick", Tool::Pick), ("rub", Tool::Erase)].into_iter().enumerate()
-        {
-            b.buttons.push(Button {
-                x: PAD + k as i32 * CELL,
-                y,
-                w: TAP,
-                h: ROW,
-                label: name,
-                swatch: None,
-                cmd: Cmd::Use(tool),
-            });
+        f.gap();
+        for (name, tool) in [("draw", Tool::Draw), ("pick", Tool::Pick), ("rub", Tool::Erase)] {
+            f.put(WIDE, name, None, Cmd::Use(tool));
         }
-        y += ROW + PAD;
+        f.gap();
+        // No colours and no actions here. Both belong to a **particular
+        // shape**, not to the program as a whole, so they live in the tree
+        // beside whatever is chosen -- see `crate::tree::inspector`.
 
-        // --- what the chosen mark does ---------------------------------------
-        // A sensible default for each, so one press does something worth
-        // watching. The numbers can be tuned afterwards; an empty animation
-        // that needs six decisions before it moves is one nobody makes.
-        // Rates chosen so that a whole number of cycles fits in [`STEP`]
-        // seconds. An act loops by default, so a rate that does not close
-        // leaves a visible jerk every time round — a spin that has got
-        // four fifths of the way and snaps back.
-        let right = Cx::new(1.6, 0.0);
-        let acts: [(&'static str, Action); 6] = [
-            ("walk", Action::Walk(right)),
-            ("run", Action::Run(right)),
-            ("jump", Action::Jump { height: 1.2, rate: 1.5 }),
-            ("spin", Action::Spin(0.5)),
-            ("bob", Action::Bob { height: 0.4, rate: 0.5 }),
-            ("pulse", Action::Pulse { amount: 0.25, rate: 0.5 }),
-        ];
-        for (k, (name, action)) in acts.into_iter().enumerate() {
-            let (col, row) = (k % 3, k / 3);
-            b.buttons.push(Button {
-                x: PAD + col as i32 * CELL,
-                y: y + row as i32 * CELL,
-                w: TAP,
-                h: ROW,
-                label: name,
-                swatch: None,
-                cmd: Cmd::Do(action),
-            });
+        for (name, cmd) in [("|<", Cmd::Step(false)), ("key", Cmd::Key), (">|", Cmd::Step(true))] {
+            f.put(TAP, name, None, cmd);
         }
-        y += 2 * CELL - GAP + PAD;
-
-        // --- the clock --------------------------------------------------------
-        for (k, (name, cmd)) in
-            [("play", Cmd::Play), ("stop", Cmd::Pause), ("|<<", Cmd::Rewind)].into_iter().enumerate()
-        {
-            b.buttons.push(Button { x: PAD + k as i32 * CELL, y, w: TAP, h: ROW, label: name, swatch: None, cmd });
+        f.put(WIDE, "unkey", None, Cmd::Unkey);
+        f.gap();
+        for (name, cmd) in [("play", Cmd::Play), ("stop", Cmd::Pause), ("|<<", Cmd::Rewind)] {
+            f.put(WIDE, name, None, cmd);
         }
-        y += CELL;
-
-        // --- keyframes --------------------------------------------------------
-        for (k, (name, cmd)) in
-            [("|<", Cmd::Step(false)), ("key", Cmd::Key), (">|", Cmd::Step(true))].into_iter().enumerate()
-        {
-            b.buttons.push(Button { x: PAD + k as i32 * CELL, y, w: TAP, h: ROW, label: name, swatch: None, cmd });
+        f.gap();
+        for (name, cmd) in [("group", Cmd::Group), ("split", Cmd::Ungroup)] {
+            f.put(WIDE, name, None, cmd);
         }
-        y += CELL;
-        b.buttons.push(Button { x: PAD, y, w: TAP, h: ROW, label: "unkey", swatch: None, cmd: Cmd::Unkey });
-        y += CELL;
-
-        // --- gathering strokes into a figure ----------------------------------
-        for (k, (name, cmd)) in
-            [("group", Cmd::Group), ("split", Cmd::Ungroup), ("no act", Cmd::Stop)].into_iter().enumerate()
-        {
-            b.buttons.push(Button { x: PAD + k as i32 * CELL, y, w: TAP, h: ROW, label: name, swatch: None, cmd });
-        }
-        y += ROW + PAD;
-
-        // --- the page ---------------------------------------------------------
-        for (k, (name, cmd)) in [
+        f.gap();
+        for (name, cmd) in [
             ("undo", Cmd::Undo),
             ("redo", Cmd::Redo),
             ("even", Cmd::Smooth),
             ("save", Cmd::Save),
             ("open", Cmd::Open),
             ("clear", Cmd::Clear),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            let (col, row) = (k % 3, k / 3);
-            b.buttons.push(Button {
-                x: PAD + col as i32 * CELL,
-                y: y + row as i32 * CELL,
-                w: TAP,
-                h: ROW,
-                label: name,
-                swatch: None,
-                cmd,
-            });
+        ] {
+            f.put(WIDE, name, None, cmd);
         }
 
-        b
+        let depth = f.out.iter().map(|b| b.y + b.h).max().unwrap_or(0) + PAD;
+        Bar { buttons: f.out, x: left - PAD, depth }
     }
 
     /// What was pressed at this pixel, if anything.
@@ -285,16 +235,11 @@ impl Bar {
 
     /// Is this pixel over the bar at all?
     ///
-    /// Wider than the buttons on purpose. The gaps between them are still the
-    /// bar, and a stroke started in a gap would be drawn *underneath* the
-    /// toolbar where it cannot be seen or picked up again.
-    pub fn covers(&self, px: f64, _py: f64) -> bool {
-        px < WIDTH as f64
-    }
-
-    /// How far down the bar reaches, for drawing its backing.
-    pub fn depth(&self) -> i32 {
-        self.buttons.iter().map(|b| b.y + b.h).max().unwrap_or(0) + PAD
+    /// The whole strip, not just the buttons. The gaps between them are still
+    /// the bar, and a stroke started in a gap would be drawn *underneath* the
+    /// toolbar where it can be neither seen nor picked up again.
+    pub fn covers(&self, px: f64, py: f64) -> bool {
+        px >= self.x as f64 && py < self.depth as f64
     }
 
     /// Which nib button is the one in hand.
@@ -309,7 +254,6 @@ impl Bar {
     /// Is this button showing the state the board is actually in?
     pub fn lit(&self, button: &Button, board: &Board) -> bool {
         match button.cmd {
-            Cmd::Colour(c) => c == board.colour,
             Cmd::Use(t) => t == board.tool,
             Cmd::Nib(k) => k == Bar::nib_index(board.nib),
             Cmd::Play => board.playing,
@@ -331,10 +275,9 @@ impl Bar {
     ///
     /// So the window's whole part in the toolbar is one call to this and one
     /// call to [`Bar::at`].
-    pub fn paint(&self, f: &mut Frame, board: &Board, tall: i32) {
-        let deep = self.depth().max(tall);
-        f.chip(0, 0, WIDTH, deep, PANEL);
-        f.chip(WIDTH - 1, 0, 1, deep, EDGE);
+    pub fn paint(&self, f: &mut Frame, board: &Board, window_w: i32) {
+        f.chip(self.x, 0, window_w - self.x, self.depth, PANEL);
+        f.chip(self.x, self.depth - 1, window_w - self.x, 1, EDGE);
 
         for b in &self.buttons {
             let lit = self.lit(b, board);
@@ -375,13 +318,15 @@ const INK_TEXT: u32 = 0xC3CDD7;
 mod tests {
     use super::*;
 
+    const WIN: i32 = 1400;
+
     /// ★ Painting and hit testing must agree exactly, and the way to be sure
     /// is for there to be only one piece of arithmetic. Every pixel inside a
-    /// button's own rectangle must find that button — the alternative is an
+    /// button's own rectangle must find that button -- the alternative is an
     /// edge that does the wrong thing, which nobody can reproduce on purpose.
     #[test]
     fn every_pixel_of_a_button_finds_that_button() {
-        let bar = Bar::new();
+        let bar = Bar::new(WIN);
         for b in &bar.buttons {
             for (px, py) in [
                 (b.x, b.y),
@@ -395,12 +340,27 @@ mod tests {
         }
     }
 
-    /// ★ And no two buttons may claim the same pixel — with a half-open test,
-    /// buttons that touch cannot both own the join. Overlapping ones would
-    /// make the second unreachable, and only sometimes.
+    /// ★ The buttons FLOW: pushed in order, wrapping when they run out of
+    /// width. So a narrow window rearranges the bar instead of running it off
+    /// the edge, and adding a button later needs no arithmetic redone.
+    #[test]
+    fn the_buttons_wrap_rather_than_running_off_the_edge() {
+        for width in [900, 1200, 1400, 1920] {
+            let bar = Bar::new(width);
+            for b in &bar.buttons {
+                assert!(b.x + b.w <= width, "at {width} wide, {:?} runs off the edge", b.cmd);
+                assert!(b.x >= crate::tree::WIDTH, "{:?} is over the tree", b.cmd);
+            }
+        }
+        // Narrower means more rows, not a wider bar.
+        assert!(Bar::new(900).depth > Bar::new(1920).depth);
+    }
+
+    /// No two buttons may claim the same pixel -- overlapping ones make the
+    /// second unreachable, and only sometimes.
     #[test]
     fn no_two_buttons_overlap() {
-        let bar = Bar::new();
+        let bar = Bar::new(WIN);
         for (k, a) in bar.buttons.iter().enumerate() {
             for b in &bar.buttons[k + 1..] {
                 let apart = a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y;
@@ -409,85 +369,52 @@ mod tests {
         }
     }
 
-    /// ★ Every button must be big enough to hit. The first version of this bar
-    /// had 22-pixel rows and the complaint was immediate: too many taps to
-    /// land on the right thing. A pen held at an angle reports a point offset
-    /// from where its nib appears to be, and a finger reports the middle of a
-    /// contact patch you cannot see.
+    /// ★ Every button must be big enough to hit. A pen held at an angle
+    /// reports a point offset from where its nib appears to be, and a finger
+    /// reports the middle of a contact patch you cannot see.
     #[test]
     fn every_button_is_big_enough_to_hit() {
-        for b in &Bar::new().buttons {
+        for b in &Bar::new(WIN).buttons {
             assert!(b.h >= TAP, "{:?} is only {} tall", b.cmd, b.h);
-            // Swatches are narrower, because a colour needs no room for a
-            // word and eight of them have to fit across.
-            let least = if b.swatch.is_some() { TAP * 3 / 4 } else { TAP };
-            assert!(b.w >= least, "{:?} is only {} wide", b.cmd, b.w);
-        }
-    }
-
-    /// And they are spaced, so a near miss lands on nothing rather than on the
-    /// neighbour — which is much the worse of the two failures, because it
-    /// does something you did not ask for.
-    #[test]
-    fn a_near_miss_lands_on_nothing_rather_than_the_neighbour() {
-        let bar = Bar::new();
-        for (k, a) in bar.buttons.iter().enumerate() {
-            for b in &bar.buttons[k + 1..] {
-                let gap_x = (a.x + a.w <= b.x && b.x - (a.x + a.w) >= 4) || (b.x + b.w <= a.x && a.x - (b.x + b.w) >= 4);
-                let gap_y = (a.y + a.h <= b.y && b.y - (a.y + a.h) >= 4) || (b.y + b.h <= a.y && a.y - (b.y + b.h) >= 4);
-                assert!(gap_x || gap_y, "{:?} and {:?} are touching", a.cmd, b.cmd);
-            }
+            assert!(b.w >= TAP, "{:?} is only {} wide", b.cmd, b.w);
         }
     }
 
     /// Just outside a button is nothing, rather than the neighbour.
     #[test]
     fn just_outside_a_button_is_nothing_in_particular() {
-        let bar = Bar::new();
+        let bar = Bar::new(WIN);
         let first = bar.buttons[0].clone();
         assert_ne!(bar.at((first.x - 1) as f64, first.y as f64), Some(first.cmd));
-        assert_ne!(bar.at(first.x as f64, (first.y - 1) as f64), Some(first.cmd));
     }
 
-    /// ★ The gaps between buttons are still the bar. A stroke begun in a gap
-    /// would be drawn *underneath* the toolbar, where it can be neither seen
-    /// nor picked up again — which looks like the pen having stopped working.
+    /// ★ The whole strip is the bar, not just the buttons. A stroke begun in
+    /// a gap would be drawn *underneath* the toolbar, where it can be neither
+    /// seen nor picked up -- which looks like the pen having stopped working.
     #[test]
     fn the_gaps_between_buttons_are_still_the_toolbar() {
-        let bar = Bar::new();
-        assert!(bar.covers(4.0, 4.0), "the margin above the first button");
-        assert!(bar.covers(WIDTH as f64 - 1.0, 300.0), "and the strip beside them");
-        assert!(!bar.covers(WIDTH as f64 + 1.0, 300.0), "but the page beyond it is the page");
-        // Every button is inside the covered strip, or it could be pressed
-        // while the pen also drew on the paper behind it.
+        let bar = Bar::new(WIN);
+        assert!(bar.covers((crate::tree::WIDTH + 4) as f64, 4.0), "the margin above the first button");
+        assert!(bar.covers((WIN - 4) as f64, 4.0), "and the empty end of a row");
+        assert!(!bar.covers((WIN - 4) as f64, (bar.depth + 1) as f64), "but the paper below it is the paper");
+        assert!(!bar.covers(10.0, 4.0), "and the tree beside it is the tree");
         for b in &bar.buttons {
-            assert!(bar.covers((b.x + b.w - 1) as f64, b.y as f64), "{:?} sticks out of the bar", b.cmd);
+            assert!(bar.covers((b.x + b.w - 1) as f64, (b.y + b.h - 1) as f64), "{:?} sticks out", b.cmd);
         }
     }
 
-    /// Every colour on offer has a swatch, and every swatch sets that colour —
-    /// a swatch painted one colour and setting another is a special kind of
-    /// maddening.
+    /// ★ What is here is a mode of the PROGRAM. Colour and what a shape does
+    /// belong to a particular shape, so they live in the tree beside it -- a
+    /// global "current colour" can only mean the colour of the NEXT stroke,
+    /// which is a strange thing to offer when you want to change one already
+    /// drawn.
     #[test]
-    fn a_swatch_sets_the_colour_it_is_painted() {
-        let bar = Bar::new();
-        let swatches: Vec<&Button> = bar.buttons.iter().filter(|b| b.swatch.is_some()).collect();
-        assert_eq!(swatches.len(), INKS.len());
-        for b in swatches {
-            assert_eq!(b.cmd, Cmd::Colour(b.swatch.expect("a swatch")));
-        }
-    }
-
-    /// The bar offers everything the keyboard does, so nothing is reachable
-    /// only by knowing a secret.
-    #[test]
-    fn the_bar_can_reach_every_command() {
-        let bar = Bar::new();
+    fn the_bar_holds_modes_and_not_properties_of_a_shape() {
+        let bar = Bar::new(WIN);
         let has = |c: Cmd| bar.buttons.iter().any(|b| b.cmd == c);
         for c in [
             Cmd::Play, Cmd::Pause, Cmd::Rewind, Cmd::Undo, Cmd::Redo, Cmd::Save, Cmd::Open, Cmd::Clear,
-            Cmd::Smooth, Cmd::Stop, Cmd::Group, Cmd::Ungroup, Cmd::Key, Cmd::Unkey,
-            Cmd::Step(true), Cmd::Step(false),
+            Cmd::Smooth, Cmd::Group, Cmd::Ungroup, Cmd::Key, Cmd::Unkey, Cmd::Step(true), Cmd::Step(false),
         ] {
             assert!(has(c), "{c:?} is not on the bar");
         }
@@ -497,39 +424,6 @@ mod tests {
         for t in [Tool::Draw, Tool::Pick, Tool::Erase] {
             assert!(has(Cmd::Use(t)));
         }
-        assert!(bar.buttons.iter().filter(|b| matches!(b.cmd, Cmd::Do(_))).count() >= 6, "and the actions");
-    }
-
-    /// Every action button carries a default worth watching, rather than a
-    /// zero that does nothing and looks broken.
-    #[test]
-    fn every_action_button_actually_moves_something() {
-        let bar = Bar::new();
-        for b in &bar.buttons {
-            let Cmd::Do(action) = b.cmd else { continue };
-            let after = action.at(0.37);
-            let moved = (after.b).abs() > 1e-3 || (after.a - plotkit::Cx::ONE).abs() > 1e-3;
-            assert!(moved, "{} does nothing", b.label);
-        }
-    }
-
-    /// ★ The rates must close in [`STEP`] seconds. An act loops, so a cycle
-    /// that has got four fifths of the way round when the step ends snaps back
-    /// — a jerk every two seconds, for ever, which reads as the animation
-    /// being broken rather than as a number being slightly wrong.
-    #[test]
-    fn a_cycling_action_comes_round_by_the_end_of_its_step() {
-        for b in &Bar::new().buttons {
-            let Cmd::Do(action) = b.cmd else { continue };
-            // The ones that go somewhere are not expected to come back; the
-            // ones that cycle in place are.
-            if matches!(action, Action::Walk(_) | Action::Run(_) | Action::Drift(_)) {
-                continue;
-            }
-            let start = action.at(0.0);
-            let end = action.at(STEP);
-            assert!((end.a - start.a).abs() < 1e-6, "{} does not come round: {:?}", b.label, end.a);
-            assert!((end.b - start.b).abs() < 1e-6, "{} does not come back: {:?}", b.label, end.b);
-        }
+        assert!(bar.buttons.iter().all(|b| b.swatch.is_none()));
     }
 }

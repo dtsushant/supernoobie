@@ -163,6 +163,16 @@ pub struct Board {
     /// pick tool, and the way to be sure is that there is exactly one place
     /// that decides — here.
     pub editing: Option<usize>,
+
+    // --- the tree -------------------------------------------------------------
+    /// Which figures are folded shut in the tree.
+    ///
+    /// **Not saved.** Folding is about looking, not about the drawing, and a
+    /// file that remembered which folders you had open would make two people's
+    /// copies of the same picture differ for no reason anybody cares about.
+    pub folded: Vec<u32>,
+    /// The line a drop would land before, while something is being dragged.
+    pub dropping: Option<usize>,
 }
 
 impl Default for Board {
@@ -191,6 +201,8 @@ impl Board {
             clock: 0.0,
             playing: false,
             editing: None,
+            folded: Vec::new(),
+            dropping: None,
         }
     }
 
@@ -636,6 +648,110 @@ impl Board {
                     .collect::<Vec<_>>()
             })
             .collect()
+    }
+
+    /// The figure everything chosen belongs to, if they all belong to one.
+    ///
+    /// `None` when nothing is chosen, when what is chosen is loose, or when it
+    /// spans two figures — because in all three cases there is no single
+    /// figure for an option to be *about*.
+    pub fn chosen_group(&self) -> Option<u32> {
+        let mut found: Option<u32> = None;
+        for k in &self.selected {
+            let g = self.sheet.marks.get(*k)?.group;
+            if g == 0 || found.is_some_and(|f| f != g) {
+                return None;
+            }
+            found = Some(g);
+        }
+        found
+    }
+
+    /// The colour everything chosen is, if they are all the same.
+    pub fn chosen_colour(&self) -> Option<u32> {
+        let mut found: Option<u32> = None;
+        for k in &self.selected {
+            let c = self.sheet.marks.get(*k)?.colour;
+            if found.is_some_and(|f| f != c) {
+                return None;
+            }
+            found = Some(c);
+        }
+        found
+    }
+
+    /// Paint whatever is chosen.
+    ///
+    /// With nothing chosen this sets the pen instead, so the swatches always
+    /// do something — a control that is dead half the time gets treated as
+    /// broken.
+    pub fn paint(&mut self, colour: u32) {
+        if self.selected.is_empty() {
+            self.colour = colour;
+            return;
+        }
+        self.colour = colour;
+        self.to_each(|m| m.colour = colour);
+    }
+
+    /// Fold a figure shut, or open it again.
+    pub fn fold(&mut self, group: u32) {
+        match self.folded.iter().position(|g| *g == group) {
+            Some(k) => {
+                self.folded.remove(k);
+            }
+            None => self.folded.push(group),
+        }
+    }
+
+    /// Choose a whole figure.
+    pub fn choose_group(&mut self, group: u32) {
+        self.selected = (0..self.sheet.len()).filter(|k| self.sheet.marks[*k].group == group).collect();
+    }
+
+    /// Choose one mark, and nothing else.
+    pub fn choose_only(&mut self, k: usize) {
+        self.selected = if k < self.sheet.len() { vec![k] } else { Vec::new() };
+    }
+
+    /// Make an empty figure to drag things into.
+    ///
+    /// A group with no members has nowhere to live in the sheet, since a
+    /// group is only a number written on marks. So this groups whatever is
+    /// chosen if anything is, and otherwise says so rather than pretending.
+    pub fn new_group(&mut self) -> bool {
+        self.group()
+    }
+
+    /// Move a mark to sit before another, which is what dragging a line does.
+    ///
+    /// Order is **paint order** — later is on top — so this is how one shape
+    /// is put in front of another.
+    pub fn move_mark(&mut self, from: usize, before: usize) -> bool {
+        if from >= self.sheet.len() || before > self.sheet.len() || from == before {
+            return false;
+        }
+        self.past.remember(&self.sheet);
+        let m = self.sheet.marks.remove(from);
+        // Removing shifts everything above down one, so a target that was
+        // above the thing moved is now one lower. Getting this wrong puts the
+        // mark one place from where it was dropped, every time, in one
+        // direction only -- which is the kind of bug people work around
+        // without ever reporting.
+        let at = if before > from { before - 1 } else { before };
+        self.sheet.marks.insert(at.min(self.sheet.len()), m);
+        self.selected = vec![at.min(self.sheet.len() - 1)];
+        true
+    }
+
+    /// Put a mark into a figure, or take it out of one.
+    pub fn put_in_group(&mut self, mark: usize, group: u32) -> bool {
+        if mark >= self.sheet.len() {
+            return false;
+        }
+        self.past.remember(&self.sheet);
+        self.sheet.marks[mark].group = group;
+        true
     }
 
     /// Does anything on the page move at all?
@@ -1556,6 +1672,89 @@ mod tests {
         let small = reach(&b);
         assert!(b.set_dial(0, 5.0));
         assert!(reach(&b) > small * 2.0, "both shapes should have grown");
+    }
+
+    /// ★ Colour belongs to the shape, not to the program. With something
+    /// chosen the swatches repaint it; with nothing chosen they set the pen,
+    /// so they always do something -- a control that is dead half the time
+    /// gets treated as broken.
+    #[test]
+    fn a_swatch_paints_what_is_chosen_or_sets_the_pen() {
+        let mut b = Board::new();
+        draw(&mut b, &ring(1.0, Cx::ZERO, 60));
+        let was = b.sheet.marks[0].colour;
+
+        b.paint(0xFF0000);
+        assert_eq!(b.sheet.marks[0].colour, was, "nothing chosen, nothing repainted");
+        assert_eq!(b.colour, 0xFF0000, "but the pen changed");
+
+        tap(&mut b, Cx::new(1.0, 0.0));
+        b.paint(0x00FF00);
+        assert_eq!(b.sheet.marks[0].colour, 0x00FF00, "chosen, so repainted");
+        assert_eq!(b.chosen_colour(), Some(0x00FF00));
+    }
+
+    /// And repainting a whole figure is one press and one step back.
+    #[test]
+    fn painting_a_figure_is_one_press() {
+        let mut b = Board::new();
+        for k in 0..3 {
+            draw(&mut b, &ring(0.4, Cx::new(k as f64 * 2.0, 0.0), 40));
+        }
+        b.selected = vec![0, 1, 2];
+        b.group();
+        b.paint(0x123456);
+        assert!(b.sheet.marks.iter().all(|m| m.colour == 0x123456));
+        assert!(b.undo());
+        assert!(b.sheet.marks.iter().all(|m| m.colour != 0x123456));
+    }
+
+    /// ★ Two things chosen with different colours have no one colour, and
+    /// saying otherwise would show a swatch as lit that is not the truth.
+    #[test]
+    fn a_mixed_selection_has_no_one_colour() {
+        let mut b = Board::new();
+        for k in 0..2 {
+            b.colour = if k == 0 { 0x111111 } else { 0x222222 };
+            draw(&mut b, &ring(0.4, Cx::new(k as f64 * 2.0, 0.0), 40));
+        }
+        b.selected = vec![0, 1];
+        assert_eq!(b.chosen_colour(), None);
+        assert_eq!(b.chosen_group(), None, "and nor do they belong to one figure");
+    }
+
+    /// ★ Dragging a line reorders the drawing, and order is paint order.
+    /// The index has to be adjusted after removing, or the mark lands one
+    /// place from where it was dropped -- every time, in one direction, which
+    /// is the kind of bug people work around without ever reporting.
+    #[test]
+    fn dragging_a_line_reorders_and_lands_where_it_was_dropped() {
+        let mut b = Board::new();
+        for k in 0..4 {
+            b.colour = 0x100 * (k + 1) as u32;
+            draw(&mut b, &ring(0.4, Cx::new(k as f64 * 2.0, 0.0), 40));
+        }
+        let colours = |b: &Board| b.sheet.marks.iter().map(|m| m.colour).collect::<Vec<_>>();
+        assert_eq!(colours(&b), vec![0x100, 0x200, 0x300, 0x400]);
+
+        // Move the first to the end.
+        assert!(b.move_mark(0, 4));
+        assert_eq!(colours(&b), vec![0x200, 0x300, 0x400, 0x100]);
+
+        // And the last back to the front.
+        assert!(b.move_mark(3, 0));
+        assert_eq!(colours(&b), vec![0x100, 0x200, 0x300, 0x400]);
+        assert!(b.undo());
+    }
+
+    /// Folding is a way of looking, so it toggles and holds nothing else.
+    #[test]
+    fn folding_a_figure_toggles() {
+        let mut b = Board::new();
+        b.fold(3);
+        assert!(b.folded.contains(&3));
+        b.fold(3);
+        assert!(!b.folded.contains(&3));
     }
 
     /// A tap leaves nothing — no invisible speck that can still be clicked on.
