@@ -710,6 +710,30 @@ cargo run -p shapes -- hexagon --steps    # watch the roots appear, then join up
 ## `shapes::wave` — `a sin(kx + φ)`, and adding them
 
 ```rust
+// Named, and drawing itself — no endpoints, no sample count.
+f.add(Wave::sine());                                   // sin(x), edge to edge
+f.place(Wave::sine().amplitude(1.5).wavelength(5.0), Cx::new(-6.0, 3.0));
+f.place(wave::sum(&harmonics), Cx::new(0.0, -6.0));    // adds the FUNCTIONS
+
+Wave::sine()          // amplitude 1, wavelength 2pi, through the origin
+    .amplitude(1.5)   // how tall
+    .wavelength(5.0)  // one whole wave, end to end -- the number you can measure
+    .frequency(3.0)   // or radians per unit, if you prefer: k = 2pi/lambda
+    .phase(0.5)       // how far along it starts. Run this with t and it travels
+    .from(z)          // where x is measured from, and the line it waves about
+```
+
+**A wave has no ends.** `Wave::shape` is a `Shape::graph`, sampled against
+whatever is on screen, so it runs off both edges however far you pan or zoom.
+There is nothing to pick — no start, no finish, no sample count.
+
+`f.place(wave, at)` **rebuilds** it about that point rather than shifting it.
+Shifting something with no ends drags the samples sideways and leaves a bare
+strip at one edge; changing where `x` is measured from moves it properly. That
+is what `Placeable` is for, and it is a bound on the method, so there is
+nothing to import.
+
+```rust
 let w = Wave::new(1.0, 2.0, 0.0);   // amplitude, frequency, phase
 
 w.at(x)        // f64 — the height

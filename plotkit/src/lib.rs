@@ -65,6 +65,6 @@ pub mod view;
 
 pub use complex::Cx;
 pub use raster::{colour, Canvas};
-pub use frame::{Anchor, Frame, Style};
+pub use frame::{Anchor, Frame, Placeable, Style};
 pub use shape::Shape;
 pub use view::View;

@@ -45,6 +45,22 @@ impl Default for Style {
     }
 }
 
+/// Something that can put itself at a point.
+///
+/// A [`Shape`] moves. Other things do better by being rebuilt: a wave spanning
+/// the whole window has no endpoints to shift, so moving it means changing
+/// where its `x` is measured from, not translating the samples — which would
+/// leave a bare strip at one edge.
+pub trait Placeable {
+    fn placed(self, at: Cx) -> Shape;
+}
+
+impl Placeable for Shape {
+    fn placed(self, at: Cx) -> Shape {
+        self.at(at)
+    }
+}
+
 /// Where on the window a pinned caption sits.
 ///
 /// Nine positions, the ones a caption is ever wanted in.
@@ -107,7 +123,8 @@ impl Frame {
     /// ```text
     /// f.add(Shape::circle(z, 1.0)).color(0xE0A44A).width(3);
     /// ```
-    pub fn add(&mut self, s: Shape) -> StyleRef<'_> {
+    pub fn add(&mut self, s: impl Into<Shape>) -> StyleRef<'_> {
+        let s = s.into();
         let st = Style { colour: PALETTE[self.next_colour % PALETTE.len()], ..Style::default() };
         self.next_colour += 1;
         self.items.push((s, st));
@@ -124,8 +141,14 @@ impl Frame {
     /// ```text
     /// f.place(face::smiley(1.0), Cx::new(-3.0, 2.0)).color(0x6FCF97);
     /// ```
-    pub fn place(&mut self, s: Shape, at: Cx) -> StyleRef<'_> {
-        self.add(s.at(at))
+    /// `place` takes anything that knows how to put itself somewhere — a
+    /// [`Shape`], which moves; or something like a wave, which is better off
+    /// being *rebuilt* about the new point than shifted.
+    ///
+    /// The bound is on the method, so nothing needs importing at the call
+    /// site. That was the whole trouble with the traits this replaced.
+    pub fn place(&mut self, thing: impl Placeable, at: Cx) -> StyleRef<'_> {
+        self.add(thing.placed(at))
     }
 
     /// Text at a world position, so it moves with whatever it labels.

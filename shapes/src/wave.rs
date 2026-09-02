@@ -29,7 +29,8 @@
 //! the sum is genuinely a new shape. [`combine`] returns `None` rather than
 //! inventing an answer — and that refusal is where Fourier series begin.
 
-use plotkit::Cx;
+use plotkit::{Cx, Placeable, Shape};
+use std::f64::consts::TAU;
 
 /// A sinusoid `a·sin(kx + φ)`. How tall, how fast, where it starts.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -37,11 +38,77 @@ pub struct Wave {
     pub a: f64,
     pub k: f64,
     pub phi: f64,
+    /// Where its `x` is measured from, and the line it waves about.
+    pub origin: Cx,
+}
+
+impl Default for Wave {
+    fn default() -> Wave {
+        Wave::sine()
+    }
 }
 
 impl Wave {
     pub const fn new(a: f64, k: f64, phi: f64) -> Wave {
-        Wave { a, k, phi }
+        Wave { a, k, phi, origin: Cx::ZERO }
+    }
+
+    /// `sin(x)`: amplitude 1, wavelength 2π, through the origin.
+    ///
+    /// The thing you want when you just want a wave.
+    pub const fn sine() -> Wave {
+        Wave::new(1.0, 1.0, 0.0)
+    }
+
+    /// How tall.
+    pub const fn amplitude(mut self, a: f64) -> Wave {
+        self.a = a;
+        self
+    }
+
+    /// How long one whole wave is, end to end.
+    ///
+    /// The number you can measure off the page. `k` is radians per unit, which
+    /// is what the mathematics wants and nobody wants to think in:
+    /// `k = 2π/λ`.
+    pub fn wavelength(mut self, lambda: f64) -> Wave {
+        self.k = TAU / lambda.abs().max(1e-12) * lambda.signum();
+        self
+    }
+
+    /// Radians per unit, if you would rather say it that way.
+    pub const fn frequency(mut self, k: f64) -> Wave {
+        self.k = k;
+        self
+    }
+
+    /// How far along it already is when it starts.
+    pub const fn phase(mut self, phi: f64) -> Wave {
+        self.phi = phi;
+        self
+    }
+
+    /// Where it starts: `x` is measured from here, and it waves about this
+    /// height.
+    pub const fn from(mut self, z: Cx) -> Wave {
+        self.origin = z;
+        self
+    }
+
+    /// What one whole wave measures, end to end.
+    pub fn length(self) -> f64 {
+        TAU / self.k.abs().max(1e-12)
+    }
+
+    /// The wave, drawn across **whatever is on screen** — no endpoints, no
+    /// sample count, nothing to choose.
+    ///
+    /// [`Shape::graph`] is sampled against the visible window, so the wave
+    /// runs off both edges however far you pan or zoom. That is what a wave
+    /// with no stated extent should do, and it is why this is a `graph` and
+    /// not a `param` with two ends somebody had to pick.
+    pub fn shape(self) -> Shape {
+        Shape::graph(move |x| self.origin.im + self.at(x - self.origin.re))
     }
 
     /// The height of the wave at `x`.
@@ -62,9 +129,36 @@ impl Wave {
     }
 }
 
+impl From<Wave> for Shape {
+    fn from(w: Wave) -> Shape {
+        w.shape()
+    }
+}
+
+impl Placeable for Wave {
+    /// Rebuilt about `at`, not shifted.
+    ///
+    /// A wave spans the whole window, so it has no endpoints to move; shifting
+    /// the samples sideways would leave a bare strip at one edge. Changing
+    /// where `x` is measured from moves it properly.
+    fn placed(self, at: Cx) -> Shape {
+        self.from(at).shape()
+    }
+}
+
+/// A whole stack of waves, added up and drawn as one curve.
+///
+/// This is the thing worth having: adding *plots* would only mean drawing
+/// both, but adding **functions** makes a third that neither one is — which is
+/// the Fourier series, and why a square wave can be made of sines.
+pub fn sum(ws: &[Wave]) -> Shape {
+    let ws = ws.to_vec();
+    Shape::graph(move |x| total(&ws, x))
+}
+
 /// The height of a whole stack of waves at `x`.
 pub fn total(ws: &[Wave], x: f64) -> f64 {
-    ws.iter().map(|w| w.at(x)).sum()
+    ws.iter().map(|w| w.origin.im + w.at(x - w.origin.re)).sum()
 }
 
 /// The arrows laid tip to tail at `x`, starting from the origin.
@@ -285,6 +379,89 @@ mod tests {
     #[test]
     fn the_first_wave_is_the_fundamental() {
         assert_eq!(next(&[]), Wave::new(1.0, 1.0, 0.0));
+    }
+
+    // ---- drawing one ------------------------------------------------------
+
+    fn pts(s: &Shape, lo: f64, hi: f64) -> Vec<Cx> {
+        s.polylines(Cx::new(lo, -50.0), Cx::new(hi, 50.0), 400).into_iter().flatten().collect()
+    }
+
+    /// ★ A wave has no ends. It is a `graph`, sampled against the visible
+    /// window, so it runs off both edges however far you pan or zoom — no
+    /// endpoints and no sample count for anybody to pick.
+    #[test]
+    fn a_wave_reaches_both_edges_of_wherever_it_is_drawn() {
+        let s = Wave::sine().shape();
+        for (lo, hi) in [(-5.0, 5.0), (-200.0, 200.0), (100.0, 101.0)] {
+            let p = pts(&s, lo, hi);
+            let (first, last) = (p[0].re, p[p.len() - 1].re);
+            assert!((first - lo).abs() < 0.1, "did not start at the left edge of {lo}..{hi}");
+            assert!((last - hi).abs() < 0.1, "did not reach the right edge of {lo}..{hi}");
+        }
+    }
+
+    /// Wavelength is the thing you can measure off the page: one whole wave,
+    /// end to end. `k` is radians per unit, and `k = 2π/λ`.
+    #[test]
+    fn wavelength_is_the_distance_between_repeats() {
+        let w = Wave::sine().wavelength(4.0);
+        assert!((w.length() - 4.0).abs() < 1e-12);
+        for x in [0.0, 1.3, -2.7] {
+            assert!((w.at(x) - w.at(x + 4.0)).abs() < 1e-12, "it should repeat after one wavelength");
+        }
+        assert!((w.at(0.5) - w.at(2.5)).abs() > 0.5, "and not after half of one");
+    }
+
+    /// The builder says what it does: taller, longer, later, elsewhere.
+    #[test]
+    fn the_builder_sets_what_it_says() {
+        let w = Wave::sine().amplitude(3.0).wavelength(8.0).phase(0.5).from(Cx::new(1.0, 2.0));
+        assert_eq!(w.a, 3.0);
+        assert!((w.length() - 8.0).abs() < 1e-12);
+        assert_eq!(w.phi, 0.5);
+        assert_eq!(w.origin, Cx::new(1.0, 2.0));
+    }
+
+    /// ★ Placing a wave rebuilds it about the point rather than shifting the
+    /// samples — so it still reaches both edges. Shifting would drag the whole
+    /// curve sideways and leave a bare strip at one end.
+    #[test]
+    fn a_placed_wave_still_reaches_both_edges() {
+        let put = Wave::sine().placed(Cx::new(6.0, 2.0));
+        let p = pts(&put, -10.0, 10.0);
+        assert!((p[0].re + 10.0).abs() < 0.1, "a bare strip appeared on the left");
+        assert!((p[p.len() - 1].re - 10.0).abs() < 0.1, "and on the right");
+
+        // And it waves about the height it was placed at, starting there.
+        let ys: Vec<f64> = p.iter().map(|q| q.im).collect();
+        let mid = (ys.iter().cloned().fold(f64::MIN, f64::max) + ys.iter().cloned().fold(f64::MAX, f64::min)) / 2.0;
+        assert!((mid - 2.0).abs() < 0.05, "it should wave about y = 2, not {mid}");
+    }
+
+    /// Where it starts is where it starts: at its own origin it is at rest.
+    #[test]
+    fn a_wave_starts_at_its_origin() {
+        let w = Wave::sine().from(Cx::new(3.0, -1.0));
+        let p = pts(&w.shape(), 2.9, 3.1);
+        let at_origin = p.iter().min_by(|a, b| (a.re - 3.0).abs().partial_cmp(&(b.re - 3.0).abs()).expect("finite"));
+        assert!((at_origin.expect("samples").im + 1.0).abs() < 0.02, "it should cross its own origin");
+    }
+
+    /// ★ `sum` adds the FUNCTIONS, not the pictures. Adding two plots would
+    /// only mean drawing both; adding two functions makes a third that neither
+    /// one is — which is the whole of Fourier.
+    #[test]
+    fn summing_waves_makes_a_new_curve_not_two_old_ones() {
+        let ws = [Wave::sine(), Wave::sine().amplitude(1.0 / 3.0).frequency(3.0)];
+        let p = pts(&sum(&ws), -3.0, 3.0);
+        assert_eq!(p.len(), 401, "one curve, not two");
+
+        for q in &p {
+            assert!((q.im - total(&ws, q.re)).abs() < 1e-9, "the drawn curve should be the sum");
+        }
+        // And it is not either of them.
+        assert!(p.iter().any(|q| (q.im - ws[0].at(q.re)).abs() > 0.1));
     }
 
     #[test]
