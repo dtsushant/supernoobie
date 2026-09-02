@@ -47,6 +47,7 @@
 //! | [`fourier`] | any closed curve as a sum of rotating arrows |
 //! | [`digit`] | 0–9, as outlines and as truncated Fourier series |
 //! | [`face`] | a smiley and a ghost |
+//! | [`bough`] | a tree, bent by sums of waves — the way a branch really bends |
 //! | [`count`] | tally marks |
 //! | [`cyclone`] | a 2D drawing that reads as 3D — one `sin(tilt)` does it |
 //! | [`glyph`] | `+`, `=`, `?` |
@@ -56,6 +57,7 @@
 //! | [`troupe`] | a group that is itself one of the things it groups |
 //! | [`wave`] | `a sin(kx + φ)`, and what happens when you add them |
 
+pub mod bough;
 pub mod count;
 pub mod cyclone;
 pub mod digit;

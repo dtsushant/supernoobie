@@ -620,6 +620,47 @@ a **taped run replays along the same path**.
 
 ---
 
+## `shapes::bough` — a tree made of sums of waves
+
+```rust
+for (level, boughs) in bough::tree(base, PI / 2.0, 2.3, 6, 0.5, 0.06, t).into_iter().enumerate() {
+    f.add(boughs).width((6 - level as i32).max(1));   // thick trunk, thin twigs
+}
+
+bough::modes(length, sway, seed, t)   // the waves one branch is bending in
+bough::bough(base, angle, length, sway, seed, t)
+bough::tip(base, angle, length, sway, seed, t)   // where it ends, and its heading
+```
+
+Not decorated with waves — **made** of them, and that is not a trick. A branch
+held at one end and free at the other bends in the modes
+
+```text
+    sin( (2n-1) · π s / 2L )        n = 1, 2, 3, ...
+```
+
+a quarter wave, three quarters, five quarters. Each is zero at the base
+because that end is held, and steepest at the tip because that end is not. Its
+shape at any instant is those added up — which is `wave::total`.
+
+**The space and the time separate**: what the clock changes is *how much of
+each mode*, not the shapes themselves. That is what keeps a swaying branch a
+sum of waves rather than a new curve every frame. Amplitudes fall off as
+`1/n²`, which is why a branch sways rather than buzzes.
+
+One complex multiply puts the branch's own frame wherever it belongs:
+
+```text
+    z(s) = base + e^{i·angle} · ( s + i · bend(s) )
+```
+
+Children grow from the **bent** tip and follow its heading. Use the
+straight-line tip instead and the tree comes apart at every joint the moment it
+sways — which looks like a rendering fault rather than the arithmetic mistake
+it is. There is a test for exactly that.
+
+---
+
 ## `shapes::terrain` — things standing on the ground
 
 ```rust
