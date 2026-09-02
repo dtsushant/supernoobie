@@ -188,6 +188,14 @@ fn walker() -> Board {
 /// count. It also means the three boxes never collide, since they are always
 /// three consecutive numbers.
 ///
+/// ## Saying well done, and saying oh dear
+///
+/// A rule notes **when** it happened — `cheer = time` — and a face is drawn at
+/// a size that runs down from there: `max(0, 1.1 - 1.4*(time - cheer))`. On
+/// the instant it is full size; a second later it is nothing, and a face of no
+/// size is a face that is not there. No notion of visibility anywhere, and no
+/// code that knows what "temporarily" means.
+///
 /// ## What is still missing, honestly
 ///
 /// The answers are in a fixed order — right one in the middle — because a rule
@@ -241,10 +249,24 @@ fn adding() -> Board {
         "# the score, up in the corner",
         "digits(score, 5.0, 3.2, 0.55)",
         "",
+        "# saying well done, and saying oh dear.",
+        "#",
+        "# `cheer` and `boo` are the moment it happened. A face is drawn at a",
+        "# size, so a size of nothing is a face that is not there -- and",
+        "# max(0, 1 - (time - cheer)) grows one on the instant and shrinks it",
+        "# away over a second. There is no notion of visibility anywhere.",
+        "cheer = -9",
+        "boo = -9",
+        "smiley(3.4, 1.5, max(0, 1.0 - 1.4*(time - cheer)))",
+        "ghost(3.4, 1.5, max(0, 1.0 - 0.9*(time - boo)))",
+        "",
         "# and the rules. the middle box is the right one.",
-        "when tap 1: score = score - 1",
-        "when tap 2: score = score + 1",
-        "when tap 3: score = score - 1",
+        "#",
+        "# each one puts the OTHER face into the past, or a fading smile hangs",
+        "# about inside the ghost that follows it.",
+        "when tap 1: score = score - 1, boo = time, cheer = -9",
+        "when tap 2: score = score + 1, cheer = time, boo = -9",
+        "when tap 3: score = score - 1, boo = time, cheer = -9",
     ];
     for r in rows {
         b.sheet.script.add(r);

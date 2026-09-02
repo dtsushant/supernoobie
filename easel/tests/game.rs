@@ -30,6 +30,33 @@ fn value(b: &Board, name: &str) -> f64 {
     b.written().vars.iter().find(|(n, _)| n == name).map(|(_, v)| v.re).unwrap_or(f64::NAN)
 }
 
+/// ★ A right answer shows a smile and a wrong one shows a ghost — and each
+/// puts the other into the past, or a fading smile hangs about inside the
+/// ghost that follows it.
+#[test]
+fn a_right_answer_smiles_and_a_wrong_one_says_boo() {
+    let mut b = game();
+    let faces = |b: &Board| {
+        // Both faces are always in the script; only their size changes, and a
+        // face of no size is not drawn at all.
+        b.written().shapes.len()
+    };
+    let quiet = faces(&b);
+
+    tap(&mut b, box_at(1));
+    assert!(faces(&b) > quiet, "a right answer should show something");
+    let cheered = faces(&b);
+
+    b.clock += 3.0;
+    assert_eq!(faces(&b), quiet, "and it should fade away again");
+
+    tap(&mut b, box_at(0));
+    assert_eq!(faces(&b), cheered, "a wrong answer should show something too");
+    // One face at a time: the smile just shown must not still be there.
+    b.clock += 0.05;
+    assert_eq!(faces(&b), cheered, "and only one of them");
+}
+
 /// ★ A box is tapped in the **middle**, which is where a child will put their
 /// finger. It used to need the two pixels of its outline, because the nib
 /// sweeps a ring and the middle of the box is the hole in it — a game nobody

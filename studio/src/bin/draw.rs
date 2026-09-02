@@ -92,6 +92,16 @@
 //!                                                  S O     save, open
 //! ```
 //!
+//! ## Just the game
+//!
+//! `~` puts the furniture away — no toolbar, no tree, only the drawing, filling
+//! the window. Press it again to get them back.
+//!
+//! It is the same drawing and the same clock; nothing is running in a different
+//! mode. What changes is only what is painted and what swallows the pointer, so
+//! there is no second code path to keep in step with the first — which is the
+//! usual way a "presentation mode" ends up subtly different from the editor.
+//!
 //! ## The tree, down the left
 //!
 //! ```text
@@ -178,6 +188,8 @@ struct Studio {
     tree: Tree,
     /// What is being dragged in the tree, if anything.
     lifting: Option<Node>,
+    /// The furniture put away, so there is only the drawing.
+    full: bool,
     /// How wide and tall the window is, for laying the panel out.
     size: (i32, i32),
 }
@@ -201,6 +213,7 @@ impl Studio {
             was_down: false,
             tree: Tree::default(),
             lifting: None,
+            full: false,
             size: (1200, 780),
         };
         if std::path::Path::new(&s.file).exists() {
@@ -422,8 +435,10 @@ impl Studio {
         self.bar = Bar::new(self.size.0);
         let pressed = down && !self.was_down;
         let released = !down && self.was_down;
-        let on_tree = Tree::covers(px.0);
-        let on_bar = self.bar.covers(px.0, px.1);
+        // With the furniture away there is nothing but drawing, so nothing
+        // swallows the pointer.
+        let on_tree = !self.full && Tree::covers(px.0);
+        let on_bar = !self.full && self.bar.covers(px.0, px.1);
 
         if pressed && on_bar {
             if let Some(cmd) = self.bar.at(px.0, px.1) {
@@ -583,6 +598,10 @@ fn main() {
         // --- the clock --------------------------------------------------------
         .on(' ', |s| s.obey(if s.board.playing { Cmd::Pause } else { Cmd::Play }))
         .on('b', |s| s.obey(Cmd::Rewind))
+        .on('~', |s| {
+            s.full = !s.full;
+            s.say = if s.full { "just the drawing -- ~ brings the tools back".into() } else { String::new() };
+        })
         .on('n', |s| s.heed(Poke::Verb(None)))
         .on('g', |s| s.obey(Cmd::Group))
         .on('k', |s| s.obey(Cmd::Key))
@@ -623,10 +642,21 @@ fn page(s: &Studio) -> Frame {
     // --- the toolbar ---------------------------------------------------------
     // One call. The rectangles are `easel`'s, and the same ones decide what a
     // tap hit, so painting and hitting cannot drift apart.
-    s.bar.paint(&mut f, &s.board, s.size.0);
-    s.tree.paint(&mut f, &s.board, s.size.1);
+    if !s.full {
+        s.bar.paint(&mut f, &s.board, s.size.0);
+        s.tree.paint(&mut f, &s.board, s.size.1);
+    }
 
     // --- what is going on ----------------------------------------------------
+    if s.full {
+        // Only what the game itself has to say. A score and a question are the
+        // drawing's own business; the studio's chatter is not.
+        if !s.say.is_empty() {
+            f.pin(Anchor::BottomLeft, 14.0, -16.0, &s.say, 0x46525E, 2);
+        }
+        return f;
+    }
+
     let doing = match s.board.chosen() {
         None => "tap a shape to choose it".to_string(),
         Some(_) if s.board.chosen().is_some_and(|m| m.act.steps.is_empty()) => {

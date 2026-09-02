@@ -169,6 +169,14 @@ impl Script {
         out
     }
 
+    /// Everything bound, at this moment, with the game where it has got to.
+    ///
+    /// What a rule is carried out against — so a deed can say
+    /// `cheer = time` and mean the moment the tap happened.
+    pub fn env(&self, time: f64, tally: &Tally) -> HashMap<String, Cx> {
+        env_of(&plotkit::expr::run(&self.source(time, tally)))
+    }
+
     /// Every rule in the script.
     pub fn rules(&self) -> Vec<Rule> {
         self.rows.iter().filter(|r| r.on).filter_map(|r| rule::read(&r.text)).collect()
@@ -237,19 +245,44 @@ impl Script {
             if !r.on {
                 continue;
             }
-            let Some(args) = r.text.trim().strip_prefix("digits(").and_then(|a| a.strip_suffix(')')) else {
+            let t = r.text.trim();
+            let Some((word, args)) =
+                FACES.iter().chain(["digits"].iter()).find_map(|w| {
+                    t.strip_prefix(&format!("{w}(")).and_then(|a| a.strip_suffix(')')).map(|a| (*w, a))
+                })
+            else {
                 continue;
             };
-            let mut arg = args.split(',');
+            let mut arg = split_args(args).into_iter();
             let mut number = |fallback: f64| {
                 arg.next()
                     .and_then(|a| plotkit::expr::parse(a.trim()).ok())
                     .and_then(|e| e.eval(env).ok())
                     .map_or(fallback, |z| z.re)
             };
-            let value = number(0.0);
-            let (x, y, size) = (number(0.0), number(0.0), number(1.0));
-            out.push((number_shape(value, Cx::new(x, y), size), 0xE3E9EF));
+            match word {
+                "digits" => {
+                    let value = number(0.0);
+                    let (x, y, size) = (number(0.0), number(0.0), number(1.0));
+                    out.push((number_shape(value, Cx::new(x, y), size), 0xE3E9EF));
+                }
+                // A face is drawn at a size, so a size of nothing is a face
+                // that is not there. That is the whole of showing and hiding
+                // one: `max(0, 1.2 - (time - boo))` grows it on a wrong answer
+                // and shrinks it away again, with no notion of visibility
+                // anywhere.
+                _ => {
+                    let (x, y, size) = (number(0.0), number(0.0), number(1.0));
+                    if size > 0.01 {
+                        let at = Cx::new(x, y);
+                        let (shape, colour) = match word {
+                            "smiley" => (shapes::face::smiley(size), 0x6FCF97),
+                            _ => (shapes::face::ghost(size), 0x9B7BD4),
+                        };
+                        out.push((shape.at(at), colour));
+                    }
+                }
+            }
         }
         out
     }
@@ -309,10 +342,42 @@ impl Script {
     }
 }
 
+/// Split an argument list on the commas that separate arguments.
+///
+/// **Not on every comma.** `ghost(0, 0, max(0, 1.2 - t))` has four commas and
+/// three arguments, and splitting naively tears `max(0` off from its own
+/// second half — which then fails to parse, falls back to a default, and
+/// leaves a ghost permanently on screen. Which is exactly what it did.
+///
+/// So: only commas at the outermost level count. That is one counter.
+fn split_args(args: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut depth = 0i32;
+    let mut here = String::new();
+    for c in args.chars() {
+        match c {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            ',' if depth == 0 => {
+                out.push(std::mem::take(&mut here));
+                continue;
+            }
+            _ => {}
+        }
+        here.push(c);
+    }
+    out.push(here);
+    out
+}
+
+/// The faces a script can ask for. Drawn by [`shapes::face`], which
+/// `plotkit::expr` has never heard of.
+pub const FACES: [&str; 2] = ["smiley", "ghost"];
+
 /// Is this row one this crate handles rather than `plotkit::expr`?
 fn mine(text: &str) -> bool {
     let t = text.trim();
-    rule::is_rule(t) || t.starts_with("digits(")
+    rule::is_rule(t) || t.starts_with("digits(") || FACES.iter().any(|w| t.starts_with(&format!("{w}(")))
 }
 
 /// A whole number written out, about a point.
@@ -694,6 +759,49 @@ circle(0, r)
             pts.iter().fold(0.0, |a: f64, z| a + z.abs())
         };
         assert!((ink(1) - ink(8)).abs() > 1e-6, "a one and an eight should not be the same drawing");
+    }
+
+    /// ★ A face is drawn at a size, so a size of nothing is a face that is
+    /// not there -- which is the whole of showing and hiding one, with no
+    /// notion of visibility anywhere.
+    #[test]
+    fn a_face_of_no_size_is_a_face_that_is_not_there() {
+        let mut s = Script::new();
+        s.add("boo = 0");
+        s.add("ghost(0, 0, max(0, 1.2 - (time - boo)))");
+
+        assert_eq!(s.run(0.0).shapes.len(), 1, "just after, it is there");
+        assert_eq!(s.run(5.0).shapes.len(), 0, "and later it is not");
+    }
+
+    /// ★ An argument list splits on the commas that separate **arguments**,
+    /// not on every comma. `ghost(0, 0, max(0, 1.2 - t))` has four commas and
+    /// three arguments; splitting naively tore `max(0` off from its own second
+    /// half, which then failed to parse, fell back to a default size, and left
+    /// a ghost permanently on screen.
+    #[test]
+    fn a_nested_call_is_not_torn_in_half() {
+        assert_eq!(split_args("0, 0, max(0, 1.2 - t)").len(), 3);
+        assert_eq!(split_args("a").len(), 1);
+        assert_eq!(split_args("max(1, min(2, 3)), b").len(), 2);
+
+        let mut s = Script::new();
+        s.add("ghost(0, 0, max(0, 1.2 - time))");
+        assert_eq!(s.run(0.0).shapes.len(), 1, "at the start it is there");
+        assert_eq!(s.run(9.0).shapes.len(), 0, "and later it is gone -- the size really got through");
+    }
+
+    /// Both faces work, and they are different faces.
+    #[test]
+    fn a_smile_and_a_ghost_are_not_the_same_drawing() {
+        let ink = |word: &str| {
+            let mut s = Script::new();
+            s.add(&format!("{word}(0, 0, 1)"));
+            let (lo, hi) = (Cx::new(-9.0, -9.0), Cx::new(9.0, 9.0));
+            let pts: Vec<Cx> = s.run(0.0).shapes[0].0.polylines(lo, hi, 400).into_iter().flatten().collect();
+            pts.iter().fold(0.0, |a: f64, z| a + z.abs())
+        };
+        assert!((ink("smiley") - ink("ghost")).abs() > 1e-6);
     }
 
     /// Colours cycle so a script of bare shapes is still readable, and

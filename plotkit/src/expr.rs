@@ -129,12 +129,12 @@ pub enum Expr {
 }
 
 /// Names that parse as function calls rather than implicit multiplication.
-pub const FUNCS: [&str; 16] = [
+pub const FUNCS: [&str; 18] = [
     "exp", "ln", "sin", "cos", "tan", "sqrt", "abs", "arg", "conj", "re", "im", "polar", "pow",
     // Whole numbers. A language with no way to say "the integer part" cannot
     // say "a number between 1 and 9", which is most of what a counting game
     // needs.
-    "floor", "round", "mod",
+    "floor", "round", "mod", "max", "min",
 ];
 
 /// Names that draw something.
@@ -175,6 +175,13 @@ impl Expr {
                     a.get(n).copied().ok_or_else(|| format!("'{f}' needs more arguments"))
                 };
                 match f.as_str() {
+                    "max" | "min" => {
+                        if a.len() != 2 {
+                            return Err(format!("'{f}' takes two numbers"));
+                        }
+                        let (x, y) = (a[0].re, a[1].re);
+                        Cx::new(if f == "max" { x.max(y) } else { x.min(y) }, 0.0)
+                    }
                     "floor" => Cx::new(one(0)?.re.floor(), 0.0),
                     "round" => Cx::new(one(0)?.re.round(), 0.0),
                     "mod" => {
@@ -608,6 +615,10 @@ mod tests {
         // Euclidean: a counting game that stepped past zero into negative
         // answers would be a strange kind of counting game.
         assert_eq!(val("mod(-1, 9)"), 8.0);
+        // `max` is what makes a thing fade to nothing and stay there rather
+        // than turning inside out: max(0, 1 - t).
+        assert_eq!(val("max(0, 3 - 5)"), 0.0);
+        assert_eq!(val("min(4, 9)"), 4.0);
         assert!(!run("a = mod(1, 0)").errors.is_empty(), "mod by nothing should say so");
     }
 

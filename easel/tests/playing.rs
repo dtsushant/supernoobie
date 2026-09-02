@@ -15,6 +15,8 @@ fn playing() {
     let mut sheet = Canvas::new(w, h);
     sheet.clear(0x0B1017);
 
+    // Right, right, wrong, wrong -- so the smile and the ghost both show.
+    let taps = [0.0f64, 0.0, -3.4, -3.4];
     for k in 0..4 {
         let mut tile = Canvas::new(tw, th);
         tile.clear(if k % 2 == 0 { 0x0B1017 } else { 0x0D131B });
@@ -26,11 +28,12 @@ fn playing() {
             }
         }
         let score = b.written().vars.iter().find(|(n, _)| n == "score").map(|(_, v)| v.re).unwrap_or(0.0);
-        sheet.text((ox + 10) as i32, (oy + 8) as i32, &format!("after {k} taps, score {score}"), 0x6B7987, 1);
-        // Tap the right one.
-        let at = Cx::new(-1.2, -2.2);
+        sheet.text((ox + 10) as i32, (oy + 8) as i32, &format!("tap {k}: score {score}"), 0x6B7987, 1);
+        let at = Cx::new(taps[k], -2.2);
         b.pointer(at, true);
         b.pointer(at, false);
+        // A moment later, so the face is up but not yet faded.
+        b.clock += 0.25;
     }
 
     let out = std::env::temp_dir().join("playing.png");

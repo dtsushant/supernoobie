@@ -24,10 +24,24 @@ row on
 row on # the score, up in the corner
 row on digits(score, 5.0, 3.2, 0.55)
 row on 
+row on # saying well done, and saying oh dear.
+row on #
+row on # `cheer` and `boo` are the moment it happened. A face is drawn at a
+row on # size, so a size of nothing is a face that is not there -- and
+row on # max(0, 1 - (time - cheer)) grows one on the instant and shrinks it
+row on # away over a second. There is no notion of visibility anywhere.
+row on cheer = -9
+row on boo = -9
+row on smiley(3.4, 1.5, max(0, 1.0 - 1.4*(time - cheer)))
+row on ghost(3.4, 1.5, max(0, 1.0 - 0.9*(time - boo)))
+row on 
 row on # and the rules. the middle box is the right one.
-row on when tap 1: score = score - 1
-row on when tap 2: score = score + 1
-row on when tap 3: score = score - 1
+row on #
+row on # each one puts the OTHER face into the past, or a fading smile hangs
+row on # about inside the ghost that follows it.
+row on when tap 1: score = score - 1, boo = time, cheer = -9
+row on when tap 2: score = score + 1, cheer = time, boo = -9
+row on when tap 3: score = score - 1, boo = time, cheer = -9
 mark round 0.1000 taper 0.0000 colour E0704A fill closed
 group 1
 p -4.6000 -3.2000 -4.5650 -3.2000 -4.5072 -3.2000 -4.4347 -3.2000 -4.3526 -3.2000 -4.2642 -3.2000 -4.1717 -3.2000 -4.0766 -3.2000

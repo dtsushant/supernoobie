@@ -917,7 +917,11 @@ impl Board {
         // rules of one tap see the same picture. Re-reading it between them
         // would make the order of two unrelated rules matter, which is a thing
         // nobody would ever think to check.
-        let env = plotkit::expr::env_of(&plotkit::expr::run(&self.sheet.script.to_rec()));
+        // The same source the drawing is made from, so a deed saying
+        // `cheer = time` means the moment the tap happened -- and so every
+        // rule of one tap sees the same picture, since re-reading it between
+        // them would make the order of two unrelated rules matter.
+        let env = self.sheet.script.env(self.clock, &self.tally);
         for r in wanted {
             rule::carry_out(r, &mut self.tally, &env);
         }
