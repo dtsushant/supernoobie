@@ -13,6 +13,7 @@ pub mod board;
 pub mod history;
 pub mod ink;
 pub mod mark;
+pub mod script;
 pub mod sheet;
 pub mod track;
 
@@ -22,5 +23,6 @@ pub use board::{Board, Tool};
 pub use history::History;
 pub use ink::Ink;
 pub use mark::Mark;
+pub use script::{Row, Script};
 pub use sheet::Sheet;
 pub use track::{Ease, Key, Track};

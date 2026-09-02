@@ -40,6 +40,7 @@ use std::fmt::Write as _;
 
 use crate::action::{Action, Step};
 use crate::mark::Mark;
+use crate::script::{Row, Script};
 use crate::track::Ease;
 use shapes::Pose;
 
@@ -54,11 +55,15 @@ const PER_LINE: usize = 8;
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Sheet {
     pub marks: Vec<Mark>,
+    /// The written half of the drawing. Saved in the same file, because it is
+    /// the same drawing — a picture that opened with its hand-drawn half and
+    /// not its written half would be half a picture.
+    pub script: Script,
 }
 
 impl Sheet {
     pub fn new() -> Sheet {
-        Sheet { marks: Vec::new() }
+        Sheet { marks: Vec::new(), script: Script::new() }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -109,6 +114,11 @@ impl Sheet {
     /// The whole drawing as text.
     pub fn to_text(&self) -> String {
         let mut out = format!("easel {VERSION}\n");
+        // The script first, so a person opening the file sees what the drawing
+        // is *made of* before several hundred lines of points.
+        for r in &self.script.rows {
+            let _ = writeln!(out, "row {} {}", if r.on { "on" } else { "off" }, r.text);
+        }
         for m in &self.marks {
             let nib = match m.nib {
                 Nib::Round(w) => format!("round {w:.4}"),
@@ -180,6 +190,15 @@ impl Sheet {
                     Some(m) => sheet.marks.push(m),
                     None => confused += 1,
                 },
+                Some("row") => {
+                    let on = word.next() != Some("off");
+                    // The rest of the line verbatim. A script row has spaces in it,
+                    // so it cannot be split into words and put back together --
+                    // `circle(0,  1)` would come back differently spaced, which is
+                    // somebody's formatting quietly rewritten under them.
+                    let text = line.trim_start().splitn(3, char::is_whitespace).nth(2).unwrap_or("").to_string();
+                    sheet.script.rows.push(Row { text, on });
+                }
                 Some("track") => match sheet.marks.last_mut() {
                     Some(m) => m.track.looping = word.next() != Some("once"),
                     None => confused += 1,
@@ -427,7 +446,7 @@ mod tests {
     /// hair different at every key would show as a wobble nobody could find.
     #[test]
     fn keyframes_survive_the_file_exactly() {
-        use crate::track::Ease;
+use crate::track::Ease;
         let mut m = Mark::new(ring(12, 1.0, Cx::ZERO), Nib::Round(0.2), 0xFFFFFF);
         m.track.set(0.0, Pose::STILL, Ease::Smooth);
         m.track.set(1.25, Pose::new(Cx::polar(1.5, 0.9), Cx::new(3.0, -2.0)), Ease::Linear);
@@ -457,6 +476,24 @@ mod tests {
         let (sheet, confused) = Sheet::from_text(text);
         assert_eq!(confused, 0);
         assert_eq!(sheet.marks[0].track.len(), 1);
+    }
+
+    /// ★ The written half is saved with the drawn half, because it is the
+    /// same drawing. And a row comes back **verbatim** -- split it into words
+    /// and join them again and `circle(0,  1)` comes back differently spaced,
+    /// which is somebody's formatting quietly rewritten under them.
+    #[test]
+    fn the_script_is_saved_with_the_drawing_exactly_as_written() {
+        let mut s = Sheet::new();
+        s.script.add("r = 2");
+        s.script.add("circle(0,  r)   # two spaces, on purpose");
+        s.script.rows.push(Row::new("ngon(0, r, 5)").off());
+        s.add(Mark::new(ring(12, 1.0, Cx::ZERO), Nib::Round(0.2), 0xFFFFFF));
+
+        let (back, confused) = Sheet::from_text(&s.to_text());
+        assert_eq!(confused, 0);
+        assert_eq!(back.script.rows, s.script.rows, "every row, verbatim");
+        assert_eq!(back.marks.len(), 1, "and the drawn half too");
     }
 
     /// An empty drawing writes and reads as an empty drawing rather than as
@@ -507,7 +544,7 @@ mod tests {
     /// invisible copy of it somewhere else on the page.
     #[test]
     fn a_moving_mark_is_caught_where_it_has_moved_to() {
-        use crate::track::Ease;
+use crate::track::Ease;
         let mut s = Sheet::new();
         let mut m = Mark::new(ring(40, 0.6, Cx::ZERO), Nib::Round(0.2), 0xFFFFFF).closed(true);
         m.track.looping = false;

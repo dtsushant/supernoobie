@@ -639,6 +639,11 @@ impl Board {
     /// step with the "playing" one, which is the kind of pair that drifts.
     pub fn frame(&self) -> Frame {
         let mut f = Frame::new();
+        // The written half first, so hand-drawn marks sit on top of the
+        // scaffolding they were drawn over.
+        for (shape, colour) in self.written().shapes {
+            f.add(shape).color(colour).width(2);
+        }
         for m in &self.sheet.marks {
             let item = f.add(m.at(self.clock)).color(m.colour);
             if m.filled {
@@ -649,6 +654,17 @@ impl Board {
             f.add(wet.shape()).color(wet.colour).fill();
         }
         f
+    }
+
+    /// Run the script at the current clock.
+    ///
+    /// Every frame, deliberately. A written shape may mention `time`, and
+    /// caching it would mean deciding when the cache is stale — a question
+    /// with no good answer, since a row can depend on the clock through three
+    /// other rows. Parsing a few dozen short lines is far cheaper than being
+    /// wrong about it.
+    pub fn written(&self) -> crate::script::Made {
+        self.sheet.script.run(self.clock)
     }
 
     /// A ring round whatever is selected, so you can see what a command will
@@ -1346,6 +1362,23 @@ mod tests {
             assert!((there.a - here.a).abs() < 1e-3);
         }
         let _ = std::fs::remove_file(path);
+    }
+
+    /// ★ Written shapes and drawn ones live in the same picture, and one
+    /// number moves everything that mentions it.
+    #[test]
+    fn written_shapes_are_drawn_alongside_the_hand_drawn_ones() {
+        let mut b = Board::new();
+        draw(&mut b, &ring(1.0, Cx::ZERO, 60));
+        let drawn_only = b.frame().len();
+
+        b.sheet.script.add("r = 2");
+        b.sheet.script.add("circle(4, r)");
+        b.sheet.script.add("ngon(-4, r, 6)");
+        assert_eq!(b.frame().len(), drawn_only + 2, "both halves should be in the picture");
+
+        b.sheet.script.set_dial("r", 3.0);
+        assert_eq!(b.frame().len(), drawn_only + 2, "and still both after a dial moves");
     }
 
     /// A tap leaves nothing — no invisible speck that can still be clicked on.

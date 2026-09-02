@@ -75,6 +75,18 @@ fn lex(s: &str) -> Result<Vec<Tok>, String> {
         let c = b[k];
         if c.is_whitespace() {
             k += 1;
+        } else if c == '0' && k + 1 < b.len() && (b[k + 1] == 'x' || b[k + 1] == 'X') {
+            // Hexadecimal, for colours. `color(14722122)` is a number nobody
+            // can read or check; `color(0xE0A44A)` is the same colour written
+            // the way every other tool writes it.
+            k += 2;
+            let start = k;
+            while k < b.len() && b[k].is_ascii_hexdigit() {
+                k += 1;
+            }
+            let t: String = b[start..k].iter().collect();
+            let v = u32::from_str_radix(&t, 16).map_err(|_| format!("bad hex number '0x{t}'"))?;
+            out.push(Tok::Num(f64::from(v)));
         } else if c.is_ascii_digit() || (c == '.' && k + 1 < b.len() && b[k + 1].is_ascii_digit()) {
             let start = k;
             while k < b.len() && (b[k].is_ascii_digit() || b[k] == '.') {
@@ -561,6 +573,23 @@ pub fn env_of(p: &Program) -> HashMap<String, Cx> {
 // ===========================================================================
 #[cfg(test)]
 mod tests {
+    /// ★ Hex numbers, for colours. `color(14722122)` is a number nobody can
+    /// read or check against anything; `color(0xE0A44A)` is the same colour
+    /// written the way every other tool writes it.
+    #[test]
+    fn hex_numbers_are_read_for_colours() {
+        let p = run("color(0xE0A44A)
+circle(0, 1)");
+        assert!(p.errors.is_empty(), "{:?}", p.errors);
+        assert!(matches!(p.cmds.first(), Some(Cmd::Color(0xE0_A4_4A))), "{:?}", p.cmds.first());
+
+        // And it does not swallow ordinary numbers starting with zero.
+        let q = run("a = 0.5
+b = 0");
+        assert!(q.errors.is_empty(), "{:?}", q.errors);
+        assert!((q.vars.iter().find(|(n, _)| n == "a").expect("a").1.re - 0.5).abs() < 1e-12);
+    }
+
     use super::*;
 
     fn ev(s: &str) -> Cx {
