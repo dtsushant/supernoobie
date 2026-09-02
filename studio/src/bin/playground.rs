@@ -50,15 +50,17 @@
 //! about that point rather than shifting it, because shifting a thing with no
 //! ends drags the samples sideways and leaves a bare strip at one edge.
 //!
-//! ## There is no speaker
+//! ## Hearing it
 //!
-//! This draws sound and can save it. It does not **play** it, and nothing in
-//! this repository does. Getting audio out of a machine needs a platform
-//! library and a callback thread running at a rate nothing else here cares
-//! about — a real dependency, and the first one past a window.
+//! Press `5`. It writes `playground.wav` and hands it to whatever the machine
+//! already has — `paplay`, `aplay`, `ffplay`, or on WSL `powershell.exe`,
+//! which needs nothing installed at all.
 //!
-//! Press `5` and it writes `playground.wav` into the working directory, which
-//! any player will open. That is the whole of the audio output for now.
+//! **Nothing is linked for this.** Linking an audio library would mean the
+//! whole repository needs a C library present before it will compile, on every
+//! machine, for the sake of one file. Handing the file to the system moves
+//! that cost to run time, where a missing player is a clear message rather
+//! than a build failure. See [`sound::speaker`].
 //!
 //! ## One screen, six ideas
 //!
@@ -86,7 +88,7 @@
 use plotkit::{Cx, Frame, Shape};
 use std::f64::consts::PI;
 use physics::{fall::gravity, Fall, Oscillator};
-use sound::{pitch, wav, Timbre, Tone, RATE};
+use sound::{pitch, speaker, wav, Timbre, Tone, RATE};
 use shapes::{bough, wave, Wave, Wind};
 use shapes::digit::glyph;
 use shapes::face::smiley;
@@ -193,18 +195,23 @@ fn main() {
         .on('2', |a| a.voice = 1)
         .on('3', |a| a.voice = 2)
         .on('4', |a| a.voice = 3)
-        // NOTE: this writes a file. Nothing here plays audio — see the header.
+        // Write the note, then hand it to whatever the machine has. Nothing
+        // is linked for this: see `sound::speaker`.
         .on('5', |a| {
             let note = a.tone();
-            match wav::write("playground.wav", &note.samples(2.0, RATE), RATE) {
-                Ok(()) => {
-                    let full = std::env::current_dir()
-                        .map(|d| d.join("playground.wav").display().to_string())
-                        .unwrap_or_else(|_| "playground.wav".to_string());
-                    println!("wrote {full}");
-                    println!("  nothing here plays it -- open it with any player to hear the note you are looking at");
+            let path = "playground.wav";
+            if let Err(e) = wav::write(path, &note.samples(2.0, RATE), RATE) {
+                eprintln!("could not write {path}: {e}");
+                return;
+            }
+            // `false`: do not wait. The window has to keep drawing, and a
+            // two-second note would freeze it solid.
+            match speaker::play_file(path, false) {
+                Ok(player) => println!("playing the note you are looking at ({player})"),
+                Err(e) => {
+                    eprintln!("{e}");
+                    eprintln!("  the file is there though: {path}");
                 }
-                Err(e) => eprintln!("could not write it: {e}"),
             }
         })
         .run(scene);
@@ -351,7 +358,7 @@ fn scene(a: &Air) -> Frame {
         plotkit::Anchor::BottomLeft,
         14.0,
         -94.0,
-        "bars are the harmonics, the curve is their sum -- 5 SAVES a wav (nothing here plays it)",
+        "bars are the harmonics, the curve is their sum -- press 5 to hear it",
         SPEC,
         2,
     );

@@ -12,16 +12,6 @@ physics = { path = "../physics" }
 shapes = { path = "../shapes" }
 plotkit = { path = "../plotkit" }
 
-# The one dependency past a window, and the only one that talks to hardware.
-# Off by default so the crate still builds where there is no audio library at
-# all -- which is the usual state of a build machine.
-[dependencies.cpal]
-version = "0.15"
-optional = true
-
-[features]
-play = ["dep:cpal"]
-
 [[bin]]
 name = "sound"
 path = "src/bin/sound.rs"

@@ -280,6 +280,12 @@ cargo run -p studio --release --bin waves        # adding sine waves
 
 cargo run -p shapes  --release -- seven --steps  # any shape, in the terminal
 cargo run -p sound   --release -- out.wav        # a WAV you can listen to
+cargo run -p sound   --release -- out.wav --play # and hear it
+
+# Nothing in the repository links an audio library. Playing means handing the
+# file to whatever the machine already has -- paplay, aplay, ffplay, or on WSL
+# powershell.exe, which needs nothing installed. So the BUILD needs nothing,
+# and a missing player is a message at run time rather than a compile error.
 ```
 
 and to tape a run of the game:

@@ -8,13 +8,13 @@
 //! of a chord one at a time, and then the chord. Play it with anything.
 //!
 //! ```text
-//!     cargo run -p sound --release -- out.wav                 just writes it
-//!     cargo run -p sound --features play --release -- --play  and plays it
+//!     cargo run -p sound --release -- out.wav            just writes it
+//!     cargo run -p sound --release -- out.wav --play     and plays it
 //! ```
 //!
-//! Playing is behind a feature because it is the one part that needs a sound
-//! card and a C library. A file, by contrast, can be listened to, looked at,
-//! and checked.
+//! Nothing here links an audio library: playing means handing the file to
+//! whatever the machine already has. So the build needs nothing, and a missing
+//! player is a message at run time rather than a compile error.
 
 use sound::{after, mix, pitch, wav, Timbre, Tone, RATE};
 
@@ -64,21 +64,11 @@ fn main() {
     }
 
     if wants_sound {
-        play_it(&all);
+        match sound::speaker::play_file(&path, true) {
+            Ok(player) => println!("played it with {player}"),
+            Err(e) => eprintln!("{e}"),
+        }
     } else {
-        println!("  (add --play to hear it, with: cargo run -p sound --features play)");
+        println!("  (add --play to hear it)");
     }
-}
-
-#[cfg(feature = "play")]
-fn play_it(samples: &[f64]) {
-    println!("playing...");
-    if let Err(e) = sound::speaker::play(samples, RATE) {
-        eprintln!("could not play it: {e}");
-    }
-}
-
-#[cfg(not(feature = "play"))]
-fn play_it(_: &[f64]) {
-    eprintln!("this build cannot play sound. Rebuild with:  --features play");
 }

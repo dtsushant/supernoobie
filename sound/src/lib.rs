@@ -26,13 +26,13 @@
 //! ## Try it
 //!
 //! ```text
-//!     cargo run -p sound --release -- chord.wav              writes a file
-//!     cargo run -p sound --features play --release -- --play plays it
+//!     cargo run -p sound --release -- chord.wav           writes a file
+//!     cargo run -p sound --release -- chord.wav --play    and plays it
 //! ```
 //!
-//! Playing is behind a feature flag because it is the one thing here that
-//! needs a sound card and a C library. Everything else is arithmetic, and
-//! arithmetic builds anywhere.
+//! **Nothing here links an audio library.** Playing means writing the file and
+//! handing it to whatever the machine already has — see [`speaker`] for why
+//! that is the better trade. The build needs nothing at all.
 //!
 //! ## Where this goes
 //!
@@ -42,9 +42,6 @@
 //! still a note.
 
 pub mod pitch;
-/// Making an actual noise. Behind the `play` feature, because it is the one
-/// part that needs a sound card and a C library — see [`speaker`].
-#[cfg(feature = "play")]
 pub mod speaker;
 pub mod tone;
 pub mod wav;
