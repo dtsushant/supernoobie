@@ -34,7 +34,7 @@
 //! how many lines it could not make sense of, so a caller can say so without
 //! having lost anything.
 
-use plotkit::Cx;
+use plotkit::{Cx, Shape};
 use shapes::Nib;
 use std::fmt::Write as _;
 
@@ -104,10 +104,23 @@ impl Sheet {
         let hi = Cx::new(p.re + 1e4, p.im + 1e4);
         (0..self.marks.len()).rev().find(|k| {
             let m = &self.marks[*k];
+            let (pose, here) = (m.pose_at(t), m.anchor());
             let shape = m.at(t);
-            // A filled mark is hit anywhere inside it; a traced one only near
-            // its line, because its middle is not part of it.
-            (m.filled && shape.contains(p, lo, hi, 800)) || shape.touches(p, tolerance, lo, hi, 800)
+            if shape.touches(p, tolerance, lo, hi, 800) {
+                return true;
+            }
+            // A **closed** mark is hit anywhere inside it, and the test is
+            // against its centreline rather than against the region the nib
+            // swept.
+            //
+            // That distinction is the whole of this and it cost an evening.
+            // Draw a box: the nib sweeps a thin rectangular *ring*, and the
+            // middle of the box is the hole in that ring — genuinely outside
+            // it by the even-odd rule, and correctly so. But nobody tapping a
+            // box means "the two pixels of its edge". They mean the box. So
+            // the question to ask is whether the point is inside the line the
+            // hand actually drew.
+            m.closed && Shape::polygon(m.pts.clone()).map(move |z| pose.apply(z - here) + here).contains(p, lo, hi, 800)
         })
     }
 
@@ -521,22 +534,53 @@ use crate::track::Ease;
         let mut s = Sheet::new();
         s.add(Mark::new(ring(40, 2.0, Cx::ZERO), Nib::Round(0.2), 0x111111).closed(true));
         s.add(Mark::new(ring(40, 2.0, Cx::ZERO), Nib::Round(0.2), 0x222222).closed(true));
-        // Pointed AT the ring, not at the middle of it. A closed stroke sweeps
-        // an annulus, and the hole in the middle is genuinely not part of the
-        // mark -- which is even-odd being right, and is also why a letter O
-        // cannot be picked up by its centre.
-        assert_eq!(s.at(Cx::new(2.0, 0.0), 0.1, 0.0), Some(1), "the top one");
-        assert_eq!(s.at(Cx::new(0.0, 0.0), 0.05, 0.0), None, "and the hole is a hole");
+        assert_eq!(s.at(Cx::new(2.0, 0.0), 0.1, 0.0), Some(1), "the top one, by its edge");
+        // And by its middle, which is a closed shape's inside. This used to
+        // say the opposite: the nib sweeps a ring and the middle is the hole
+        // in it, which is even-odd being right and is also completely useless
+        // for tapping a box.
+        assert_eq!(s.at(Cx::new(0.0, 0.0), 0.05, 0.0), Some(1), "and by its middle");
     }
 
-    /// A filled mark is hit anywhere inside it; a traced one only near its
-    /// line, because its middle is not part of it.
+    /// ★ **A closed shape is hit anywhere inside it**, and this is the fix for
+    /// a game that could not be played.
+    ///
+    /// Draw a box: the nib sweeps a thin rectangular *ring*, and the middle of
+    /// the box is the hole in that ring — outside it by the even-odd rule, and
+    /// correctly so. But nobody tapping a box means "the two pixels of its
+    /// edge". So the question asked is whether the point is inside the line
+    /// the hand drew, not inside the ink.
     #[test]
-    fn a_traced_mark_is_only_its_line() {
+    fn the_inside_of_a_closed_shape_can_be_tapped() {
         let mut s = Sheet::new();
-        s.add(Mark::new(ring(40, 2.0, Cx::ZERO), Nib::Round(0.1), 0xFFFFFF).closed(true).outlined());
-        assert_eq!(s.at(Cx::new(0.0, 0.0), 0.05, 0.0), None, "the middle is not part of an outline");
-        assert_eq!(s.at(Cx::new(2.0, 0.0), 0.15, 0.0), Some(0), "but the line itself is");
+        s.add(Mark::new(ring(40, 2.0, Cx::ZERO), Nib::Round(0.1), 0xFFFFFF).closed(true));
+        assert_eq!(s.at(Cx::new(0.0, 0.0), 0.05, 0.0), Some(0), "the middle of a box is the box");
+        assert_eq!(s.at(Cx::new(2.0, 0.0), 0.15, 0.0), Some(0), "and so is its edge");
+        assert_eq!(s.at(Cx::new(9.0, 0.0), 0.15, 0.0), None, "but outside is outside");
+    }
+
+    /// An **open** stroke is only its line — it encloses nothing, so there is
+    /// no inside for a tap to be in.
+    #[test]
+    fn an_open_stroke_is_only_its_line() {
+        let mut s = Sheet::new();
+        s.add(Mark::new(vec![Cx::new(-2.0, 0.0), Cx::new(2.0, 0.0)], Nib::Round(0.1), 0xFFFFFF));
+        assert_eq!(s.at(Cx::new(0.0, 1.5), 0.05, 0.0), None);
+        assert_eq!(s.at(Cx::new(0.0, 0.0), 0.15, 0.0), Some(0));
+    }
+
+    /// And a closed shape that has walked away is hit where it has walked to.
+    #[test]
+    fn a_moving_box_is_tapped_where_it_has_got_to() {
+        use crate::track::Ease;
+        let mut s = Sheet::new();
+        let mut m = Mark::new(ring(40, 1.0, Cx::ZERO), Nib::Round(0.1), 0xFFFFFF).closed(true);
+        m.track.looping = false;
+        m.track.set(0.0, Pose::STILL, Ease::Linear);
+        m.track.set(1.0, Pose::new(Cx::ONE, Cx::new(6.0, 0.0)), Ease::Linear);
+        s.add(m);
+        assert_eq!(s.at(Cx::new(6.0, 0.0), 0.05, 1.0), Some(0), "inside it, where it now is");
+        assert_eq!(s.at(Cx::new(0.0, 0.0), 0.05, 1.0), None, "and not where it used to be");
     }
 
     /// ★ A moving mark must be catchable **where it is**, not where it was

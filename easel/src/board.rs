@@ -174,6 +174,11 @@ pub struct Board {
     pub folded: Vec<u32>,
     /// The line a drop would land before, while something is being dragged.
     pub dropping: Option<usize>,
+    /// How far down the tree has been scrolled, in pixels.
+    ///
+    /// Not saved, for the same reason folding is not: it is about looking, not
+    /// about the drawing.
+    pub scrolled: f64,
     /// Where the game has got to. Empty until a rule has fired.
     pub tally: Tally,
     /// Whether tapping a figure sets its rules off, rather than choosing it.
@@ -212,6 +217,7 @@ impl Board {
             editing: None,
             folded: Vec::new(),
             dropping: None,
+            scrolled: 0.0,
             tally: Tally::new(),
             playing_game: false,
         }
@@ -727,6 +733,11 @@ impl Board {
         }
         self.colour = colour;
         self.to_each(|m| m.colour = colour);
+    }
+
+    /// Scroll the tree, never past either end.
+    pub fn scroll(&mut self, by: f64, most: f64) {
+        self.scrolled = (self.scrolled + by).clamp(0.0, most.max(0.0));
     }
 
     /// Fold a figure shut, or open it again.

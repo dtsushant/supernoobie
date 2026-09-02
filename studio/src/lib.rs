@@ -114,12 +114,14 @@ pub struct Graph {
     origin: Option<(f64, f64)>,
     grid: bool,
     background: u32,
+    /// Where the graph keeps its hands off. See [`Graph::reserve`].
+    reserved: Option<Box<dyn Fn(f64, f64) -> bool>>,
 }
 
 impl Graph {
     /// 1100×700, graph paper on, fitted to whatever you draw.
     pub fn new(title: impl Into<String>) -> Graph {
-        Graph { title: title.into(), w: 1100, h: 700, scale: None, origin: None, grid: true, background: 0x0B1017 }
+        Graph { title: title.into(), reserved: None, w: 1100, h: 700, scale: None, origin: None, grid: true, background: 0x0B1017 }
     }
 
     pub fn size(mut self, w: usize, h: usize) -> Graph {
@@ -130,6 +132,23 @@ impl Graph {
     /// Pixels per unit, fixed. Without this the graph fits itself to the first
     /// frame — which is usually what a sketch wants, and never what an
     /// animation that grows wants.
+    /// Mark part of the window as **not the graph**.
+    ///
+    /// Given the pointer in pixels, return `true` where the graph should keep
+    /// its hands off: no panning, no zooming, no wheel. For furniture — a
+    /// toolbar, a list of rows — which already swallows clicks and must
+    /// swallow the wheel too, or scrolling a list quietly zooms the drawing
+    /// behind it.
+    ///
+    /// It is a plain function of the position, with no state, because it has
+    /// to be consulted **before** the sketch runs. The graph pans and zooms at
+    /// the top of the frame; a veto that arrived afterwards would always be
+    /// one frame late.
+    pub fn reserve(mut self, f: impl Fn(f64, f64) -> bool + 'static) -> Graph {
+        self.reserved = Some(Box::new(f));
+        self
+    }
+
     pub fn scale(mut self, k: f64) -> Graph {
         self.scale = Some(k);
         self
@@ -203,6 +222,12 @@ impl Graph {
             let keys = Keys::read(&win, &view, was_down, typed);
             was_down = keys.down;
 
+            // Furniture swallows the pointer, and the wheel with it. Worked
+            // out here, at the top, because the graph pans and zooms before
+            // the sketch runs -- a veto that arrived afterwards would always
+            // be one frame late.
+            let mine = self.reserved.as_ref().is_none_or(|f| !f(keys.at_px().0, keys.at_px().1));
+
             if keys.just('g') {
                 grid = !grid;
             }
@@ -273,7 +298,7 @@ impl Graph {
             // On the mouse, never the keyboard, so a sketch keeps every key
             // for itself. The wheel zooms, the right button drags the paper
             // about, and Home puts it back.
-            if keys.scroll().abs() > 1e-6 {
+            if mine && keys.scroll().abs() > 1e-6 {
                 zoom_about(&mut view, keys.at_px(), 1.0 + 0.14 * keys.scroll().clamp(-3.0, 3.0));
             }
             // No `over()` test here. It sounds right — "a pan should begin
@@ -281,7 +306,7 @@ impl Graph {
             // returning `Some`, and a backend that always says `None` would
             // make panning impossible for a reason that has nothing to do
             // with the mouse buttons. Not worth the risk for the little it buys.
-            if keys.panning() {
+            if mine && keys.panning() {
                 if let Some((lx, ly)) = last_pan {
                     // The origin is in pixels, so moving it by the pointer's
                     // own delta makes the paper follow the hand exactly.
@@ -560,6 +585,12 @@ impl<S: 'static> Sketch<S> {
     ///
     /// The pointer, the clock and [`Sketch::on_keys`] are not gated: the
     /// window still has to work while you are typing in it.
+    /// Mark part of the window as furniture: see [`Graph::reserve`].
+    pub fn reserve(mut self, f: impl Fn(f64, f64) -> bool + 'static) -> Self {
+        self.graph = self.graph.reserve(f);
+        self
+    }
+
     pub fn gate(mut self, f: impl Fn(&S) -> bool + 'static) -> Self {
         self.gate = Some(Box::new(f));
         self

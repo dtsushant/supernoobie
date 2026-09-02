@@ -12,7 +12,7 @@
 //!     >  figure 2                     <- folded: four strokes, out of the way
 //!        - a loose stroke
 //!
-//!     FORMULAS                 [+]
+//!     FUNCTIONS                 [+]
 //!     [x] r = 2
 //!         --------o--------           <- because the row binds a number
 //!     [x] circle(0, r)
@@ -70,7 +70,7 @@
 //! ## What a `+` does
 //!
 //! Under `SHAPES` it makes an empty group to drag things into. Under
-//! `FORMULAS` it makes a row and starts typing in it. Neither asks a question
+//! `FUNCTIONS` it makes a row and starts typing in it. Neither asks a question
 //! first — a dialog before you have done anything is a dialog answered wrongly.
 
 use plotkit::{Anchor, Canvas, Cx, Frame};
@@ -126,7 +126,7 @@ const VERB: i32 = 46;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Half {
     Shapes,
-    Formulas,
+    Functions,
 }
 
 /// One line in the tree.
@@ -154,7 +154,7 @@ impl Node {
     pub fn half(self) -> Half {
         match self {
             Node::Title(h) => h,
-            Node::Row(_) => Half::Formulas,
+            Node::Row(_) => Half::Functions,
             _ => Half::Shapes,
         }
     }
@@ -218,6 +218,12 @@ pub struct Inspector {
 
 impl Tree {
     /// Lay the tree out for this board.
+    ///
+    /// Everything is placed from the top and then shifted by however far the
+    /// list has been scrolled, so there is one layout and scrolling is a
+    /// single subtraction. Laying out from the scrolled position instead would
+    /// mean every rectangle carried the scroll in it, and the day one of them
+    /// forgot, that row would be unclickable at some scroll positions only.
     pub fn new(board: &Board) -> Tree {
         let mut t = Tree::default();
         let mut y = PAD;
@@ -259,10 +265,10 @@ impl Tree {
             }
         }
 
-        // --- formulas -------------------------------------------------------
+        // --- functions -------------------------------------------------------
         y += PAD;
-        t.lines.push(Line { node: Node::Title(Half::Formulas), y, h: HEAD, depth: 0, dial: None });
-        t.adds.push((Half::Formulas, y));
+        t.lines.push(Line { node: Node::Title(Half::Functions), y, h: HEAD, depth: 0, dial: None });
+        t.adds.push((Half::Functions, y));
         y += HEAD + 2;
 
         let dials = board.sheet.script.dials(board.clock);
@@ -277,7 +283,38 @@ impl Tree {
         }
 
         t.height = y + PAD;
+
+        // The shift, applied once, at the end.
+        let by = board.scrolled.round() as i32;
+        if by != 0 {
+            for l in t.lines.iter_mut() {
+                l.y -= by;
+                if let Some((_, _, sy)) = l.dial.as_mut() {
+                    *sy -= by;
+                }
+            }
+            for (_, ay) in t.adds.iter_mut() {
+                *ay -= by;
+            }
+            if let Some(ins) = t.inspector.as_mut() {
+                ins.swatches -= by;
+                for (_, _, _, vy) in ins.verbs.iter_mut() {
+                    *vy -= by;
+                }
+            }
+        }
         t
+    }
+
+    /// How far the list could be scrolled before its end is on screen.
+    ///
+    /// Never negative: a list shorter than the window does not scroll at all,
+    /// and one that could be dragged up off its own top is a list that feels
+    /// broken.
+    pub fn most(&self, window_h: i32) -> f64 {
+        // `height` is worked out before the shift, so it is the full length of
+        // the list however far it has been scrolled.
+        f64::from((self.height - window_h + PAD).max(0))
     }
 
     /// Lay the options out at `y`, indented to `depth`. Returns the new `y`.
@@ -388,7 +425,7 @@ impl Tree {
             let x = PAD + line.depth * INDENT;
             match line.node {
                 Node::Title(half) => {
-                    let name = if half == Half::Shapes { "SHAPES" } else { "FORMULAS" };
+                    let name = if half == Half::Shapes { "SHAPES" } else { "FUNCTIONS" };
                     f.pin(Anchor::TopLeft, x as f64, (line.y + 9) as f64, name, 0x6B7987, 1);
                     let ax = WIDTH - PAD - KNOB;
                     f.chip(ax, line.y, KNOB, HEAD, EDGE);
@@ -555,7 +592,7 @@ mod tests {
         let t = Tree::new(&a_board());
         let kinds: Vec<Node> = t.lines.iter().map(|l| l.node).collect();
         assert!(kinds.contains(&Node::Title(Half::Shapes)));
-        assert!(kinds.contains(&Node::Title(Half::Formulas)));
+        assert!(kinds.contains(&Node::Title(Half::Functions)));
         assert!(kinds.iter().any(|n| matches!(n, Node::Group(..))));
         assert!(kinds.iter().any(|n| matches!(n, Node::Mark(_))));
         assert!(kinds.iter().any(|n| matches!(n, Node::Row(_))));
@@ -679,6 +716,66 @@ mod tests {
         for (half, y) in &t.adds {
             assert_eq!(t.at((WIDTH - PAD - 10) as f64, (y + 5) as f64), Some(Poke::Add(*half)));
         }
+    }
+
+    /// ★ A long list scrolls, and every line moves together — including the
+    /// sliders and the options, which are laid out separately and are exactly
+    /// the things that get forgotten.
+    #[test]
+    fn scrolling_moves_the_whole_list_together() {
+        let mut b = a_board();
+        for k in 0..20 {
+            b.sheet.script.add(format!("r{k} = {k}"));
+        }
+        b.selected = vec![2];
+
+        let before = Tree::new(&b);
+        b.scrolled = 120.0;
+        let after = Tree::new(&b);
+
+        assert_eq!(before.lines.len(), after.lines.len());
+        for (a, c) in before.lines.iter().zip(&after.lines) {
+            assert_eq!(a.y - 120, c.y, "{:?} did not move with the rest", a.node);
+            if let (Some((_, _, x)), Some((_, _, y))) = (&a.dial, &c.dial) {
+                assert_eq!(x - 120, *y, "a slider was left behind");
+            }
+        }
+        for (a, c) in before.adds.iter().zip(&after.adds) {
+            assert_eq!(a.1 - 120, c.1, "a + button was left behind");
+        }
+        let (x, y) = (before.inspector.expect("options"), after.inspector.expect("options"));
+        assert_eq!(x.swatches - 120, y.swatches, "the swatches were left behind");
+        assert_eq!(x.verbs[0].3 - 120, y.verbs[0].3, "and the verbs");
+    }
+
+    /// ★ And the hit test follows, because it reads the same rectangles. A row
+    /// you can see but cannot press is the worst kind of scrolling bug: it
+    /// looks like the program ignoring you.
+    #[test]
+    fn a_scrolled_row_is_pressed_where_it_now_is() {
+        let mut b = a_board();
+        for k in 0..20 {
+            b.sheet.script.add(format!("r{k} = {k}"));
+        }
+        b.scrolled = 200.0;
+        let t = Tree::new(&b);
+        let line = t.lines.iter().find(|l| l.y > 40 && matches!(l.node, Node::Row(_))).expect("a row on screen");
+        let far = (WIDTH - PAD - 20) as f64;
+        assert!(matches!(t.at(far, (line.y + 5) as f64), Some(Poke::Edit(_))), "it should be where it looks");
+    }
+
+    /// A list shorter than the window does not scroll at all — one that could
+    /// be dragged up off its own top feels broken.
+    #[test]
+    fn a_short_list_does_not_scroll() {
+        let b = Board::new();
+        assert_eq!(Tree::new(&b).most(800), 0.0);
+
+        let mut long = Board::new();
+        for k in 0..40 {
+            long.sheet.script.add(format!("r{k} = {k}"));
+        }
+        assert!(Tree::new(&long).most(800) > 0.0, "but a long one does");
     }
 
     /// The drawing beside the tree is the drawing.

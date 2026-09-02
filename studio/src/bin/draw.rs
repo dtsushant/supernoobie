@@ -103,7 +103,7 @@
 //!        - body
 //!     >  figure 2                     folded
 //!
-//!     FORMULAS                 [+]
+//!     FUNCTIONS                [+]
 //!     [x] r = 2
 //!         --------o--------
 //!     [x] circle(0, r)
@@ -183,6 +183,10 @@ struct Studio {
 }
 
 const EDGE: u32 = 0x22303C;
+/// How far down the toolbar reaches, at the widths this window is opened at.
+/// Generous: the strip is furniture and a few spare pixels of it are harmless,
+/// where a few too few would let a stroke start underneath a button.
+const BAR_DEEP: i32 = 100;
 
 impl Studio {
     fn new(file: String) -> Studio {
@@ -380,7 +384,7 @@ impl Studio {
                 self.board.choose_only(k);
             }
             Poke::Choose(_) => {}
-            Poke::Add(Half::Formulas) => self.board.add_row(),
+            Poke::Add(Half::Functions) => self.board.add_row(),
             Poke::Add(Half::Shapes) => {
                 self.say = if self.board.new_group() {
                     "one figure now -- tap any part to take it all".into()
@@ -517,6 +521,10 @@ fn main() {
         // typing `p` in a formula would switch to the pick tool. One place
         // decides, rather than thirty shortcuts each testing the same thing.
         .gate(|s: &Studio| s.board.editing.is_none())
+        // The tree and the toolbar are furniture: the graph keeps its hands
+        // off them, so scrolling a long list does not quietly zoom the drawing
+        // behind it.
+        .reserve(|px, py| px < tree::WIDTH as f64 || py < BAR_DEEP as f64)
         .each_frame(|s, t| {
             let dt = (t - s.was).clamp(0.0, 1.0 / 15.0);
             s.was = t;
@@ -526,6 +534,12 @@ fn main() {
         // the shortcuts so the row has the keyboard first -- though what
         // really settles it is that every shortcut below asks `not typing`.
         .on_keys(|s, keys| {
+            // The wheel over the tree scrolls the tree.
+            let wheel = keys.scroll();
+            if wheel.abs() > 1e-6 && Tree::covers(keys.at_px().0) {
+                let most = s.tree.most(s.size.1);
+                s.board.scroll(-wheel * 46.0, most);
+            }
             if s.board.editing.is_some() {
                 if !keys.typed().is_empty() {
                     s.board.type_into(keys.typed());

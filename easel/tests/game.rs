@@ -21,13 +21,27 @@ fn tap(b: &mut Board, at: Cx) {
 /// The middle of each answer box.
 const BOXES: [f64; 3] = [-3.4, 0.0, 3.4];
 
+/// The **middle** of a box, which is where anybody would tap it.
 fn box_at(k: usize) -> Cx {
-    // The edge of the box, since a traced outline is hit on its line.
-    Cx::new(BOXES[k] - 1.2, -2.2)
+    Cx::new(BOXES[k], -2.2)
 }
 
 fn value(b: &Board, name: &str) -> f64 {
     b.written().vars.iter().find(|(n, _)| n == name).map(|(_, v)| v.re).unwrap_or(f64::NAN)
+}
+
+/// ★ A box is tapped in the **middle**, which is where a child will put their
+/// finger. It used to need the two pixels of its outline, because the nib
+/// sweeps a ring and the middle of the box is the hole in it — a game nobody
+/// could play, and the reason this test aims at the centre.
+#[test]
+fn the_middle_of_a_box_is_the_box() {
+    let mut b = game();
+    for k in 0..3 {
+        let before = value(&b, "score");
+        tap(&mut b, box_at(k));
+        assert_ne!(value(&b, "score"), before, "tapping the middle of box {k} did nothing");
+    }
 }
 
 /// ★ The whole game, played. The right box puts the score up, a wrong one puts
