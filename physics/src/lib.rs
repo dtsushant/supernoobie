@@ -15,6 +15,7 @@
 //! |---|---|---|
 //! | [`oscillator`] | `ẍ + 2ζω ẋ + ω² x = f` | Laplace, and Heaviside who made it useful |
 //! | [`fall`] | `s = s₀ + v₀t + ½gt²` | Galileo, by slowing gravity down until he could time it |
+//! | [`trigger`] | edges, not levels | — the small thing that turns a moving number into an event |
 //!
 //! ## Why the comments read like a history book
 //!
@@ -55,6 +56,8 @@
 
 pub mod fall;
 pub mod oscillator;
+pub mod trigger;
 
 pub use fall::Fall;
 pub use oscillator::Oscillator;
+pub use trigger::{Edge, Trigger};

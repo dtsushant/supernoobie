@@ -1,5 +1,8 @@
 # Rust build artefacts
 /target/
+# `live` is its own workspace root, so it has its own target directory.
+live/target/
+live/Cargo.lock
 **/*.rs.bk
 
 # Generated output - regenerate rather than commit.

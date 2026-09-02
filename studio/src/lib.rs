@@ -90,6 +90,7 @@ use plotkit::{plot, raster::Canvas, Cx, Frame, View};
 /// use studio::prelude::*;
 /// ```
 pub mod tape;
+pub mod world;
 
 pub mod prelude {
     pub use crate::tape::Tape;

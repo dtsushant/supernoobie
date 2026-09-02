@@ -34,6 +34,22 @@
 //! handing it to whatever the machine already has — see [`speaker`] for why
 //! that is the better trade. The build needs nothing at all.
 //!
+//! ## Recorded sound and live sound
+//!
+//! Two different programs, and the crate does both:
+//!
+//! | | [`speaker`] | [`mixer`] |
+//! |---|---|---|
+//! | when it is made | all at once, in advance | a few hundred samples at a time, forever |
+//! | can it change? | no — it is a file | yes, while it is playing |
+//! | can it start on a frame? | no, only when noticed | yes, on the exact frame |
+//! | what it costs | nothing | somebody must ask it for samples |
+//!
+//! [`mixer`] is what binds sound to **what a shape is doing** — a ball landing
+//! strikes a note at the moment it lands, and the wind's level follows the
+//! wind. It writes into a slice, so it is tested in silence and still links
+//! nothing; the binding to real hardware lives outside this workspace.
+//!
 //! ## Where this goes
 //!
 //! Nothing in this crate has a dimension in it, so none of it needs revisiting
@@ -41,11 +57,14 @@
 //! two ears, and the difference in arrival time between them — but a note is
 //! still a note.
 
+pub mod kit;
+pub mod mixer;
 pub mod pitch;
 pub mod speaker;
 pub mod tone;
 pub mod wav;
 
+pub use mixer::{Mixer, Source, Voice};
 pub use tone::{Timbre, Tone, RATE};
 
 /// Mix several sounds into one.

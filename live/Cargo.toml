@@ -1,0 +1,32 @@
+# Deliberately NOT a member of the workspace above.
+#
+# The empty `[workspace]` table below makes this its own root, so
+# `cargo test --workspace` up there never builds it, never resolves `cpal`,
+# and never needs a C library. Everything in the main workspace compiles on a
+# bare machine; the price of hearing it live is paid only here, by whoever
+# chooses to.
+#
+#     cargo run --manifest-path live/Cargo.toml --release
+#
+# On Linux that needs ALSA's headers present:  sudo apt install libasound2-dev
+[workspace]
+
+[package]
+name = "live"
+version = "0.1.0"
+edition = "2021"
+description = "The playground's world, with a sound card attached"
+
+[dependencies]
+# The only reason this crate exists. Everything below is a path into the main
+# workspace, which knows nothing about it.
+cpal = "0.15"
+
+physics = { path = "../physics" }
+plotkit = { path = "../plotkit" }
+shapes = { path = "../shapes" }
+sound = { path = "../sound" }
+studio = { path = "../studio" }
+
+[profile.release]
+opt-level = 3

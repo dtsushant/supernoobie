@@ -15,6 +15,10 @@ minifb = { version = "0.28", optional = true }
 
 [workspace]
 members = ["physics", "plotkit", "shapes", "sound", "studio"]
+# `live` links cpal, which on Linux wants ALSA's headers at build time. Kept
+# out so that everything here compiles and tests on a bare machine; the cost of
+# hearing it live is paid only by whoever runs it.
+exclude = ["live"]
 
 [features]
 # live browser console, rendered server-side
