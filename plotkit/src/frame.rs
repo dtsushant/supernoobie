@@ -113,6 +113,9 @@ pub struct Frame {
     pins: Vec<(Anchor, f64, f64, String, u32, i32)>,
     /// Rectangles in **pixels from the top left**, painted over everything.
     chips: Vec<(i32, i32, i32, i32, u32)>,
+    /// Where the drawing is allowed to be, in pixels. Furniture is not
+    /// confined to it: it is what the drawing is being kept out of.
+    stage: Option<(i32, i32, i32, i32)>,
 }
 
 impl Default for Frame {
@@ -123,7 +126,7 @@ impl Default for Frame {
 
 impl Frame {
     pub fn new() -> Self {
-        Frame { items: Vec::new(), next_colour: 0, labels: Vec::new(), pins: Vec::new(), chips: Vec::new() }
+        Frame { items: Vec::new(), next_colour: 0, labels: Vec::new(), pins: Vec::new(), chips: Vec::new(), stage: None }
     }
 
     /// Add a shape, taking the next palette colour. Returns its style so it
@@ -204,6 +207,16 @@ impl Frame {
         self.chips.push((x, y, w, h, colour));
     }
 
+    /// Keep the **drawing** inside this rectangle, in pixels.
+    ///
+    /// The furniture is not confined to it — it is the thing the drawing is
+    /// being kept out of. Without this a curve heading for the toolbar is
+    /// drawn under it and painted over, which looks the same until you wonder
+    /// why the shape you can half see cannot be clicked.
+    pub fn stage(&mut self, x: i32, y: i32, w: i32, h: i32) {
+        self.stage = Some((x, y, w, h));
+    }
+
     pub fn len(&self) -> usize {
         self.items.len()
     }
@@ -245,6 +258,9 @@ impl Frame {
 
     /// Render onto a canvas through a view.
     pub fn draw(&self, c: &mut Canvas, v: &View) {
+        if let Some((x, y, w, h)) = self.stage {
+            c.keep_to(x, y, w, h);
+        }
         let (lo, hi) = plot::bounds(v);
         for (shape, st) in &self.items {
             let dot_world = st.dot / v.scale.max(1e-9);
@@ -275,6 +291,9 @@ impl Frame {
         for (at, text, colour, scale) in &self.labels {
             v.text_mid(c, *at, text, *colour, *scale);
         }
+        // The furniture is not on the stage; it is what the stage is cut out
+        // of.
+        c.keep_to_all();
         // Furniture first, so text pinned on top of a panel is readable.
         for (x, y, w, h, colour) in &self.chips {
             c.fill_rect(*x, *y, *w, *h, *colour);

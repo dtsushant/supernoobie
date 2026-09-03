@@ -48,6 +48,20 @@
 //! hidden and grouped. Two panels would mean learning two sets of habits for
 //! the same job.
 //!
+//! ## Size, and being able to read it
+//!
+//! The rows are set at **twice** the size of the toolbar's labels, and the
+//! list is wide enough for them. A function is the one thing here you have to
+//! read character by character — `max(0, 1.1 - 1.4*(time - cheer))` is not
+//! something you recognise by its shape — so it is the one thing that must not
+//! be small. Everything else on screen is a word you know by sight.
+//!
+//! ## Collapsing
+//!
+//! The whole list folds away to a strip, because the drawing is the point and
+//! the list is how you got there. What is left is wide enough to press and
+//! nothing else.
+//!
 //! ## Folding
 //!
 //! A figure is six strokes and you almost never want to see all six. Folded,
@@ -79,8 +93,10 @@ use crate::action::Action;
 
 use crate::board::Board;
 
-/// How wide the tree is.
-pub const WIDTH: i32 = 300;
+/// How wide the tree is when it is open.
+pub const WIDTH: i32 = 380;
+/// How wide it is when it is collapsed: enough to press, and nothing more.
+pub const SHUT: i32 = 26;
 /// How far a slider reaches either side of zero.
 pub const RANGE: f64 = 10.0;
 
@@ -112,10 +128,14 @@ pub fn verbs_list() -> [(&'static str, Option<Action>); 7] {
 }
 
 const PAD: i32 = 8;
-const LINE: i32 = 30;
-const HEAD: i32 = 26;
-const SLIDER: i32 = 20;
-const INDENT: i32 = 18;
+/// Tall enough for text at twice the size, with room round it.
+const LINE: i32 = 36;
+const HEAD: i32 = 28;
+const SLIDER: i32 = 22;
+const INDENT: i32 = 16;
+/// How big the row text is. Two, not one: a function has to be read character
+/// by character, and everything else on screen is a word you know by sight.
+const TEXT: i32 = 2;
 /// The fold arrow, and the tick, are this wide.
 const KNOB: i32 = 26;
 /// A swatch, and a verb button.
@@ -174,6 +194,8 @@ pub struct Line {
 /// What was pressed.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Poke {
+    /// Open the list, or shut it away.
+    Collapse,
     /// Fold or unfold a group.
     Fold(u32),
     /// Switch a formula row on or off.
@@ -217,6 +239,15 @@ pub struct Inspector {
 }
 
 impl Tree {
+    /// How wide the tree is for this board — a strip when it is shut away.
+    pub fn width(board: &Board) -> i32 {
+        if board.tree_shut {
+            SHUT
+        } else {
+            WIDTH
+        }
+    }
+
     /// Lay the tree out for this board.
     ///
     /// Everything is placed from the top and then shifted by however far the
@@ -226,6 +257,13 @@ impl Tree {
     /// forgot, that row would be unclickable at some scroll positions only.
     pub fn new(board: &Board) -> Tree {
         let mut t = Tree::default();
+        if board.tree_shut {
+            // Nothing but the handle to open it again. Laying the rest out
+            // and then not painting it would leave every line hittable
+            // underneath, which is the sort of thing that only shows up as
+            // "the drawing sometimes ignores me near the left edge".
+            return t;
+        }
         let mut y = PAD;
 
         // --- shapes ---------------------------------------------------------
@@ -336,18 +374,35 @@ impl Tree {
     }
 
     /// Is this pixel over the tree at all?
+    pub fn covers_at(px: f64, width: i32) -> bool {
+        px < f64::from(width)
+    }
+
+    /// Is this pixel over an **open** tree?
     pub fn covers(px: f64) -> bool {
-        px < WIDTH as f64
+        Tree::covers_at(px, WIDTH)
+    }
+
+    /// The handle that opens and shuts it, down the right-hand edge.
+    pub fn handle(width: i32) -> (i32, i32) {
+        (width - SHUT, SHUT)
     }
 
     /// What was pressed here.
-    pub fn at(&self, px: f64, py: f64) -> Option<Poke> {
-        if !Tree::covers(px) {
+    pub fn at(&self, px: f64, py: f64, width: i32) -> Option<Poke> {
+        if !Tree::covers_at(px, width) {
+            return None;
+        }
+        let (hx, hw) = Tree::handle(width);
+        if px >= f64::from(hx) && px < f64::from(hx + hw) && py < f64::from(SHUT + PAD) {
+            return Some(Poke::Collapse);
+        }
+        if self.lines.is_empty() {
             return None;
         }
         for (half, y) in &self.adds {
-            let x = WIDTH - PAD - KNOB;
-            if py >= *y as f64 && py < (y + HEAD) as f64 && px >= x as f64 {
+            let x = WIDTH - PAD - KNOB - SHUT;
+            if py >= *y as f64 && py < (y + HEAD) as f64 && px >= x as f64 && px < (x + KNOB) as f64 {
                 return Some(Poke::Add(*half));
             }
         }
@@ -417,32 +472,49 @@ impl Tree {
 
     /// Paint it, from the same rectangles [`Tree::at`] reads.
     pub fn paint(&self, f: &mut Frame, board: &Board, window_h: i32) {
+        let width = Tree::width(board);
+        let deep = window_h.max(self.height);
+        f.chip(0, 0, width, deep, PANEL);
+        f.chip(width - 1, 0, 1, deep, EDGE);
+
+        // The handle, always. It is how the list comes back.
+        let (hx, hw) = Tree::handle(width);
+        f.chip(hx, PAD / 2, hw - 2, SHUT, EDGE);
+        f.pin(
+            Anchor::TopLeft,
+            f64::from(hx + 8),
+            f64::from(PAD / 2 + 9),
+            if board.tree_shut { ">" } else { "<" },
+            0xC3CDD7,
+            1,
+        );
+        if board.tree_shut {
+            return;
+        }
         let made = board.written();
-        f.chip(0, 0, WIDTH, window_h.max(self.height), PANEL);
-        f.chip(WIDTH - 1, 0, 1, window_h.max(self.height), EDGE);
 
         for line in &self.lines {
             let x = PAD + line.depth * INDENT;
             match line.node {
                 Node::Title(half) => {
                     let name = if half == Half::Shapes { "SHAPES" } else { "FUNCTIONS" };
-                    f.pin(Anchor::TopLeft, x as f64, (line.y + 9) as f64, name, 0x6B7987, 1);
-                    let ax = WIDTH - PAD - KNOB;
+                    f.pin(Anchor::TopLeft, x as f64, (line.y + 10) as f64, name, 0x6B7987, 1);
+                    let ax = WIDTH - PAD - KNOB - SHUT;
                     f.chip(ax, line.y, KNOB, HEAD, EDGE);
-                    f.pin(Anchor::TopLeft, (ax + 10) as f64, (line.y + 9) as f64, "+", 0xC3CDD7, 1);
+                    f.pin(Anchor::TopLeft, (ax + 9) as f64, (line.y + 10) as f64, "+", 0xC3CDD7, TEXT);
                 }
                 Node::Group(id, n) => {
                     let chosen = board.chosen_group() == Some(id);
                     f.chip(x, line.y, WIDTH - PAD - x, LINE, if chosen { LIT } else { EDGE });
                     let arrow = if board.folded.contains(&id) { ">" } else { "v" };
-                    f.pin(Anchor::TopLeft, (x + 8) as f64, (line.y + 11) as f64, arrow, 0xE0A44A, 1);
+                    f.pin(Anchor::TopLeft, (x + 7) as f64, (line.y + (LINE - 7 * TEXT) / 2) as f64, arrow, 0xE0A44A, TEXT);
                     f.pin(
                         Anchor::TopLeft,
                         (x + KNOB) as f64,
-                        (line.y + 11) as f64,
+                        (line.y + (LINE - 7 * TEXT) / 2) as f64,
                         format!("figure {id}  ({n})"),
                         if chosen { 0xFFFFFF } else { INK },
-                        1,
+                        TEXT,
                     );
                 }
                 Node::Mark(k) => {
@@ -458,10 +530,10 @@ impl Tree {
                     f.pin(
                         Anchor::TopLeft,
                         (x + KNOB) as f64,
-                        (line.y + 11) as f64,
+                        (line.y + (LINE - 7 * TEXT) / 2) as f64,
                         if moves { format!("stroke {k}  *") } else { format!("stroke {k}") },
                         if chosen { 0xFFFFFF } else { INK },
-                        1,
+                        TEXT,
                     );
                 }
                 Node::Row(k) => {
@@ -479,7 +551,7 @@ impl Tree {
                         0x6B7987
                     };
                     let text = if typing { format!("{}_", r.text) } else { r.text.clone() };
-                    let room = ((WIDTH - PAD - x - KNOB - 8) / Canvas::text_w("n", 1).max(1)) as usize;
+                    let room = ((WIDTH - PAD - x - KNOB - 8) / Canvas::text_w("n", TEXT).max(1)) as usize;
                     // The END of a long row, not the beginning: what you are
                     // typing is at the end, and a box that scrolled away from
                     // the cursor would be useless to type into.
@@ -488,7 +560,14 @@ impl Tree {
                     } else {
                         text
                     };
-                    f.pin(Anchor::TopLeft, (x + KNOB) as f64, (line.y + 11) as f64, shown, ink, 1);
+                    f.pin(
+                        Anchor::TopLeft,
+                        (x + KNOB) as f64,
+                        (line.y + (LINE - 7 * TEXT) / 2) as f64,
+                        shown,
+                        ink,
+                        TEXT,
+                    );
 
                     if let Some((name, value, sy)) = &line.dial {
                         let (x0, x1) = (PAD + INDENT, WIDTH - PAD);
@@ -499,9 +578,9 @@ impl Tree {
                         f.pin(
                             Anchor::TopLeft,
                             x0 as f64,
-                            (*sy + SLIDER - 7) as f64,
+                            (*sy + SLIDER - 8) as f64,
                             format!("{name} = {value:.2}"),
-                            0x6B7987,
+                            0x94A1AE,
                             1,
                         );
                     }
@@ -623,13 +702,13 @@ mod tests {
         let g = find(|n| matches!(n, Node::Group(..)));
         let knob = (PAD + g.depth * INDENT + 4) as f64;
         let far = (WIDTH - PAD - 20) as f64;
-        assert!(matches!(t.at(knob, (g.y + 5) as f64), Some(Poke::Fold(_))), "the arrow folds");
-        assert!(matches!(t.at(far, (g.y + 5) as f64), Some(Poke::Choose(Node::Group(..)))), "the rest chooses");
+        assert!(matches!(t.at(knob, (g.y + 5) as f64, WIDTH), Some(Poke::Fold(_))), "the arrow folds");
+        assert!(matches!(t.at(far, (g.y + 5) as f64, WIDTH), Some(Poke::Choose(Node::Group(..)))), "the rest chooses");
 
         let r = find(|n| matches!(n, Node::Row(_)));
         let rknob = (PAD + r.depth * INDENT + 4) as f64;
-        assert!(matches!(t.at(rknob, (r.y + 5) as f64), Some(Poke::Tick(_))), "the tick switches it off");
-        assert!(matches!(t.at(far, (r.y + 5) as f64), Some(Poke::Edit(_))), "the rest is typed into");
+        assert!(matches!(t.at(rknob, (r.y + 5) as f64, WIDTH), Some(Poke::Tick(_))), "the tick switches it off");
+        assert!(matches!(t.at(far, (r.y + 5) as f64, WIDTH), Some(Poke::Edit(_))), "the rest is typed into");
     }
 
     /// A title is not a button, except for its `+`.
@@ -638,9 +717,9 @@ mod tests {
         let b = a_board();
         let t = Tree::new(&b);
         let title = t.lines.iter().find(|l| matches!(l.node, Node::Title(Half::Shapes))).expect("a title").clone();
-        assert_eq!(t.at(20.0, (title.y + 5) as f64), None, "the heading itself is not a button");
+        assert_eq!(t.at(20.0, (title.y + 5) as f64, WIDTH), None, "the heading itself is not a button");
         assert_eq!(
-            t.at((WIDTH - PAD - 10) as f64, (title.y + 5) as f64),
+            t.at((WIDTH - PAD - SHUT - 10) as f64, (title.y + 5) as f64, WIDTH),
             Some(Poke::Add(Half::Shapes)),
             "but the plus is"
         );
@@ -697,7 +776,7 @@ mod tests {
         let (_, _, sy) = with.dial.clone().expect("a dial");
         let y = (sy + SLIDER / 2) as f64;
 
-        let value = |px: f64| match t.at(px, y) {
+        let value = |px: f64| match t.at(px, y, WIDTH) {
             Some(Poke::Dial(_, v)) => v,
             other => panic!("expected a dial, got {other:?}"),
         };
@@ -714,7 +793,7 @@ mod tests {
         let t = Tree::new(&b);
         assert_eq!(t.adds.len(), 2);
         for (half, y) in &t.adds {
-            assert_eq!(t.at((WIDTH - PAD - 10) as f64, (y + 5) as f64), Some(Poke::Add(*half)));
+            assert_eq!(t.at((WIDTH - PAD - SHUT - 10) as f64, (y + 5) as f64, WIDTH), Some(Poke::Add(*half)));
         }
     }
 
@@ -761,7 +840,7 @@ mod tests {
         let t = Tree::new(&b);
         let line = t.lines.iter().find(|l| l.y > 40 && matches!(l.node, Node::Row(_))).expect("a row on screen");
         let far = (WIDTH - PAD - 20) as f64;
-        assert!(matches!(t.at(far, (line.y + 5) as f64), Some(Poke::Edit(_))), "it should be where it looks");
+        assert!(matches!(t.at(far, (line.y + 5) as f64, WIDTH), Some(Poke::Edit(_))), "it should be where it looks");
     }
 
     /// A list shorter than the window does not scroll at all — one that could
@@ -778,11 +857,52 @@ mod tests {
         assert!(Tree::new(&long).most(800) > 0.0, "but a long one does");
     }
 
+    /// ★ Collapsed, the list lays out **nothing**. Laying it out and then not
+    /// painting it would leave every line hittable underneath — which shows up
+    /// only as "the drawing sometimes ignores me near the left edge".
+    #[test]
+    fn a_collapsed_tree_has_nothing_to_press_but_its_handle() {
+        let mut b = a_board();
+        assert!(!Tree::new(&b).lines.is_empty());
+
+        b.tree_shut = true;
+        let t = Tree::new(&b);
+        assert!(t.lines.is_empty());
+        assert_eq!(Tree::width(&b), SHUT);
+
+        // Only the handle answers.
+        assert_eq!(t.at(4.0, 4.0, SHUT), Some(Poke::Collapse));
+        assert_eq!(t.at(4.0, 300.0, SHUT), None, "and the rest of the strip is nothing");
+        assert_eq!(t.at(200.0, 40.0, SHUT), None, "and the drawing beside it is the drawing");
+    }
+
+    /// The handle is there when it is open too, or there would be no way to
+    /// shut it.
+    #[test]
+    fn the_handle_is_there_either_way() {
+        let b = a_board();
+        let t = Tree::new(&b);
+        let (hx, _) = Tree::handle(WIDTH);
+        assert_eq!(t.at(f64::from(hx + 4), 4.0, WIDTH), Some(Poke::Collapse));
+    }
+
+    /// ★ A function has to be read character by character, so the rows are set
+    /// at twice the size of everything else — and the list is wide enough for
+    /// them. Everything else on screen is a word you know by sight.
+    #[test]
+    fn a_function_row_is_big_enough_to_read() {
+        assert!(TEXT >= 2, "the rows are the one thing that must not be small");
+        assert!(LINE >= 7 * TEXT + 8, "and the line has to fit the text with room round it");
+        // Enough width for a formula worth writing.
+        let room = (WIDTH - PAD - INDENT - KNOB - 8) / Canvas::text_w("n", TEXT).max(1);
+        assert!(room >= 24, "only {room} characters fit, which is not a formula");
+    }
+
     /// The drawing beside the tree is the drawing.
     #[test]
     fn the_canvas_is_not_the_tree() {
         assert!(!Tree::covers(WIDTH as f64));
         assert!(Tree::covers((WIDTH - 1) as f64));
-        assert_eq!(Tree::new(&a_board()).at(WIDTH as f64 + 5.0, 40.0), None);
+        assert_eq!(Tree::new(&a_board()).at(WIDTH as f64 + 5.0, 40.0, WIDTH), None);
     }
 }

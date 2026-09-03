@@ -36,21 +36,49 @@ pub struct Canvas {
     pub w: i32,
     pub h: i32,
     pub buf: Vec<u32>,
+    /// The rectangle anything is allowed to be drawn in: `(x, y, w, h)`.
+    ///
+    /// Enforced in [`Canvas::px`], which every other drawing operation is
+    /// built on — so one bounds test covers lines, curves, fills, glyphs and
+    /// anything added later. Clipping each shape against a rectangle instead
+    /// would mean every kind of shape knowing about clipping, and the day a
+    /// new kind forgot, it alone would leak.
+    clip: (i32, i32, i32, i32),
 }
 
 impl Canvas {
     pub fn new(w: usize, h: usize) -> Self {
-        Canvas { w: w as i32, h: h as i32, buf: vec![colour::BG; w * h] }
+        Canvas { w: w as i32, h: h as i32, buf: vec![colour::BG; w * h], clip: (0, 0, w as i32, h as i32) }
     }
 
+    /// Fill the **whole** canvas, clip or no clip. Starting a frame is not
+    /// drawing; a clip left set from last frame must not leave a stripe of the
+    /// frame before showing through.
     pub fn clear(&mut self, c: u32) {
         self.buf.fill(c);
+    }
+
+    /// Keep drawing inside this rectangle until told otherwise.
+    ///
+    /// For furniture: the drawing is given the space that is left, so a curve
+    /// running off towards a toolbar stops at its edge instead of being drawn
+    /// underneath it and painted over. The difference shows the moment
+    /// anything is translucent, or the moment somebody wonders why a shape
+    /// they can half see cannot be clicked.
+    pub fn keep_to(&mut self, x: i32, y: i32, w: i32, h: i32) {
+        self.clip = (x.max(0), y.max(0), w.min(self.w - x.max(0)), h.min(self.h - y.max(0)));
+    }
+
+    /// Draw anywhere again.
+    pub fn keep_to_all(&mut self) {
+        self.clip = (0, 0, self.w, self.h);
     }
 
     /// The one primitive. Everything else is a loop around this.
     #[inline]
     pub fn px(&mut self, x: i32, y: i32, c: u32) {
-        if x >= 0 && y >= 0 && x < self.w && y < self.h {
+        let (cx, cy, cw, ch) = self.clip;
+        if x >= cx && y >= cy && x < cx + cw && y < cy + ch && x < self.w && y < self.h {
             self.buf[(y * self.w + x) as usize] = c;
         }
     }
@@ -58,7 +86,8 @@ impl Canvas {
     /// Blend `c` over what is already there, `a` in 0..=255.
     #[inline]
     pub fn px_blend(&mut self, x: i32, y: i32, c: u32, a: u32) {
-        if x < 0 || y < 0 || x >= self.w || y >= self.h {
+        let (cx, cy, cw, ch) = self.clip;
+        if x < cx || y < cy || x >= cx + cw || y >= cy + ch || x >= self.w || y >= self.h {
             return;
         }
         let i = (y * self.w + x) as usize;
@@ -480,6 +509,59 @@ const FONT: [[u8; 5]; 64] = [
 
 #[cfg(test)]
 mod tests {
+    /// ★ One bounds test, in the one primitive everything is built on — so
+    /// lines, curves, fills, glyphs and anything added later are all clipped
+    /// by it. Clipping each kind of shape separately would mean every kind
+    /// knowing about clipping, and the day a new one forgot, it alone would
+    /// leak over the furniture.
+    #[test]
+    fn a_clip_holds_for_everything_drawn_through_it() {
+        let mut c = Canvas::new(60, 60);
+        c.clear(0);
+        c.keep_to(20, 20, 20, 20);
+
+        // Every primitive, all trying to cover the whole canvas.
+        c.line(0, 0, 59, 59, 0xFFFFFF);
+        c.thick_line(0, 30, 59, 30, 9, 0xFFFFFF);
+        c.disc(5, 5, 40, 0xFFFFFF);
+        c.fill_rect(0, 0, 60, 60, 0xFFFFFF);
+        c.fill_poly(&[(0, 0), (59, 0), (59, 59), (0, 59)], 0xFFFFFF);
+        c.text(0, 0, "hello", 0xFFFFFF, 2);
+        c.px_blend(2, 2, 0xFFFFFF, 255);
+
+        for y in 0..60 {
+            for x in 0..60 {
+                let inside = (20..40).contains(&x) && (20..40).contains(&y);
+                if !inside {
+                    assert_eq!(c.buf[(y * 60 + x) as usize], 0, "something leaked at ({x}, {y})");
+                }
+            }
+        }
+        assert!(c.buf.iter().any(|p| *p == 0xFFFFFF), "and the inside really was drawn");
+    }
+
+    /// Clearing ignores the clip, because starting a frame is not drawing. A
+    /// clip left over from last frame must not leave a stripe of the frame
+    /// before showing through.
+    #[test]
+    fn clearing_is_not_drawing() {
+        let mut c = Canvas::new(20, 20);
+        c.keep_to(5, 5, 5, 5);
+        c.clear(0x123456);
+        assert!(c.buf.iter().all(|p| *p == 0x123456));
+    }
+
+    /// And letting it go again lets everything through.
+    #[test]
+    fn the_clip_can_be_let_go() {
+        let mut c = Canvas::new(20, 20);
+        c.clear(0);
+        c.keep_to(5, 5, 5, 5);
+        c.keep_to_all();
+        c.fill_rect(0, 0, 20, 20, 0xFFFFFF);
+        assert!(c.buf.iter().all(|p| *p == 0xFFFFFF));
+    }
+
     use super::*;
 
     #[test]

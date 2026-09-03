@@ -92,6 +92,17 @@
 //!                                                  S O     save, open
 //! ```
 //!
+//! ## The drawing gets its own space
+//!
+//! The toolbar and the tree are not painted *over* the drawing; the drawing is
+//! **kept out of them**. A curve heading for the toolbar stops at its edge
+//! rather than being drawn underneath and painted over — which looks the same
+//! until you wonder why a shape you can half see cannot be clicked.
+//!
+//! One rectangle says where the drawing lives, and three things read it: the
+//! clip, the pointer, and the wheel. `<` at the top of the tree folds it away
+//! to a strip and the rectangle grows to suit.
+//!
 //! ## Just the game
 //!
 //! `~` puts the furniture away — no toolbar, no tree, only the drawing, filling
@@ -167,6 +178,9 @@ use easel::tree::{self, Half, Node, Poke, Tree, STEP};
 use easel::{Board, Tool};
 use plotkit::{Anchor, Cx, Frame, Shape};
 use shapes::Nib;
+use std::cell::Cell;
+use std::rc::Rc;
+
 use studio::Graph;
 
 /// The window's own concerns: the bar, the file, and what to say.
@@ -190,6 +204,13 @@ struct Studio {
     lifting: Option<Node>,
     /// The furniture put away, so there is only the drawing.
     full: bool,
+    /// Where the drawing lives: `(left, top)` in pixels.
+    ///
+    /// Shared with the window, because the graph has to know before the sketch
+    /// runs whether the pointer is over the drawing — it pans and zooms at the
+    /// top of the frame. Written here, read there, one frame later. The only
+    /// moment that shows is the frame you fold the tree away on.
+    stage: Rc<Cell<(i32, i32)>>,
     /// How wide and tall the window is, for laying the panel out.
     size: (i32, i32),
 }
@@ -214,6 +235,7 @@ impl Studio {
             tree: Tree::default(),
             lifting: None,
             full: false,
+            stage: Rc::new(Cell::new((tree::WIDTH, BAR_DEEP))),
             size: (1200, 780),
         };
         if std::path::Path::new(&s.file).exists() {
@@ -372,6 +394,12 @@ impl Studio {
         }
     }
 
+    /// Where the drawing lives: everything the furniture is not using.
+    fn free(&self) -> (i32, i32, i32, i32) {
+        let (left, top) = if self.full { (0, 0) } else { (Tree::width(&self.board), BAR_DEEP) };
+        (left, top, self.size.0 - left, self.size.1 - top)
+    }
+
     /// Paint what is chosen, or set the pen if nothing is.
     fn paint_now(&mut self, colour: u32) {
         self.board.paint(colour);
@@ -380,6 +408,10 @@ impl Studio {
     /// Do what a line in the tree says.
     fn heed(&mut self, poke: Poke) {
         match poke {
+            Poke::Collapse => {
+                self.board.tree_shut = !self.board.tree_shut;
+                self.board.edit(None);
+            }
             Poke::Fold(g) => self.board.fold(g),
             Poke::Tick(k) => {
                 self.board.toggle_row(k);
@@ -433,11 +465,13 @@ impl Studio {
         self.px = px;
         self.tree = Tree::new(&self.board);
         self.bar = Bar::new(self.size.0);
+        let (left, top, _, _) = self.free();
+        self.stage.set((left, top));
         let pressed = down && !self.was_down;
         let released = !down && self.was_down;
         // With the furniture away there is nothing but drawing, so nothing
         // swallows the pointer.
-        let on_tree = !self.full && Tree::covers(px.0);
+        let on_tree = !self.full && Tree::covers_at(px.0, left);
         let on_bar = !self.full && self.bar.covers(px.0, px.1);
 
         if pressed && on_bar {
@@ -447,7 +481,7 @@ impl Studio {
         }
 
         if on_tree || on_bar {
-            match (pressed, self.tree.at(px.0, px.1)) {
+            match (pressed, self.tree.at(px.0, px.1, left)) {
                 // A slider answers to being held, not only to the press.
                 (_, Some(Poke::Dial(k, v))) if down => {
                     if pressed {
@@ -529,9 +563,17 @@ impl Studio {
 fn main() {
     let file = std::env::args().nth(1).unwrap_or_else(|| "drawing.easel".to_string());
 
+    // Shared with the sketch: the window has to know where the drawing lives
+    // before the sketch runs, since it pans and zooms at the top of the frame.
+    let where_it_lives = Rc::new(Cell::new((tree::WIDTH, BAR_DEEP)));
+
     Graph::new("studio")
         .scale(70.0)
-        .with(Studio::new(file))
+        .with({
+            let mut studio = Studio::new(file);
+            studio.stage = Rc::clone(&where_it_lives);
+            studio
+        })
         // While a row is being typed the keyboard belongs to it -- otherwise
         // typing `p` in a formula would switch to the pick tool. One place
         // decides, rather than thirty shortcuts each testing the same thing.
@@ -539,7 +581,13 @@ fn main() {
         // The tree and the toolbar are furniture: the graph keeps its hands
         // off them, so scrolling a long list does not quietly zoom the drawing
         // behind it.
-        .reserve(|px, py| px < tree::WIDTH as f64 || py < BAR_DEEP as f64)
+        .reserve({
+            let stage = Rc::clone(&where_it_lives);
+            move |px, py| {
+                let (left, top) = stage.get();
+                px < f64::from(left) || py < f64::from(top)
+            }
+        })
         .each_frame(|s, t| {
             let dt = (t - s.was).clamp(0.0, 1.0 / 15.0);
             s.was = t;
@@ -551,7 +599,7 @@ fn main() {
         .on_keys(|s, keys| {
             // The wheel over the tree scrolls the tree.
             let wheel = keys.scroll();
-            if wheel.abs() > 1e-6 && Tree::covers(keys.at_px().0) {
+            if wheel.abs() > 1e-6 && Tree::covers_at(keys.at_px().0, Tree::width(&s.board)) {
                 let most = s.tree.most(s.size.1);
                 s.board.scroll(-wheel * 46.0, most);
             }
@@ -621,6 +669,12 @@ fn main() {
 
 fn page(s: &Studio) -> Frame {
     let mut f = s.board.frame();
+    {
+        // Set first, so it applies to everything in the frame -- including
+        // whatever `Board::frame` has already put there.
+        let (left, top, w, h) = s.free();
+        f.stage(left, top, w, h);
+    }
 
     // Onion skin: the other moments this thing is keyed at, drawn faintly
     // underneath. Nearly free -- a frame is the same drawing at another time.
@@ -642,6 +696,10 @@ fn page(s: &Studio) -> Frame {
     // --- the toolbar ---------------------------------------------------------
     // One call. The rectangles are `easel`'s, and the same ones decide what a
     // tap hit, so painting and hitting cannot drift apart.
+    // The drawing is kept out of the furniture rather than painted under it.
+    let (left, top, w, h) = s.free();
+    f.stage(left, top, w, h);
+
     if !s.full {
         s.bar.paint(&mut f, &s.board, s.size.0);
         s.tree.paint(&mut f, &s.board, s.size.1);
@@ -674,7 +732,7 @@ fn page(s: &Studio) -> Frame {
     };
     f.pin(
         Anchor::TopLeft,
-        (tree::WIDTH + 14) as f64,
+        (Tree::width(&s.board) + 14) as f64,
         14.0,
         format!("{}   {}   {}", tool_name(s), s.nib_name(), doing),
         s.board.colour,
@@ -683,7 +741,7 @@ fn page(s: &Studio) -> Frame {
     let keys = s.board.keys_here();
     f.pin(
         Anchor::TopLeft,
-        (tree::WIDTH + 14) as f64,
+        (Tree::width(&s.board) + 14) as f64,
         50.0,
         if s.board.clock <= 0.0 {
             "at 0s: dragging moves the shape itself".to_string()
@@ -695,7 +753,7 @@ fn page(s: &Studio) -> Frame {
     );
     f.pin(
         Anchor::TopLeft,
-        (tree::WIDTH + 14) as f64,
+        (Tree::width(&s.board) + 14) as f64,
         32.0,
         format!(
             "{}  t {:.1}s   spring {:.2}   taper {}   {} marks   {}{}",
@@ -710,7 +768,7 @@ fn page(s: &Studio) -> Frame {
         0x94A1AE,
         2,
     );
-    f.pin(Anchor::BottomLeft, (tree::WIDTH + 14) as f64, -16.0, &s.say, 0x6FCF97, 2);
+    f.pin(Anchor::BottomLeft, (Tree::width(&s.board) + 14) as f64, -16.0, &s.say, 0x6FCF97, 2);
     f.pin(
         Anchor::BottomRight,
         -14.0,

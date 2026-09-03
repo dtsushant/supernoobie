@@ -174,6 +174,8 @@ pub struct Board {
     pub folded: Vec<u32>,
     /// The line a drop would land before, while something is being dragged.
     pub dropping: Option<usize>,
+    /// The tree folded away to a strip, so the drawing has the window.
+    pub tree_shut: bool,
     /// How far down the tree has been scrolled, in pixels.
     ///
     /// Not saved, for the same reason folding is not: it is about looking, not
@@ -217,6 +219,7 @@ impl Board {
             editing: None,
             folded: Vec::new(),
             dropping: None,
+            tree_shut: false,
             scrolled: 0.0,
             tally: Tally::new(),
             playing_game: false,
