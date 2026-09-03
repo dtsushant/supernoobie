@@ -1042,18 +1042,20 @@ impl Board {
         for (shape, colour) in made.shapes {
             f.add(shape).color(colour).width(2);
         }
-        // After the outlines, so a solid thing covers what it is lying on --
-        // a die sliding over the board hides the squares it is on, which is
-        // what a die lying on a board does.
-        for (shape, colour) in made.solid {
-            f.add(shape).color(colour).fill();
-        }
         let env = self.sheet.script.env(self.clock, &self.tally);
         for m in &self.sheet.marks {
             let item = f.add(m.at_in(self.clock, &env)).color(m.colour);
             if m.filled {
                 item.fill();
             }
+        }
+        // Solids last. A filled shape is opaque, so drawing it after everything
+        // else is what "lying on top of the board" means -- and it is what
+        // stops the die's own tappable mark showing through from underneath,
+        // which read as a second box drifting out of the first one every time
+        // the die went edge-on.
+        for (shape, colour) in made.solid {
+            f.add(shape).color(colour).fill();
         }
         if let Some(wet) = self.drawing() {
             f.add(wet.shape()).color(wet.colour).fill();

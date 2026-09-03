@@ -274,8 +274,9 @@ long ago it left the hand, and the half-width of the square it is thrown across
 | `dieface(…)` | the face it is showing, 1 to 6 |
 | `diex(…)` `diey(…)` | where it is |
 | `dieturn(…)` | how far round it has turned, in radians |
+| `diesquash(…)` | how wide the face looks — 1 flat on, 0 edge-on |
 | `diedone(…)` | whether it has stopped |
-| `dice(face, x, y, size, turn)` | draws it — body and pips |
+| `dice(face, x, y, size, turn, squash)` | draws it — body and pips |
 
 `flung` is *when* it was thrown, so everything is a function of the clock and
 nothing is stepped frame by frame. A throw can be replayed, scrubbed, or watched
@@ -292,10 +293,19 @@ be pushed back. And it lands square, on a right angle.
 throw number, so it is unpredictable in play and exactly repeatable — which is
 what lets a match be replayed and makes “he cheated” answerable.
 
-Be honest about the face: a real die tumbles in three dimensions, and this is a
-flat drawing with one angle. So the face is a *consequence* — how far it turned
-and how many walls it struck — not a simulation. What matters is that it is
-entirely determined by the throw.
+**A die tumbles, it does not spin.** A square turning smoothly on the spot looks
+like a plate on a stick. The giveaway in two dimensions is foreshortening: the
+face narrows to nothing as the die goes over its edge, and the next one opens
+out — which is what `diesquash` is, and the face changes exactly where the die
+is edge-on and nobody can see it change.
+
+**The face is drawn first and the tumble is arranged to finish on it.** This was
+the other way round to begin with, and it made an unfair die: the face fell out
+of how far the die had turned, `quarters` runs over fifteen values, and fifteen
+does not divide by six. Ones and fours came up eleven per cent more often than
+twos and threes — chi-square 38.8 against a 11.07 threshold. Physically the new
+way round is backwards; it is also the only way to get a fair die out of a flat
+drawing with one angle, and it is checked by `plotkit/tests/fair.rs`.
 
 ### Turning a mark by a number
 

@@ -496,7 +496,8 @@ fn ludogame() -> Board {
     add!("# is only its face, which has to be redrawn every frame because it");
     add!("# changes, and a mark\'s points do not.");
     add!("dice(die, diex(seed, rolls, age, span), diey(seed, rolls, age, span), \
-         0.78, dieturn(seed, rolls, age, span))");
+         0.78, dieturn(seed, rolls, age, span), \
+         diesquash(seed, rolls, age, span))");
     add!("");
     add!("# whose turn it is, in that seat\'s own colour, in the middle of the");
     add!("# board where the four home paths meet.");
@@ -686,6 +687,10 @@ fn ludogame() -> Board {
         stroke(&mut b, &ring);
         let m = b.sheet.marks.last_mut().expect("a token");
         m.closed = true;
+        // Filled, so a token reads as a piece on a board rather than as a
+        // circle drawn on one. Everything here was outlines, and outlines on
+        // outlines is why it looked like a diagram.
+        m.filled = true;
         m.place = Some((format!("ludox(seat{k}, at{k})"), format!("ludoy(seat{k}, at{k})")));
         b.selected = vec![b.sheet.len() - 1];
         b.group_alone();
@@ -695,17 +700,15 @@ fn ludogame() -> Board {
     // wherever it has slid to and however it is lying. That is what `placea`
     // is for, and it is the piece that was missing: a thing that follows a
     // number nearly always has to face somewhere too.
+    // Round, and the same ivory as the die, because it cannot squash: a
+    // square hit target stayed square while the die foreshortened, and read as
+    // a second box drifting out of the first. A circle has no corners to give
+    // that away, and the die body is drawn over it besides.
     b.colour = 0xEDE6D6;
     b.nib = Nib::Round(0.07);
     let at = Cx::ZERO;
-    let half = 0.78;
-    let box_path: Vec<Cx> = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0), (-1.0, -1.0)]
-        .windows(2)
-        .flat_map(|w| {
-            line(at + Cx::new(w[0].0 * half, w[0].1 * half), at + Cx::new(w[1].0 * half, w[1].1 * half))
-        })
-        .collect();
-    stroke(&mut b, &box_path);
+    let ring: Vec<Cx> = (0..=28).map(|j| at + Cx::polar(0.34, j as f64 / 28.0 * TAU)).collect();
+    stroke(&mut b, &ring);
     let m = b.sheet.marks.last_mut().expect("the die");
     m.closed = true;
     m.place =

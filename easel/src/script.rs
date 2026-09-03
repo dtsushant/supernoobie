@@ -314,8 +314,11 @@ impl Script {
                     let (x, y) = (number(0.0), number(0.0));
                     let size = number(0.5).abs().min(4.0);
                     let turn = number(0.0);
+                    // Flat on unless told otherwise, so a die that is not
+                    // being thrown needs five arguments and not six.
+                    let squash = number(1.0);
                     if size > 0.01 {
-                        let mut parts = shapes::dice::die(face, Cx::new(x, y), size, turn);
+                        let mut parts = shapes::dice::die(face, Cx::new(x, y), size, turn, squash);
                         // Ivory body, dark pips -- fixed, like `digits`, because
                         // a die whose pips were the same colour as its face is
                         // not a die at all. Nothing else here has two colours

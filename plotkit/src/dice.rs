@@ -43,20 +43,45 @@
 //!
 //! ## Which face it lands on
 //!
-//! Be honest about this one. A real die tumbles in three dimensions and its
-//! orientation is a rotation in space; this one is a flat drawing with a single
-//! angle. So the face is not *simulated*, it is a **consequence**: how far the
-//! die turned, and how many walls it struck on each axis.
+//! **The face is drawn first, and the tumble is the show.** This was the other
+//! way round to begin with — the face fell out of how far the die had turned
+//! and how many walls it had struck, which was a pleasing idea and made an
+//! unfair die. `quarters` runs over fifteen values and fifteen does not divide
+//! by six, so some faces got three chances and others two: ones and fours came
+//! up eleven per cent more often than twos and threes, and a chi-square of 38.8
+//! against a 11.07 threshold. Four fours in a row in the first thirty throws.
+//!
+//! A die has to be fair before it is anything else, so now:
 //!
 //! ```text
-//!     face = 1 + (quarter turns + 2·knocks across + 3·knocks up) mod 6
+//!     face = 1 + floor(6 · spread(…))
 //! ```
 //!
-//! Each wall tips it onto a different face, and the two axes tip it
-//! differently, which is why they carry different weights. It is a model. What
-//! matters is that it is **entirely determined by the throw** — so it is
-//! unpredictable to play against and exactly repeatable from a seed, which is
-//! what makes "he cheated" an answerable question.
+//! and the tumble is arranged to *finish* on that face. Physically that is
+//! backwards. It is also the only way to get a fair die out of a flat drawing
+//! with one angle, and every die in every game does it — the honest thing is
+//! to say so rather than to dress it up.
+//!
+//! What is kept is what actually mattered: the throw is **entirely determined
+//! by the seed and the throw number**, so it is unpredictable to play against
+//! and exactly repeatable, which is what makes "he cheated" answerable.
+//!
+//! ## Tumbling, rather than spinning
+//!
+//! A square turning smoothly on the spot looks like a plate on a stick. A die
+//! **flips**, face over face, and the giveaway in two dimensions is that it
+//! foreshortens: the face you are looking at narrows to nothing as it goes over
+//! its edge, and the next one opens out.
+//!
+//! ```text
+//!     flips(t) = n · ease(t)         how many times it has gone over
+//!     squash   = |cos(π · frac(flips))|
+//! ```
+//!
+//! One at the start of a flip, nothing in the middle of it, one again at the
+//! end — and the face changes exactly where the die is edge-on and nobody can
+//! see it change. That is the whole trick, and without it no amount of
+//! rotation reads as a die.
 
 use crate::Cx;
 use std::f64::consts::{FRAC_PI_2, TAU};
@@ -79,6 +104,9 @@ pub struct Roll {
     pub turn: f64,
     /// The face it is showing, 1 to 6.
     pub face: u8,
+    /// How wide the face looks, 1 flat on and 0 edge-on — the foreshortening
+    /// that makes a flip read as a flip.
+    pub squash: f64,
     /// Whether it has stopped.
     pub done: bool,
 }
@@ -157,20 +185,34 @@ pub fn thrown(seed: f64, roll: f64, age: f64, span: f64) -> Roll {
     let straight = from + Cx::polar(gone, aim);
     let at = Cx::new(fold(straight.re, -span, span), fold(straight.im, -span, span));
 
-    // The tumble. It lands on a right angle, so a stopped die sits square
-    // rather than askew -- which is the one thing that would give away that
-    // this is an angle and not a die.
-    let quarters = (3.0 + 14.0 * spread(seed, roll, 5.0)).round();
+    // How it lies when it stops. A whole number of right angles, so a stopped
+    // die sits square rather than askew -- which is the one thing that would
+    // give away that this is an angle and not a die.
+    let quarters = (2.0 + 6.0 * spread(seed, roll, 5.0)).round();
     let turn = quarters * FRAC_PI_2 * ease;
 
-    // The face, from how far it has turned and what it has hit. See the note
-    // at the top: a consequence, not a simulation.
-    let turned = (turn / FRAC_PI_2).floor();
-    let bx = knocks(straight.re, -span, span) as f64;
-    let by = knocks(straight.im, -span, span) as f64;
-    let face = 1 + (turned + 2.0 * bx + 3.0 * by).rem_euclid(6.0) as u8;
+    // The face it will land on, drawn fairly. See the note at the top: this
+    // is chosen first and the tumble is arranged to finish on it.
+    let rest = 1 + (6.0 * spread(seed, roll, 6.0)).floor().clamp(0.0, 5.0) as u8;
 
-    Roll { at, turn, face, done }
+    // The tumble: how many times it has gone over so far.
+    let all = (5.0 + 9.0 * spread(seed, roll, 7.0)).round();
+    let flips = all * ease;
+    let gone_over = flips.floor();
+    // Edge-on in the middle of each flip, flat on at either end -- and the
+    // face changes exactly where nobody can see it change.
+    let squash = (std::f64::consts::PI * (flips - gone_over)).cos().abs();
+    // What is showing part way through. Jumbled rather than counted down: the
+    // face changing by one each flip is a tidy little sequence, and the eye
+    // picks that out of a tumbling die at once.
+    let left = all - gone_over;
+    let face = if done || left < 1.0 {
+        rest
+    } else {
+        1 + (6.0 * spread(seed, roll + 1000.0 * gone_over, 8.0)).floor().clamp(0.0, 5.0) as u8
+    };
+
+    Roll { at, turn, face, squash: if done { 1.0 } else { squash.max(0.06) }, done }
 }
 
 // ===========================================================================

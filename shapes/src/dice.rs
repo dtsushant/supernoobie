@@ -64,8 +64,12 @@ pub fn lit(face: u8) -> &'static [usize] {
 ///
 /// `size` is the half-width, `turn` the angle it is lying at. The body comes
 /// first so a renderer that draws in order puts the pips on top of it.
-pub fn die(face: u8, at: Cx, size: f64, turn: f64) -> Vec<Shape> {
-    let put = |z: Cx| at + z * Cx::polar(size, turn);
+pub fn die(face: u8, at: Cx, size: f64, turn: f64, squash: f64) -> Vec<Shape> {
+    // Foreshortened along its OWN width, before it is turned -- a die going
+    // over its edge narrows across the axis it is rolling about, not across
+    // the screen.
+    let squash = squash.clamp(0.0, 1.0);
+    let put = |z: Cx| at + Cx::new(z.re * squash, z.im) * Cx::polar(size, turn);
     let mut out = Vec::new();
 
     // The body, with its corners taken off -- a square with sharp corners
@@ -136,7 +140,7 @@ mod tests {
         for face in 1..=6u8 {
             for step in 0..24 {
                 let turn = step as f64 / 24.0 * TAU;
-                let shapes = die(face, Cx::new(3.0, -2.0), 0.5, turn);
+                let shapes = die(face, Cx::new(3.0, -2.0), 0.5, turn, 1.0);
                 assert_eq!(shapes.len(), 1 + face as usize, "a body and {face} pips");
                 for s in &shapes[1..] {
                     for run in s.polylines(Cx::new(-9.0, -9.0), Cx::new(9.0, 9.0), 400) {
@@ -150,11 +154,46 @@ mod tests {
         }
     }
 
+    /// ★ **Edge-on is a sliver.** The foreshortening that makes a flip read as
+    /// a flip: the face narrows to nothing as the die goes over its edge.
+    #[test]
+    fn a_squashed_die_is_narrow() {
+        let wide = |sq: f64| {
+            let s = &die(6, Cx::ZERO, 1.0, 0.0, sq)[0];
+            let pts: Vec<Cx> =
+                s.polylines(Cx::new(-9.0, -9.0), Cx::new(9.0, 9.0), 400).into_iter().flatten().collect();
+            let lo = pts.iter().map(|p| p.re).fold(f64::MAX, f64::min);
+            let hi = pts.iter().map(|p| p.re).fold(f64::MIN, f64::max);
+            hi - lo
+        };
+        let flat = wide(1.0);
+        assert!(wide(0.5) < flat * 0.6, "half way over should be about half as wide");
+        assert!(wide(0.05) < flat * 0.1, "edge-on should be a sliver");
+    }
+
+    /// And it narrows across its own width, not the screen’s — so a die lying
+    /// at a quarter turn foreshortens the other way.
+    #[test]
+    fn it_narrows_across_its_own_width() {
+        let tall = |turn: f64| {
+            let s = &die(6, Cx::ZERO, 1.0, turn, 0.1)[0];
+            let pts: Vec<Cx> =
+                s.polylines(Cx::new(-9.0, -9.0), Cx::new(9.0, 9.0), 400).into_iter().flatten().collect();
+            let w = pts.iter().map(|p| p.re).fold(f64::MIN, f64::max)
+                - pts.iter().map(|p| p.re).fold(f64::MAX, f64::min);
+            let h = pts.iter().map(|p| p.im).fold(f64::MIN, f64::max)
+                - pts.iter().map(|p| p.im).fold(f64::MAX, f64::min);
+            h / w
+        };
+        assert!(tall(0.0) > 3.0, "flat on, it is narrow and tall");
+        assert!(tall(std::f64::consts::FRAC_PI_2) < 0.33, "a quarter turn round, the other way");
+    }
+
     /// It goes where it is put, and the body is centred on it.
     #[test]
     fn a_die_is_drawn_where_it_is_put() {
         let at = Cx::new(-4.0, 1.5);
-        let shapes = die(1, at, 0.4, 0.0);
+        let shapes = die(1, at, 0.4, 0.0, 1.0);
         let mut mid = Cx::ZERO;
         let mut n = 0.0;
         for run in shapes[1].polylines(Cx::new(-9.0, -9.0), Cx::new(9.0, 9.0), 400) {

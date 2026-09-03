@@ -185,7 +185,7 @@ pub enum Expr {
 }
 
 /// Names that parse as function calls rather than implicit multiplication.
-pub const FUNCS: [&str; 30] = [
+pub const FUNCS: [&str; 31] = [
     "exp", "ln", "sin", "cos", "tan", "sqrt", "abs", "arg", "conj", "re", "im", "polar", "pow",
     // Whole numbers. A language with no way to say "the integer part" cannot
     // say "a number between 1 and 9", which is most of what a counting game
@@ -200,7 +200,7 @@ pub const FUNCS: [&str; 30] = [
     // things -- the game’s seed, which throw this is, how long ago it left the
     // hand, and the half-width of the board it is thrown across -- so a whole
     // die is five rows that differ only in the name at the front.
-    "diex", "diey", "dieturn", "dieface", "diedone",
+    "diex", "diey", "dieturn", "dieface", "diedone", "diesquash",
 ];
 
 /// Names that draw something.
@@ -328,7 +328,7 @@ impl Expr {
                     // A die in mid-throw. Five functions rather than one giving
                     // a die, for the same reason `ludox` and `ludoy` are two:
                     // a row holds one number, and numbers are what save.
-                    "diex" | "diey" | "dieturn" | "dieface" | "diedone" => {
+                    "diex" | "diey" | "dieturn" | "dieface" | "diedone" | "diesquash" => {
                         if a.len() != 4 {
                             return Err(format!("'{f}' takes a seed, a throw, an age and a span"));
                         }
@@ -339,6 +339,7 @@ impl Expr {
                                 "diey" => r.at.im,
                                 "dieturn" => r.turn,
                                 "dieface" => r.face as f64,
+                                "diesquash" => r.squash,
                                 _ => r.done as u8 as f64,
                             },
                             0.0,

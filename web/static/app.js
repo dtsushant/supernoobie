@@ -59,8 +59,20 @@ function look() {
 // So commands queue behind one another, and only the clock is allowed to skip
 // -- with the skipped time carried, below, so it is delayed and not lost.
 let chain = Promise.resolve();
+// How many commands are waiting. The clock stands aside while any of them are,
+// because a tap that has to queue behind a tick waits for a whole round trip
+// before it is even sent -- and at sixty ticks a second there is nearly always
+// one in the way. That is the entire reason a click felt slow: not the work,
+// the queueing behind an animation frame.
+let pending = 0;
 function ask(body) {
-  chain = chain.then(() => send(body)).catch(() => {});
+  pending += 1;
+  chain = chain
+    .then(() => send(body))
+    .catch(() => {})
+    .finally(() => {
+      pending -= 1;
+    });
   return chain;
 }
 
@@ -382,7 +394,10 @@ function frame(now) {
   // an instruction -- it is an amount. A skipped one is CARRIED rather than
   // dropped, so a slow answer makes the animation stutter and never makes it
   // run slow, which would look like the physics being wrong.
-  if (scene.playing && !waiting && owed > 0) {
+  // A command outranks the clock, and the time it waits is carried rather than
+  // lost -- so a tap goes out at once and the animation catches up on the next
+  // frame instead of running slow.
+  if (scene.playing && !waiting && !pending && owed > 0) {
     const dt = owed;
     owed = 0;
     ask({ do: 'Tick', seconds: dt });
