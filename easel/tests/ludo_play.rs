@@ -18,7 +18,84 @@ fn v(b: &Board, name: &str) -> f64 {
 /// The die is figure 9; tokens are figures 1..8.
 fn roll(b: &mut Board) -> f64 {
     b.play_tap(9);
+    // The die is thrown and takes a moment to settle, so the number is not the
+    // number until it has stopped -- which is the whole point of throwing it.
+    b.clock += 4.0;
     v(b, "die")
+}
+
+/// ★ **A thrown die.** It whirls, eases and stops -- the rate of tumbling
+/// decays, so the number is not the number until it has settled. One
+/// `exp(-age/relax)` does all of it, and nothing is stepped frame by frame:
+/// `flung` is *when*, so the whole throw is a function of the clock.
+#[test]
+fn the_die_tumbles_and_then_settles() {
+    let mut b = game();
+    b.play_tap(9);
+
+    // While it is going, the face changes.
+    let mut seen = std::collections::HashSet::new();
+    for k in 0..12 {
+        b.clock = k as f64 * 0.06;
+        seen.insert(v(&b, "die") as i64);
+    }
+    assert!(seen.len() > 2, "it should be turning over: {seen:?}");
+    assert_eq!(v(&b, "settled"), 0.0, "and not settled yet");
+
+    // And then it stops, and stays stopped.
+    b.clock = 4.0;
+    assert_eq!(v(&b, "settled"), 1.0);
+    let face = v(&b, "die");
+    for k in 0..20 {
+        b.clock = 4.0 + k as f64;
+        assert_eq!(v(&b, "die"), face, "a settled die does not change its mind");
+    }
+}
+
+/// ★ And it slows down rather than stopping dead: it turns through far more
+/// faces in its first moment than in its last.
+#[test]
+fn the_die_slows_rather_than_halting() {
+    let mut b = game();
+    b.play_tap(9);
+    let turned = |b: &mut Board, from: f64, to: f64| {
+        b.clock = from;
+        let a = v(b, "tumbles");
+        b.clock = to;
+        v(b, "tumbles") - a
+    };
+    let early = turned(&mut b, 0.0, 0.2);
+    let late = turned(&mut b, 1.0, 1.2);
+    assert!(early > late * 5.0, "the first moment should turn far more: {early} then {late}");
+}
+
+/// ★ It bounces off the walls of its box rather than sliding out of it.
+#[test]
+fn the_die_stays_in_its_box() {
+    let mut b = game();
+    b.play_tap(9);
+    for k in 0..80 {
+        b.clock = k as f64 * 0.05;
+        let dx = v(&b, "dx");
+        let box_w = v(&b, "box");
+        assert!((0.0..=box_w + 1e-9).contains(&dx), "it left the box at {}: {dx}", b.clock);
+    }
+}
+
+/// ★ A move is refused until the die has stopped. Moving on a number that is
+/// still turning over is moving on a number nobody has seen.
+#[test]
+fn you_cannot_move_while_the_die_is_still_going() {
+    let mut b = game();
+    b.tally.values.insert("at0".into(), 10.0);
+    b.play_tap(9);
+    b.clock = 0.1;
+    b.play_tap(1);
+    assert_eq!(v(&b, "at0"), 10.0, "not while it is turning");
+
+    b.clock = 4.0;
+    b.play_tap(1);
+    assert_ne!(v(&b, "at0"), 10.0, "and now it may");
 }
 
 /// ★ A real die: one to six, and not the same number every time.
@@ -67,6 +144,7 @@ fn the_same_game_rolls_the_same_way_twice() {
 fn a_token_comes_out_only_on_a_six() {
     let mut b = game();
     b.tally.values.insert("rolled".into(), 1.0);
+    b.clock = 99.0;
     b.tally.values.insert("turn".into(), 0.0);
 
     b.tally.values.insert("die".into(), 3.0);
@@ -74,6 +152,7 @@ fn a_token_comes_out_only_on_a_six() {
     assert!(v(&b, "at0") < 0.0, "three does not open the gate");
 
     b.tally.values.insert("rolled".into(), 1.0);
+    b.clock = 99.0;
     b.tally.values.insert("die".into(), 6.0);
     b.play_tap(1);
     assert_eq!(v(&b, "at0"), 0.0, "six does");
@@ -86,6 +165,7 @@ fn the_turn_passes_unless_it_was_a_six() {
     // Seat 0 has a token out, and rolls a three.
     b.tally.values.insert("at0".into(), 10.0);
     b.tally.values.insert("rolled".into(), 1.0);
+    b.clock = 99.0;
     b.tally.values.insert("die".into(), 3.0);
     b.play_tap(1);
     assert_eq!(v(&b, "at0"), 13.0, "it moved");
@@ -95,6 +175,7 @@ fn the_turn_passes_unless_it_was_a_six() {
     // Seat 1 rolls a six.
     b.tally.values.insert("at2".into(), 10.0);
     b.tally.values.insert("rolled".into(), 1.0);
+    b.clock = 99.0;
     b.tally.values.insert("die".into(), 6.0);
     b.play_tap(3);
     assert_eq!(v(&b, "turn"), 1.0, "a six keeps the turn");
@@ -107,6 +188,7 @@ fn you_cannot_move_on_somebody_elses_turn() {
     let mut b = game();
     b.tally.values.insert("at2".into(), 10.0);
     b.tally.values.insert("rolled".into(), 1.0);
+    b.clock = 99.0;
     b.tally.values.insert("die".into(), 3.0);
     b.tally.values.insert("turn".into(), 0.0);
     b.play_tap(3); // seat 1's token, on seat 0's turn
@@ -127,6 +209,7 @@ fn landing_on_an_enemy_sends_it_home() {
     assert_eq!(v(&b, "sq2"), 10.0, "the two are on the same square");
 
     b.tally.values.insert("rolled".into(), 1.0);
+    b.clock = 99.0;
     b.tally.values.insert("die".into(), 3.0);
     b.tally.values.insert("turn".into(), 0.0);
     b.play_tap(1);
@@ -142,6 +225,7 @@ fn landing_on_your_own_token_is_safe() {
     b.tally.values.insert("at0".into(), 7.0);
     b.tally.values.insert("at1".into(), 10.0);
     b.tally.values.insert("rolled".into(), 1.0);
+    b.clock = 99.0;
     b.tally.values.insert("die".into(), 3.0);
     b.play_tap(1);
     assert_eq!(v(&b, "at1"), 10.0, "a team-mate stays put");
@@ -153,11 +237,13 @@ fn a_token_needs_the_exact_count_to_finish() {
     let mut b = game();
     b.tally.values.insert("at0".into(), 55.0);
     b.tally.values.insert("rolled".into(), 1.0);
+    b.clock = 99.0;
     b.tally.values.insert("die".into(), 4.0);
     b.play_tap(1);
     assert_eq!(v(&b, "at0"), 55.0, "four would overshoot, so it may not move");
 
     b.tally.values.insert("rolled".into(), 1.0);
+    b.clock = 99.0;
     b.tally.values.insert("die".into(), 2.0);
     b.play_tap(1);
     assert_eq!(v(&b, "at0"), 57.0, "two is exact, so it goes home");

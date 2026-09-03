@@ -325,17 +325,29 @@ fn ludo() -> Board {
 /// 56, which is a game you can read. The repeat that would make four each
 /// bearable is the next thing the language wants, and this is the reason.
 ///
-/// ## The die is real
+/// ## The die is thrown, and it settles
 ///
 /// ```text
-///     die = 1 + floor(6*abs(sin(seed + 97*rolls)))
+///     slow    = exp(-age/relax)        1 at the throw, nothing when it is over
+///     tumbles = spin*(1 - slow)        faces turned through: the RATE decays
+///     slid    = 5.5*(1 - slow)         and it slides, and folds off the walls
 /// ```
 ///
-/// No random number generator anywhere. `sin` of a large multiple of a whole
-/// number wanders across its range without settling into a pattern anybody
-/// spots, and `seed` is a number you are not looking at. So it is unpredictable
-/// in play and **exactly repeatable** from its seed — which is what lets a
-/// match be replayed, and what makes "he cheated" answerable.
+/// One number does all three — `e^{-t/τ}`, the same decay as a branch settling
+/// after a gust or a note dying away. It whirls, eases and stops; it does not
+/// run at one speed and then halt.
+///
+/// **Nothing is stepped frame by frame.** `flung` is *when* it was thrown, so
+/// everything above is a function of the clock — which means the throw can be
+/// replayed, scrubbed, or watched at half speed, and looks the same every time.
+///
+/// The face it lands on is `spin`, worked out from the seed and the roll
+/// number rather than drawn from anywhere. No random number generator: it is
+/// unpredictable in play and **exactly repeatable** from its seed, which is
+/// what lets a match be replayed and makes "he cheated" answerable.
+///
+/// A move is refused until the die has stopped — four time constants, which is
+/// the usual answer to *when has an exponential finished*.
 ///
 /// ## Squares, not steps
 ///
@@ -368,8 +380,10 @@ fn ludogame() -> Board {
     add!("# --- the state -------------------------------------------------");
     add!("seed = 137");
     add!("rolls = 0");
-    add!("die = 0");
     add!("rolled = 0");
+    add!("# when the die was last thrown. the whole throw is a function of the");
+    add!("# clock and this one number, so nothing is stepped frame by frame.");
+    add!("flung = -99");
     add!("turn = 0");
     for k in 0..tokens {
         rows.push(format!("seat{k} = {}", seat_of(k)));
@@ -384,21 +398,56 @@ fn ludogame() -> Board {
         ));
     }
     add!("");
+    add!("# --- the die, thrown -------------------------------------------");
+    add!("#");
+    add!("# A die is flung, tumbles fast, slows, and settles. All three are one");
+    add!("# number: exp(-age/relax), which is 1 at the throw and nothing when it");
+    add!("# is over -- the same e^(-t/tau) as a branch settling after a gust or a");
+    add!("# note dying away. Laplace, doing the only thing it ever does.");
+    add!("relax = 0.42");
+    add!("age = max(0, time - flung)");
+    add!("slow = exp(-0 - age/relax)");
+    add!("");
+    add!("# how hard it was thrown. different every roll, and worked out rather");
+    add!("# than drawn from anywhere, so the same match replays exactly.");
+    add!("spin = 11 + mod(floor(seed + 29*rolls), 13)");
+    add!("");
+    add!("# faces turned through so far. the RATE decays, so it whirls, eases");
+    add!("# and stops -- it does not run at one speed and then halt.");
+    add!("tumbles = spin*(1 - slow)");
+    add!("");
+    add!("# four time constants is 98 percent of the way there, which is the");
+    add!("# usual answer to `when has an exponential finished`.");
+    add!("settled = age > 4*relax");
+    add!("die = if(settled, 1 + mod(floor(spin), 6), 1 + mod(floor(tumbles), 6))");
+    add!("");
+    add!("# and it slides, and bounces off the walls of its box. a reflection is");
+    add!("# a triangle wave: go a distance, fold it back at each edge.");
+    add!("box = 1.15");
+    add!("slid = 5.5*(1 - slow)");
+    add!("dx = box - abs(mod(slid, 2*box) - box)");
+    add!("dy = 0.55*box - abs(mod(1.7*slid, 1.1*box) - 0.55*box)");
+    add!("");
     add!("# --- what you can see ------------------------------------------");
     add!("color(0xE3E9EF)");
-    add!("digits(die, 8.6, 4.2, 0.9)");
-    add!("# whose turn it is, in that seat's colour");
-    add!("color(0x6B7987)");
-    add!("digits(turn + 1, 8.6, 1.6, 0.5)");
+    add!("digits(die, 8.6 - box + dx, 4.2 - 0.3 + dy, 0.9)");
+    add!("");
+    add!("# whose turn it is, in that seat's own colour, beside the die.");
+    add!("color(pick(turn, 0xE0704A, 0x6FCF97, 0x4FBCD4, 0xE0A44A))");
+    add!("param(0.62*exp(i*t) + 8.6 + 1.5i, 0, tau)");
+    add!("digits(turn + 1, 8.6, 1.5, 0.42)");
+    add!("");
+    add!("# a ring round the die while it is still going, so it is plain that");
+    add!("# the number is not yet the number.");
     add!("color(0x46525E)");
-    add!("param(0.55*exp(i*t) + 8.6 + 4.2i, 0, tau)");
+    add!("param(if(settled, 0, 1.5)*exp(i*t) + 8.6 + 4.2i, 0, tau)");
 
     add!("");
-    add!("# --- the die ----------------------------------------------------");
-    add!("# a six rolls again, so the turn does not pass. three sixes would");
-    add!("# forfeit in a real game; that wants a counter and is left out.");
+    add!("# --- throwing it ------------------------------------------------");
+    add!("# `flung` is WHEN, so everything above is a function of the clock and");
+    add!("# nothing has to be stepped frame by frame.");
     add!("when tap 9: rolls = rolls + if(rolled == 1, 0, 1), \
-         die = if(rolled == 1, die, 1 + floor(6*abs(sin(seed + 97*(rolls + 1))))), \
+         flung = if(rolled == 1, flung, time), \
          rolled = 1");
 
     add!("");
@@ -408,7 +457,7 @@ fn ludogame() -> Board {
         // May this token move at all? Its seat's turn, a die rolled, and
         // either it is out or the die is a six.
         deeds.push(format!(
-            "ok = and(and(seat{k} == turn, rolled == 1), if(at{k} < 0, die == 6, at{k} + die <= 57))"
+            "ok = and(and(and(seat{k} == turn, rolled == 1), settled), if(at{k} < 0, die == 6, at{k} + die <= 57))"
         ));
         // Out of the yard on a six goes to the start; otherwise walk on.
         deeds.push(format!("was = at{k}"));
