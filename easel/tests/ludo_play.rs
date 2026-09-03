@@ -482,3 +482,75 @@ fn there_are_four_tokens_a_seat() {
         assert_eq!(mine, 4, "seat {seat}");
     }
 }
+
+/// ★ **You have to be able to hit the die.** Every other test in this file
+/// calls `play_tap(17)`, which is the rule firing — it says nothing at all
+/// about whether a tap where the die is drawn ever *reaches* that rule. It did
+/// not: the die was an open stroke, so its middle was a hole and only the
+/// 0.08-wide outline was live. Seventeen passing tests and an unrollable die.
+#[test]
+fn tapping_the_die_rolls_it() {
+    let mut b = game();
+    assert_eq!(v(&b, "rolled"), 0.0, "nothing thrown yet");
+    // Straight at the middle of the box, where anybody would aim.
+    b.pointer(plotkit::Cx::new(8.6, 4.2), true);
+    b.pointer(plotkit::Cx::new(8.6, 4.2), false);
+    assert_eq!(v(&b, "rolled"), 1.0, "the die was thrown");
+}
+
+/// And so do the tokens, which is the same question asked of the thing that
+/// already worked — so a regression in either shows up here.
+#[test]
+fn tapping_a_token_moves_it() {
+    let mut b = game();
+    b.tally.values.insert("turn".into(), 0.0);
+    b.tally.values.insert("rolled".into(), 1.0);
+    b.tally.values.insert("die".into(), 6.0);
+    let at = plotkit::ludo::waiting(0, 0);
+    b.pointer(at, true);
+    b.pointer(at, false);
+    assert_eq!(v(&b, "at0"), 0.0, "out of the yard on a six");
+}
+
+/// ★ **The web presses Play, and Play is not Watch.** `playing_game` and
+/// `watching` are two flags, and the browser only ever sets the first — so this
+/// is the state a person actually clicks in. If a tap does not reach the rules
+/// here, the game is unplayable in the browser however well it plays in a test.
+#[test]
+fn a_tap_rolls_the_die_with_only_play_pressed() {
+    let mut b = Board::new();
+    b.load("../samples/ludogame.easel").expect("the game opens");
+    b.play(true);
+    b.playing_game = true; // exactly what the server does for `Play { on: true }`
+    b.pointer(plotkit::Cx::new(8.6, 4.2), true);
+    b.pointer(plotkit::Cx::new(8.6, 4.2), false);
+    assert_eq!(v(&b, "rolled"), 1.0, "the die was thrown");
+}
+
+/// ★ **A tap does nothing until Play is pressed**, and that is deliberate —
+/// while you are editing, a click chooses a mark. Worth a test because "I
+/// clicked the die and nothing happened" has exactly one other explanation,
+/// and this rules it out.
+#[test]
+fn a_tap_does_nothing_while_still_editing() {
+    let mut b = Board::new();
+    b.load("../samples/ludogame.easel").expect("the game opens");
+    b.pointer(plotkit::Cx::new(8.6, 4.2), true);
+    b.pointer(plotkit::Cx::new(8.6, 4.2), false);
+    assert_eq!(v(&b, "rolled"), 0.0, "no rule fired");
+    assert!(b.any_chosen(), "it was chosen instead, which is what editing means");
+}
+
+/// ★ **`ludo.easel` is a drawing; `ludogame.easel` is the game.** They are one
+/// letter apart in a file list and only one of them has anything to tap — which
+/// is a fine way to spend ten minutes clicking a die that is not there.
+#[test]
+fn the_board_and_the_game_are_different_files() {
+    let mut drawing = Board::new();
+    drawing.load("../samples/ludo.easel").expect("the board opens");
+    assert_eq!(drawing.sheet.len(), 0, "the board has nothing tappable in it");
+
+    let mut game = Board::new();
+    game.load("../samples/ludogame.easel").expect("the game opens");
+    assert_eq!(game.sheet.len(), 17, "the game has sixteen tokens and a die");
+}
