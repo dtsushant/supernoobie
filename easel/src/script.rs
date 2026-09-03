@@ -247,7 +247,7 @@ impl Script {
             }
             let t = r.text.trim();
             let Some((word, args)) =
-                FACES.iter().chain(["digits"].iter()).find_map(|w| {
+                FACES.iter().chain(OURS.iter()).chain(["digits"].iter()).find_map(|w| {
                     t.strip_prefix(&format!("{w}(")).and_then(|a| a.strip_suffix(')')).map(|a| (*w, a))
                 })
             else {
@@ -261,6 +261,27 @@ impl Script {
                     .map_or(fallback, |z| z.re)
             };
             match word {
+                // The whole board, from `shapes::ludo`. It brings its own
+                // colours, since a Ludo board without its four is not a Ludo
+                // board.
+                "ludo" => out.extend(shapes::ludo::board()),
+                // A token. **A negative step means still in the yard** --
+                // `-1` to `-4` are the four waiting places -- which saves a
+                // fourth argument for something every token needs to say
+                // anyway, and reads as "not yet on the board".
+                "token" => {
+                    let seat = number(0.0).round().rem_euclid(4.0) as usize;
+                    let step = number(0.0).round();
+                    let size = number(0.34).abs().min(2.0);
+                    let at = if step < 0.0 {
+                        shapes::ludo::waiting(seat, (-step - 1.0).max(0.0) as usize)
+                    } else {
+                        shapes::ludo::place(seat, (step as usize).min(shapes::ludo::FINISH))
+                    };
+                    if size > 0.01 {
+                        out.push((Shape::circle(at, size), shapes::ludo::SEATS[seat]));
+                    }
+                }
                 "digits" => {
                     let value = number(0.0);
                     let (x, y, size) = (number(0.0), number(0.0), number(1.0));
@@ -374,10 +395,15 @@ fn split_args(args: &str) -> Vec<String> {
 /// `plotkit::expr` has never heard of.
 pub const FACES: [&str; 2] = ["smiley", "ghost"];
 
+/// The rows this crate reads itself, beyond the faces and `digits`.
+pub const OURS: [&str; 2] = ["ludo", "token"];
+
 /// Is this row one this crate handles rather than `plotkit::expr`?
 fn mine(text: &str) -> bool {
     let t = text.trim();
-    rule::is_rule(t) || t.starts_with("digits(") || FACES.iter().any(|w| t.starts_with(&format!("{w}(")))
+    rule::is_rule(t)
+        || t.starts_with("digits(")
+        || FACES.iter().chain(OURS.iter()).any(|w| t.starts_with(&format!("{w}(")))
 }
 
 /// A whole number written out, about a point.
@@ -802,6 +828,60 @@ circle(0, r)
             pts.iter().fold(0.0, |a: f64, z| a + z.abs())
         };
         assert!((ink("smiley") - ink("ghost")).abs() > 1e-6);
+    }
+
+    /// ★ The board and its tokens can be asked for from a row, so a game is
+    /// a drawing like any other.
+    #[test]
+    fn a_ludo_board_can_be_asked_for() {
+        let mut s = Script::new();
+        s.add("ludo()");
+        let made = s.run(0.0);
+        assert!(made.errors.is_empty(), "{:?}", made.errors);
+        assert_eq!(made.shapes.len(), shapes::ludo::board().len());
+    }
+
+    /// ★ A **negative** step means still in the yard -- `-1` to `-4` are the
+    /// four waiting places. It saves a fourth argument for something every
+    /// token has to say anyway, and reads as "not yet on the board".
+    #[test]
+    fn a_negative_step_is_a_token_still_waiting() {
+        let where_is = |src: &str| {
+            let mut s = Script::new();
+            s.add(src);
+            let made = s.run(0.0);
+            assert!(made.errors.is_empty(), "{src}: {:?}", made.errors);
+            let (lo, hi) = (Cx::new(-9.0, -9.0), Cx::new(9.0, 9.0));
+            let pts: Vec<Cx> = made.shapes[0].0.polylines(lo, hi, 400).into_iter().flatten().collect();
+            let sum = pts.iter().fold(Cx::ZERO, |a, z| a + *z);
+            sum.scale(1.0 / pts.len() as f64)
+        };
+        // Four waiting places, four different spots.
+        let mut seen: Vec<Cx> = Vec::new();
+        for k in 1..=4 {
+            let at = where_is(&format!("token(0, -{k}, 0.3)"));
+            assert!(seen.iter().all(|z| (*z - at).abs() > 0.5), "yard spot {k} is on top of another");
+            seen.push(at);
+        }
+        // And a step of nought is on the board, not in the yard.
+        let out = where_is("token(0, 0, 0.3)");
+        assert!(seen.iter().all(|z| (*z - out).abs() > 0.5));
+        assert!((out - shapes::ludo::place(0, 0)).abs() < 0.2);
+    }
+
+    /// A token walks: step 0 and step 20 are different places, and each seat
+    /// walks its own way.
+    #[test]
+    fn a_token_walks_where_the_board_says() {
+        for seat in 0..4 {
+            let mut s = Script::new();
+            s.add(&format!("token({seat}, 20, 0.3)"));
+            let made = s.run(0.0);
+            let (lo, hi) = (Cx::new(-9.0, -9.0), Cx::new(9.0, 9.0));
+            let pts: Vec<Cx> = made.shapes[0].0.polylines(lo, hi, 400).into_iter().flatten().collect();
+            let sum = pts.iter().fold(Cx::ZERO, |a, z| a + *z).scale(1.0 / pts.len() as f64);
+            assert!((sum - shapes::ludo::place(seat, 20)).abs() < 0.2, "seat {seat}");
+        }
     }
 
     /// Colours cycle so a script of bare shapes is still readable, and

@@ -1,0 +1,20 @@
+easel 1
+row on # THE BOARD. press play and watch the four paths.
+row on ludo()
+row on 
+row on # how fast the tokens walk. drag it.
+row on pace = 3
+row on 
+row on # each seat walks its own way round, from its own start.
+row on # mod keeps them on the board when they run past the end.
+row on token(0, mod(floor(time*pace), 58), 0.34)
+row on token(1, mod(floor(time*pace*0.8), 58), 0.34)
+row on token(2, mod(floor(time*pace*0.6), 58), 0.34)
+row on token(3, mod(floor(time*pace*0.4), 58), 0.34)
+row on 
+row on # and one of each still waiting. a NEGATIVE step is the yard:
+row on # -1 to -4 are the four places a token waits in.
+row on token(0, -1, 0.26)
+row on token(1, -2, 0.26)
+row on token(2, -3, 0.26)
+row on token(3, -4, 0.26)

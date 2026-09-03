@@ -356,4 +356,18 @@ window.onresize = () => {
   paint();
   refresh();
 };
-refresh();
+
+// What to open, and whether to open it playing. From the address, so a link is
+// the whole of it -- no session to keep, and a page you can bookmark.
+const wanted = new URLSearchParams(location.search);
+const file = wanted.get('file');
+document.getElementById('shown-file').textContent = file || 'drawing.easel';
+
+(async () => {
+  if (file) await ask({ do: 'OpenFile', name: file });
+  else await refresh();
+  if (wanted.get('play')) {
+    document.getElementById('app').classList.add('full');
+    await ask({ do: 'Play', on: true });
+  }
+})();

@@ -142,3 +142,52 @@ input[type=color] {
 
 #paper { flex: 1 1 auto; display: block; width: 100%; touch-action: none; cursor: crosshair; }
 #hint { padding: 6px 10px; color: #46525e; font-size: 11px; border-top: 1px solid var(--edge); }
+
+/* ---- which drawing this is --------------------------------------------- */
+
+#which {
+  border-bottom: 1px solid var(--edge);
+  gap: 8px;
+  color: var(--ink);
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 13px;
+}
+#which a { color: var(--soft); text-decoration: none; font-size: 18px; }
+#which a:hover { color: var(--ink); }
+#shown-file { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+a.asbutton {
+  background: var(--edge); color: var(--soft); border-radius: 5px;
+  padding: 9px 12px; min-height: 38px; text-decoration: none;
+  display: inline-flex; align-items: center;
+}
+a.asbutton:hover { background: var(--lit); color: var(--ink); }
+
+/* ---- the front page ----------------------------------------------------- */
+
+#home { max-width: 860px; margin: 0 auto; padding: 48px 24px 80px; overflow-y: auto; height: 100vh; }
+#home h1 { font-size: 28px; font-weight: 500; margin: 0 0 6px; }
+#home .lead { color: var(--soft); margin: 0 0 36px; max-width: 60ch; }
+#home h2 {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .1em;
+  color: var(--faint); font-weight: 500; margin: 28px 0 10px;
+}
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.card {
+  background: var(--panel); border: 1px solid var(--edge); border-radius: 8px;
+  padding: 14px 16px; display: flex; flex-direction: column; gap: 4px;
+}
+.card.new { text-decoration: none; color: inherit; }
+.card.new:hover { border-color: var(--lit); }
+.card .what { font-size: 15px; }
+.card .why { color: var(--faint); font-size: 12px; min-height: 2.4em; }
+.card .go { display: flex; gap: 8px; margin-top: 6px; }
+.card .go a {
+  background: var(--edge); color: var(--soft); border-radius: 5px;
+  padding: 7px 14px; text-decoration: none; font-size: 13px;
+}
+.card .go a:hover { background: var(--lit); color: #fff; }
+#home footer { margin-top: 48px; color: var(--faint); font-size: 12px; max-width: 70ch; }
+#home code { color: var(--soft); }
+.none { color: var(--faint); }

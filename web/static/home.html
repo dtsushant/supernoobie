@@ -1,0 +1,76 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>studio</title>
+<link rel="stylesheet" href="/app.css">
+
+<div id="home">
+  <h1>studio</h1>
+  <p class="lead">
+    Drawings made of strokes and of arithmetic, in the same file.
+    <b>Edit</b> opens the tools; <b>play</b> opens only the drawing.
+  </p>
+
+  <section>
+    <h2>start something</h2>
+    <div class="cards">
+      <a class="card new" href="/studio?file=drawing.easel">
+        <span class="what">a blank page</span>
+        <span class="why">draw with the pen, or write a function</span>
+        <span class="go">edit &rarr;</span>
+      </a>
+    </div>
+  </section>
+
+  <section>
+    <h2>open one</h2>
+    <div class="cards" id="list">loading…</div>
+  </section>
+
+  <footer>
+    <p>
+      The file named is the one <code>save</code> writes to. There is no
+      &ldquo;save as&rdquo;: one page, one file.
+      A <code>.rec</code> is <em>imported</em> — its rows come in and saving
+      goes to a <code>.easel</code> beside it, so a script you are borrowing
+      from is never overwritten.
+    </p>
+  </footer>
+</div>
+
+<script>
+// What each sample is, so the list is not four identical rectangles.
+const ABOUT = {
+  'samples/ludo.easel': ['the ludo board', 'press play and watch the four paths'],
+  'samples/adding.easel': ['an adding game', 'tap the box with the right answer'],
+  'samples/dials.easel': ['sliders', 'move r or n and everything follows'],
+  'samples/bouncing.easel': ['keyframes', 'a ball with its timing said, not computed'],
+  'samples/walker.easel': ['verbs and groups', 'six strokes told to walk as one'],
+};
+
+fetch('/list').then(r => r.json()).then(files => {
+  const list = document.getElementById('list');
+  list.textContent = '';
+  if (!files.length) {
+    list.innerHTML = '<p class="none">nothing in <code>samples/</code> yet — run '
+      + '<code>cargo run -p studio --bin sample</code></p>';
+    return;
+  }
+  for (const f of files) {
+    const [what, why] = ABOUT[f] || [f.replace(/^.*\//, '').replace(/\.easel$/, ''), f];
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `<span class="what">${what}</span><span class="why">${why}</span>`;
+    const go = document.createElement('span');
+    go.className = 'go';
+    const edit = document.createElement('a');
+    edit.href = `/studio?file=${encodeURIComponent(f)}`;
+    edit.textContent = 'edit';
+    const play = document.createElement('a');
+    play.href = `/studio?file=${encodeURIComponent(f)}&play=1`;
+    play.textContent = 'play';
+    go.append(edit, play);
+    card.append(go);
+    list.append(card);
+  }
+});
+</script>

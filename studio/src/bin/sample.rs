@@ -38,6 +38,7 @@ fn main() {
         ("bouncing", bouncing as fn() -> Board),
         ("walker", walker as fn() -> Board),
         ("adding", adding as fn() -> Board),
+        ("ludo", ludo as fn() -> Board),
     ] {
         let path = dir.join(format!("{name}.easel"));
         let board = build();
@@ -267,6 +268,46 @@ fn adding() -> Board {
         "when tap 1: score = score - 1, boo = time, cheer = -9",
         "when tap 2: score = score + 1, cheer = time, boo = -9",
         "when tap 3: score = score - 1, boo = time, cheer = -9",
+    ];
+    for r in rows {
+        b.sheet.script.add(r);
+    }
+    b
+}
+
+/// **A board.** Not a game yet — the geometry, with tokens that walk when you
+/// press play, so the path each seat takes can be watched rather than trusted.
+///
+/// Everything moving here is `time` and arithmetic. `mod` keeps a token on the
+/// board when it runs past the end, and the four seats walk at different rates
+/// so they separate instead of moving as one.
+///
+/// What is missing is the rules, and they are missing for a reason: a rule can
+/// change a number but cannot yet say "send home whichever token is on this
+/// square". That wants writing to a computed name, which is the next thing the
+/// language grows.
+fn ludo() -> Board {
+    let mut b = Board::new();
+    let rows = [
+        "# THE BOARD. press play and watch the four paths.",
+        "ludo()",
+        "",
+        "# how fast the tokens walk. drag it.",
+        "pace = 3",
+        "",
+        "# each seat walks its own way round, from its own start.",
+        "# mod keeps them on the board when they run past the end.",
+        "token(0, mod(floor(time*pace), 58), 0.34)",
+        "token(1, mod(floor(time*pace*0.8), 58), 0.34)",
+        "token(2, mod(floor(time*pace*0.6), 58), 0.34)",
+        "token(3, mod(floor(time*pace*0.4), 58), 0.34)",
+        "",
+        "# and one of each still waiting. a NEGATIVE step is the yard:",
+        "# -1 to -4 are the four places a token waits in.",
+        "token(0, -1, 0.26)",
+        "token(1, -2, 0.26)",
+        "token(2, -3, 0.26)",
+        "token(3, -4, 0.26)",
     ];
     for r in rows {
         b.sheet.script.add(r);
