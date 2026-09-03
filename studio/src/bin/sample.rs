@@ -349,6 +349,44 @@ fn ludo() -> Board {
 /// A move is refused until the die has stopped — four time constants, which is
 /// the usual answer to *when has an exponential finished*.
 ///
+/// ## Whether a token may move is named once
+///
+/// `can0 … can7`, and three things read it: the move itself, the ring round
+/// the tokens you may tap, and the rule that notices you may tap **none** of
+/// them. Three copies of one rule is three chances for them to disagree.
+///
+/// That last one matters more than it sounds. Roll a three with both tokens in
+/// the yard and nothing at all is legal — so the turn has to pass by itself,
+/// or the game simply stops. It did.
+///
+/// ## Safe squares in one `mod`
+///
+/// The four starts are at 0, 13, 26 and 39, and the four starred squares eight
+/// further on. So "safe" is `here` being a multiple of thirteen, or eight past
+/// one — the whole rule in one expression rather than a list of eight numbers
+/// to mistype.
+///
+/// ## A house rule is a dial
+///
+/// No two tables play Ludo the same way, and the differences are all *numbers*:
+/// what opens the gate, whether you must cut before coming home, what earns
+/// another turn, whether two together block a square. So they are numbers —
+/// plain bindings at the top of the file:
+///
+/// ```text
+///     opens = 6     alsoone = 0     mustcut = 0     blockade = 1
+///     again6 = 1    againcut = 0    againhome = 0   stars = 1
+/// ```
+///
+/// A plain number gets a slider, so these are set before the game starts by
+/// dragging them; and they are saved in the file, so **two tables differ by a
+/// file** rather than by a build. The rules already written just read them —
+/// `if(at < 0, or(die == opens, and(alsoone == 1, die == 1)), …)` is the same
+/// line it always was with a name where the six used to be.
+///
+/// This is why the settings needed no new machinery. Once behaviour is rows,
+/// configuring behaviour is editing rows, which the file format already does.
+///
 /// ## Squares, not steps
 ///
 /// Two seats at the same *step* are on different *squares*: they start a
@@ -377,6 +415,25 @@ fn ludogame() -> Board {
     add!("# LUDO, four players, one screen. tap the DIE, then tap a token.");
     add!("ludo()");
     add!("");
+    add!("# --- HOUSE RULES ------------------------------------------------");
+    add!("# Set these before you start. Each is a plain number, so each gets a");
+    add!("# slider -- a house rule is a dial, and two tables differ by a file.");
+    add!("#");
+    add!("# what brings a token out of the yard");
+    add!("opens = 6");
+    add!("# ...and whether a one does as well");
+    add!("alsoone = 0");
+    add!("# must a seat have cut somebody before it may go home?");
+    add!("mustcut = 0");
+    add!("# what earns another turn: a six, a capture, getting one home");
+    add!("again6 = 1");
+    add!("againcut = 0");
+    add!("againhome = 0");
+    add!("# may you land on a square where two of one seat already stand?");
+    add!("blockade = 1");
+    add!("# show the eight safe squares");
+    add!("stars = 1");
+    add!("");
     add!("# --- the state -------------------------------------------------");
     add!("seed = 137");
     add!("rolls = 0");
@@ -388,6 +445,9 @@ fn ludogame() -> Board {
     for k in 0..tokens {
         rows.push(format!("seat{k} = {}", seat_of(k)));
         rows.push(format!("at{k} = -{}", k % 2 + 1));
+    }
+    for seat in 0..4 {
+        rows.push(format!("cuts{seat} = 0"));
     }
     add!("");
     add!("# where each token counts as standing. the yard and the home column");
@@ -451,16 +511,85 @@ fn ludogame() -> Board {
          rolled = 1");
 
     add!("");
+    add!("# how many of ONE seat stand on each square a token might land on.");
+    add!("# A blockade is two of a colour together; you may not land there.");
+    add!("");
+    add!("# --- may it move? ----------------------------------------------");
+    add!("# Named once and used three times: to allow the move, to ring the");
+    add!("# tokens you may tap, and to notice that you may tap none of them.");
+    add!("# Three copies of a rule is three chances for them to disagree.");
+    for k in 0..tokens {
+        // Out of the yard on whatever the house says opens it; and into the
+        // home column only if the house does not ask for a cut first.
+        let lands = format!("at{k} + die");
+        let blocked = (0..tokens)
+            .step_by(2)
+            .map(|j| {
+                format!(
+                    "and(and(seat{j} != seat{k}, at{j} >= 0), and(at{j} == at{jj}, \
+                     mod(13*seat{j} + at{j}, 52) == mod(13*seat{k} + {lands}, 52)))",
+                    jj = j + 1
+                )
+            })
+            .fold(String::from("0"), |acc, t| format!("or({acc}, {t})"));
+        rows.push(format!(
+            "onto{k} = if(blockade == 0, 0, {blocked})"
+        ));
+        rows.push(format!(
+            "can{k} = and(and(and(seat{k} == turn, rolled == 1), settled), \
+             if(at{k} < 0, or(die == opens, and(alsoone == 1, die == 1)), \
+             and(and({lands} <= 57, not(onto{k})), \
+             or(or(mustcut == 0, cuts[seat{k}] > 0), {lands} <= 50))))"
+        ));
+    }
+    rows.push(format!(
+        "anycan = {}",
+        (0..tokens).map(|k| format!("can{k}")).fold(String::new(), |acc, t| if acc.is_empty() {
+            t
+        } else {
+            format!("or({acc}, {t})")
+        })
+    ));
+    add!("");
+    add!("# a ring round each token you may move. drawn at no size when you may");
+    add!("# not, which is how a thing is hidden here.");
+    add!("color(0xE3E9EF)");
+    for k in 0..tokens {
+        rows.push(format!(
+            "param(if(can{k}, 0.52, 0)*exp(i*t) + ludox(seat{k}, at{k}) + i*ludoy(seat{k}, at{k}), 0, tau)"
+        ));
+    }
+
+    add!("");
+    add!("# --- a turn nobody can play -------------------------------------");
+    add!("# Roll a three with both tokens in the yard and nothing is legal. The");
+    add!("# turn has to pass by itself, or the game simply stops -- which it did.");
+    add!("when and(and(rolled == 1, settled), not(anycan)): \
+         turn = mod(turn + 1, 4), rolled = 0, passed = passed + 1");
+    add!("passed = 0");
+
+    add!("");
+    add!("# --- three sixes forfeit ----------------------------------------");
+    add!("# The face is not known until the die stops, so this waits for that");
+    add!("# rather than firing when it is thrown.");
+    add!("sixes = 0");
+    add!("when and(rolled == 1, settled): sixes = if(die == 6, sixes + 1, 0)");
+    add!("when sixes > 2: turn = mod(turn + 1, 4), rolled = 0, sixes = 0");
+
+    add!("");
     add!("# --- moving a token ---------------------------------------------");
     for k in 0..tokens {
         let mut deeds: Vec<String> = Vec::new();
         // May this token move at all? Its seat's turn, a die rolled, and
         // either it is out or the die is a six.
-        deeds.push(format!(
-            "ok = and(and(and(seat{k} == turn, rolled == 1), settled), if(at{k} < 0, die == 6, at{k} + die <= 57))"
-        ));
+        deeds.push(format!("ok = can{k}"));
         // Out of the yard on a six goes to the start; otherwise walk on.
         deeds.push(format!("was = at{k}"));
+        for j in 0..tokens {
+            if j != k {
+                deeds.push(format!("was{j} = at{j}"));
+            }
+        }
         deeds.push(format!("at[{k}] = if(ok, if(at{k} < 0, 0, at{k} + die), at{k})"));
         deeds.push(format!(
             "here = if(ok, if(was < 0, mod(13*seat{k}, 52), \
@@ -470,15 +599,56 @@ fn ludogame() -> Board {
             if j == k {
                 continue;
             }
+            // Not on a safe square. The four starts are at 0, 13, 26 and 39 and
+            // the four starred ones eight further on -- so "safe" is `here`
+            // being a multiple of thirteen, or eight past one. The whole rule
+            // in one `mod`, rather than a list of eight numbers to mistype.
             deeds.push(format!(
-                "at[{j}] = if(and(and(seat{j} != seat{k}, sq{j} == here), and(here >= 0, here < 52)), -{}, at{j})",
+                "at[{j}] = if(and(and(and(seat{j} != seat{k}, sq{j} == here), and(here >= 0, here < 52)), \
+                 not(or(mod(here, 13) == 0, mod(here, 13) == 8))), -{}, at{j})",
                 j % 2 + 1
             ));
         }
-        // The turn passes unless it was a six, and the die must be rolled again.
-        deeds.push("turn = if(ok, if(die == 6, turn, mod(turn + 1, 4)), turn)".into());
+        // Did this move cut anybody? Counted, because a house rule may ask
+        // for a cut before a seat is allowed home.
+        let cut = (0..tokens)
+            .filter(|j| *j != k)
+            .map(|j| format!("and(at{j} < 0, was{j} >= 0)"))
+            .fold(String::from("0"), |acc, t| format!("or({acc}, {t})"));
+        deeds.push(format!("cut = if(ok, {cut}, 0)"));
+        deeds.push(format!("cuts[seat{k}] = cuts[seat{k}] + cut"));
+        // Another turn, on whatever the house says earns one.
+        deeds.push(format!(
+            "turn = if(ok, if(or(or(and(again6 == 1, die == 6), and(againcut == 1, cut)), \
+             and(againhome == 1, at[{k}] == 57)), turn, mod(turn + 1, 4)), turn)"
+        ));
         deeds.push("rolled = if(ok, 0, rolled)".into());
         rows.push(format!("when tap {}: {}", k + 1, deeds.join(", \\\n         ")));
+    }
+
+    add!("");
+    add!("# --- the safe stars ---------------------------------------------");
+    add!("# Drawn at no size when the house does not use them, which is how a");
+    add!("# thing is hidden here.");
+    add!("color(0x6B7987)");
+    for k in (0..52).step_by(13) {
+        for off in [0usize, 8] {
+            rows.push(format!(
+                "param(if(stars == 1, 0.3, 0)*exp(i*t) + ludox(0, {}) + i*ludoy(0, {}), 0, tau)",
+                k + off,
+                k + off
+            ));
+        }
+    }
+
+    add!("");
+    add!("# --- how many are in --------------------------------------------");
+    for seat in 0..4 {
+        let mine: Vec<String> =
+            (0..tokens).filter(|k| seat_of(*k) == seat).map(|k| format!("(at{k} == 57)")).collect();
+        rows.push(format!("home{seat} = {}", mine.join(" + ")));
+        rows.push(format!("color({})", ["0xE0704A", "0x6FCF97", "0x4FBCD4", "0xE0A44A"][seat]));
+        rows.push(format!("digits(home{seat}, -8.4, {}, 0.4)", 4.0 - seat as f64 * 1.1));
     }
 
     add!("");

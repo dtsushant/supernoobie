@@ -114,9 +114,13 @@ fn the_die_rolls_one_to_six_and_varies() {
 }
 
 /// ★ And rolling twice in one turn changes nothing — you get one roll.
+///
+/// A token has to be out first: with nothing legal the turn passes by itself,
+/// the die is cleared, and a second tap rightly *does* roll again.
 #[test]
 fn a_second_tap_on_the_die_does_not_roll_again() {
     let mut b = game();
+    b.tally.values.insert("at0".into(), 10.0);
     let first = roll(&mut b);
     for _ in 0..5 {
         assert_eq!(roll(&mut b), first, "the die is already rolled");
@@ -151,8 +155,10 @@ fn a_token_comes_out_only_on_a_six() {
     b.play_tap(1);
     assert!(v(&b, "at0") < 0.0, "three does not open the gate");
 
+    // Nothing was legal, so the turn passed by itself. Set it back: this test
+    // is about the gate, not about whose go it is.
+    b.tally.values.insert("turn".into(), 0.0);
     b.tally.values.insert("rolled".into(), 1.0);
-    b.clock = 99.0;
     b.tally.values.insert("die".into(), 6.0);
     b.play_tap(1);
     assert_eq!(v(&b, "at0"), 0.0, "six does");
@@ -190,6 +196,9 @@ fn you_cannot_move_on_somebody_elses_turn() {
     b.tally.values.insert("rolled".into(), 1.0);
     b.clock = 99.0;
     b.tally.values.insert("die".into(), 3.0);
+    // Seat 0 has a legal move, so the turn will not pass by itself and this
+    // test is about the tap alone.
+    b.tally.values.insert("at0".into(), 10.0);
     b.tally.values.insert("turn".into(), 0.0);
     b.play_tap(3); // seat 1's token, on seat 0's turn
     assert_eq!(v(&b, "at2"), 10.0, "it must not move");
@@ -242,11 +251,158 @@ fn a_token_needs_the_exact_count_to_finish() {
     b.play_tap(1);
     assert_eq!(v(&b, "at0"), 55.0, "four would overshoot, so it may not move");
 
+    // And with nothing legal the turn passed on its own, which is the point of
+    // that rule. Put it back to test the other half.
+    b.tally.values.insert("turn".into(), 0.0);
     b.tally.values.insert("rolled".into(), 1.0);
-    b.clock = 99.0;
     b.tally.values.insert("die".into(), 2.0);
     b.play_tap(1);
     assert_eq!(v(&b, "at0"), 57.0, "two is exact, so it goes home");
+}
+
+/// ★ **A turn nobody can play passes by itself.** Roll a three with both
+/// tokens in the yard and nothing at all is legal — before this the game
+/// simply stopped, which is the kind of bug that ends an evening rather than
+/// looking like a bug.
+#[test]
+fn a_turn_nobody_can_play_passes_by_itself() {
+    let mut b = game();
+    // Seat 0, both tokens in the yard, and a three.
+    b.tally.values.insert("turn".into(), 0.0);
+    b.tally.values.insert("rolled".into(), 1.0);
+    b.tally.values.insert("flung".into(), 0.0);
+    b.tally.values.insert("rolls".into(), 3.0);
+    b.clock = 99.0;
+    assert!(v(&b, "settled") > 0.5);
+    if v(&b, "die") == 6.0 {
+        // That seed happened to give a six, which IS playable. Nudge to a roll
+        // that is not, rather than asserting about the wrong thing.
+        b.tally.values.insert("rolls".into(), 4.0);
+    }
+    assert_ne!(v(&b, "die"), 6.0, "for this test the die must not open the gate");
+    assert_eq!(v(&b, "anycan"), 0.0, "nothing is legal");
+
+    b.settle();
+    assert_eq!(v(&b, "turn"), 1.0, "the turn passed on its own");
+    assert_eq!(v(&b, "rolled"), 0.0, "and the die must be thrown again");
+}
+
+/// ★ Whether a token may move is named **once**, and the ring you can see is
+/// the same test the move uses. Three copies of a rule is three chances for
+/// them to disagree.
+#[test]
+fn the_ring_you_can_see_is_the_rule_that_is_applied() {
+    let mut b = game();
+    b.tally.values.insert("turn".into(), 0.0);
+    b.tally.values.insert("rolled".into(), 1.0);
+    b.tally.values.insert("die".into(), 3.0);
+    b.tally.values.insert("at0".into(), 10.0);
+    b.clock = 99.0;
+
+    assert_eq!(v(&b, "can0"), 1.0, "out on the board with a three: it may move");
+    assert_eq!(v(&b, "can1"), 0.0, "in the yard without a six: it may not");
+    assert_eq!(v(&b, "can2"), 0.0, "and it is not seat 1's turn at all");
+
+    // And the move agrees with the ring.
+    b.play_tap(2);
+    assert!(v(&b, "at1") < 0.0, "the one with no ring did not move");
+    b.play_tap(1);
+    assert_eq!(v(&b, "at0"), 13.0, "the one with a ring did");
+}
+
+/// ★ A start square is safe: landing on one does not send anybody home. The
+/// four starts and the four starred squares are one `mod`, not a list of eight
+/// numbers to mistype.
+#[test]
+fn nobody_is_captured_on_a_safe_square() {
+    let mut b = game();
+    // Seat 1's token sits on square 13, which is seat 1's own start.
+    b.tally.values.insert("at2".into(), 0.0);
+    assert_eq!(v(&b, "sq2"), 13.0);
+
+    // Seat 0 lands there: step 13, from 10, with a three.
+    b.tally.values.insert("at0".into(), 10.0);
+    b.tally.values.insert("rolled".into(), 1.0);
+    b.tally.values.insert("die".into(), 3.0);
+    b.tally.values.insert("turn".into(), 0.0);
+    b.clock = 99.0;
+    b.play_tap(1);
+
+    assert_eq!(v(&b, "at0"), 13.0, "it moved onto the square");
+    assert_eq!(v(&b, "at2"), 0.0, "and the one standing there is safe");
+}
+
+/// But an ordinary square is not safe.
+#[test]
+fn an_ordinary_square_is_not_safe() {
+    let mut b = game();
+    b.tally.values.insert("at0".into(), 8.0);
+    b.tally.values.insert("at2".into(), 48.0); // 13 + 48 mod 52 = 9
+    assert_eq!(v(&b, "sq2"), 9.0);
+    assert_eq!(v(&b, "sq0"), 8.0);
+
+    b.tally.values.insert("rolled".into(), 1.0);
+    b.tally.values.insert("die".into(), 1.0);
+    b.tally.values.insert("turn".into(), 0.0);
+    b.clock = 99.0;
+    b.play_tap(1);
+    assert_eq!(v(&b, "at0"), 9.0);
+    assert!(v(&b, "at2") < 0.0, "square 9 is nobody's start, so it is fair game");
+}
+
+/// ★ Three sixes forfeit the turn. The face is not known until the die stops,
+/// so the counting waits for that rather than for the throw.
+#[test]
+fn three_sixes_give_the_turn_away() {
+    let mut b = game();
+    b.tally.values.insert("turn".into(), 0.0);
+    for n in 1..=3 {
+        // The count follows the EDGE of "rolled and settled", so the die has
+        // to be picked up between throws -- which a real move does.
+        b.tally.values.insert("rolled".into(), 0.0);
+        b.settle();
+        b.tally.values.insert("rolled".into(), 1.0);
+        b.tally.values.insert("die".into(), 6.0);
+        b.tally.values.insert("turn".into(), 0.0);
+        b.clock += 10.0;
+        b.settle();
+        if n < 3 {
+            assert_eq!(v(&b, "turn"), 0.0, "after {n} sixes the turn is still yours");
+        }
+    }
+    assert_eq!(v(&b, "turn"), 1.0, "three sixes and you lose it");
+    assert_eq!(v(&b, "sixes"), 0.0, "and the count starts again");
+}
+
+/// And a roll that is not a six clears the count.
+#[test]
+fn anything_but_a_six_clears_the_count() {
+    let mut b = game();
+    b.tally.values.insert("rolled".into(), 1.0);
+    b.tally.values.insert("die".into(), 6.0);
+    b.clock += 10.0;
+    b.settle();
+    assert_eq!(v(&b, "sixes"), 1.0);
+
+    b.tally.values.insert("rolled".into(), 0.0);
+    b.settle();
+    b.tally.values.insert("rolled".into(), 1.0);
+    b.tally.values.insert("die".into(), 2.0);
+    b.clock += 10.0;
+    b.settle();
+    assert_eq!(v(&b, "sixes"), 0.0);
+}
+
+/// How many of each seat's tokens are in, shown down the side.
+#[test]
+fn it_says_how_many_are_in() {
+    let mut b = game();
+    assert_eq!(v(&b, "home0"), 0.0);
+    b.tally.values.insert("at0".into(), 57.0);
+    assert_eq!(v(&b, "home0"), 1.0);
+    b.tally.values.insert("at1".into(), 57.0);
+    assert_eq!(v(&b, "home0"), 2.0);
+    assert_eq!(v(&b, "home1"), 0.0, "and only that seat's");
 }
 
 /// ★ Both tokens home wins, and the game says who.
