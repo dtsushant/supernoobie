@@ -20,6 +20,27 @@ fn ink(made: &easel::script::Made) -> usize {
     made.shapes.iter().map(|(s, _)| s.polylines(lo, hi, 900).iter().map(Vec::len).sum::<usize>()).sum()
 }
 
+/// ★ The cookbook's table of questions: an answer is a number, so it is
+/// arithmetic; equality is slack; comparison binds looser than `+`; and the
+/// deciding happens before the arguments are worked out.
+#[test]
+fn the_question_table_is_true() {
+    let val = |src: &str| {
+        let made = run(src);
+        assert!(made.errors.is_empty(), "{src}: {:?}", made.errors);
+        made.vars.iter().find(|(n, _)| n == "a").expect("a").1.re
+    };
+    assert_eq!(val("die = 6
+a = 5 + 10*(die == 6)"), 15.0);
+    assert_eq!(val("a = 0.1 + 0.2 == 0.3"), 1.0, "equality has a hair of slack");
+    assert_eq!(val("a = 1 + 2 == 3"), 1.0, "comparison binds looser than +");
+    assert_eq!(val("x = 0
+a = if(x == 0, 0, 1/x)"), 0.0, "if never divides by nothing");
+    assert_eq!(val("a = and(0, ln(0))"), 0.0, "and never takes the log of nothing");
+    assert_eq!(val("a = pick(0, 5, ln(0))"), 5.0, "pick works out only the one chosen");
+    assert!(!run("a = 1 < 2 < 3").errors.is_empty(), "two comparisons in a row are refused");
+}
+
 /// ★ A curve that only **touches** the level is drawn if and only if the grid
 /// happens to land on it — which is worse than never being drawn, because it
 /// depends on where you are looking.

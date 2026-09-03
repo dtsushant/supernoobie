@@ -56,6 +56,14 @@ use std::collections::HashMap;
 // tokens
 // ---------------------------------------------------------------------------
 
+/// How close two numbers have to be to count as the same.
+///
+/// Exact equality between floats is a trap — `0.1 + 0.2 == 0.3` is false — and
+/// a language for drawings and games should not make anybody learn that before
+/// they can ask a question. Also what counts as "true": anything not within a
+/// hair of zero.
+pub const NEAR: f64 = 1e-9;
+
 #[derive(Clone, Debug, PartialEq)]
 enum Tok {
     Num(f64),
@@ -65,6 +73,8 @@ enum Tok {
     Close,
     Comma,
     Eq,
+    /// A comparison: `==`, `!=`, `<`, `<=`, `>`, `>=`.
+    Cmp(&'static str),
 }
 
 fn lex(s: &str) -> Result<Vec<Tok>, String> {
@@ -100,13 +110,35 @@ fn lex(s: &str) -> Result<Vec<Tok>, String> {
                 k += 1;
             }
             out.push(Tok::Ident(b[start..k].iter().collect()));
+        } else if matches!(c, '<' | '>' | '=' | '!') {
+            // Two characters where there are two, one where there is one. `=`
+            // on its own is still a binding, so `a = 3` is unchanged and
+            // `a == 3` is a question.
+            let next = b.get(k + 1).copied();
+            let two = matches!((c, next), ('<', Some('=')) | ('>', Some('=')) | ('=', Some('=')) | ('!', Some('=')));
+            if two {
+                out.push(Tok::Cmp(match c {
+                    '<' => "<=",
+                    '>' => ">=",
+                    '=' => "==",
+                    _ => "!=",
+                }));
+                k += 2;
+            } else if c == '<' || c == '>' {
+                out.push(Tok::Cmp(if c == '<' { "<" } else { ">" }));
+                k += 1;
+            } else if c == '=' {
+                out.push(Tok::Eq);
+                k += 1;
+            } else {
+                return Err("a lone '!' means nothing; did you mean '!='?".into());
+            }
         } else {
             k += 1;
             match c {
                 '(' => out.push(Tok::Open),
                 ')' => out.push(Tok::Close),
                 ',' => out.push(Tok::Comma),
-                '=' => out.push(Tok::Eq),
                 '+' | '-' | '*' | '/' | '^' => out.push(Tok::Op(c)),
                 _ => return Err(format!("unexpected character '{c}'")),
             }
@@ -121,6 +153,10 @@ fn lex(s: &str) -> Result<Vec<Tok>, String> {
 
 #[derive(Clone, Debug)]
 pub enum Expr {
+    /// A comparison, giving `1` for true and `0` for false — because every
+    /// value here is a number and inventing a second kind would mean two of
+    /// everything.
+    Cmp(&'static str, Box<Expr>, Box<Expr>),
     Num(f64),
     Var(String),
     Neg(Box<Expr>),
@@ -129,12 +165,15 @@ pub enum Expr {
 }
 
 /// Names that parse as function calls rather than implicit multiplication.
-pub const FUNCS: [&str; 18] = [
+pub const FUNCS: [&str; 23] = [
     "exp", "ln", "sin", "cos", "tan", "sqrt", "abs", "arg", "conj", "re", "im", "polar", "pow",
     // Whole numbers. A language with no way to say "the integer part" cannot
     // say "a number between 1 and 9", which is most of what a counting game
     // needs.
     "floor", "round", "mod", "max", "min",
+    // Asking questions. `if`, `and`, `or` and `pick` are decided before
+    // their arguments are worked out; see `Expr::eval`.
+    "if", "and", "or", "not", "pick",
 ];
 
 /// Names that draw something.
@@ -168,6 +207,62 @@ impl Expr {
                     _ => return Err(format!("bad operator '{op}'")),
                 }
             }
+            Expr::Cmp(op, a, b) => {
+                let (x, y) = (a.eval(env)?, b.eval(env)?);
+                let yes = match *op {
+                    // Equality with a hair of slack. Exact equality between
+                    // floats is a trap: `0.1 + 0.2 == 0.3` is false, and a
+                    // language for drawings and games should not make anybody
+                    // learn that before they can ask a question.
+                    "==" => (x - y).abs() < NEAR,
+                    "!=" => (x - y).abs() >= NEAR,
+                    // Complex numbers are not ordered, so an order test is on
+                    // the **real part**, and says so here rather than
+                    // pretending otherwise.
+                    "<" => x.re < y.re,
+                    "<=" => x.re <= y.re,
+                    ">" => x.re > y.re,
+                    _ => x.re >= y.re,
+                };
+                Cx::new(if yes { 1.0 } else { 0.0 }, 0.0)
+            }
+            // `if`, `and`, `or` are decided **before** their arguments are
+            // worked out, because the whole point is not to work them all out.
+            // `if(x == 0, 0, 1/x)` must not divide by nothing on the way to
+            // deciding it should not divide by nothing.
+            Expr::Call(f, args) if f == "if" => {
+                if args.len() != 3 {
+                    return Err("if takes a question and two answers".into());
+                }
+                let yes = args[0].eval(env)?.re.abs() > NEAR;
+                return args[if yes { 1 } else { 2 }].eval(env);
+            }
+            Expr::Call(f, args) if f == "and" || f == "or" => {
+                if args.len() != 2 {
+                    return Err(format!("{f} takes two"));
+                }
+                let first = args[0].eval(env)?.re.abs() > NEAR;
+                let stop = if f == "and" { !first } else { first };
+                if stop {
+                    return Ok(Cx::new(if first { 1.0 } else { 0.0 }, 0.0));
+                }
+                let second = args[1].eval(env)?.re.abs() > NEAR;
+                return Ok(Cx::new(if second { 1.0 } else { 0.0 }, 0.0));
+            }
+            // `pick` gives you an indexed read without a second kind of value:
+            // `pick(k, a, b, c)` is the k-th of them. Only the one chosen is
+            // worked out, so the others may be nonsense at this moment.
+            Expr::Call(f, args) if f == "pick" => {
+                if args.len() < 2 {
+                    return Err("pick takes an index and at least one value".into());
+                }
+                let k = args[0].eval(env)?.re.round();
+                let n = (args.len() - 1) as f64;
+                if !(0.0..n).contains(&k) {
+                    return Err(format!("pick: {k} is outside 0..{}", n - 1.0));
+                }
+                return args[1 + k as usize].eval(env);
+            }
             Expr::Call(f, args) => {
                 let a: Result<Vec<Cx>, String> = args.iter().map(|e| e.eval(env)).collect();
                 let a = a?;
@@ -182,6 +277,7 @@ impl Expr {
                         let (x, y) = (a[0].re, a[1].re);
                         Cx::new(if f == "max" { x.max(y) } else { x.min(y) }, 0.0)
                     }
+                    "not" => Cx::new(if one(0)?.re.abs() > NEAR { 0.0 } else { 1.0 }, 0.0),
                     "floor" => Cx::new(one(0)?.re.floor(), 0.0),
                     "round" => Cx::new(one(0)?.re.round(), 0.0),
                     "mod" => {
@@ -310,7 +406,25 @@ impl P {
         }
     }
 
+    /// `sum (CMP sum)?` — one comparison, and it binds **looser** than `+`, so
+    /// `a + b == c` asks what it looks like it asks.
+    ///
+    /// Only one: `a < b < c` is a thing people write and almost never mean, so
+    /// it is refused rather than quietly read as `(a < b) < c`.
     fn expr(&mut self) -> Result<Expr, String> {
+        let a = self.sum()?;
+        if let Some(Tok::Cmp(op)) = self.peek().cloned() {
+            self.k += 1;
+            let b = self.sum()?;
+            if let Some(Tok::Cmp(_)) = self.peek() {
+                return Err("two comparisons in a row: write and(a < b, b < c)".into());
+            }
+            return Ok(Expr::Cmp(op, Box::new(a), Box::new(b)));
+        }
+        Ok(a)
+    }
+
+    fn sum(&mut self) -> Result<Expr, String> {
         let mut a = self.term()?;
         while let Some(Tok::Op(c @ ('+' | '-'))) = self.peek().cloned() {
             self.k += 1;
@@ -605,6 +719,117 @@ pub fn env_of(p: &Program) -> HashMap<String, Cx> {
 // ===========================================================================
 #[cfg(test)]
 mod tests {
+    /// Read one binding out of a script.
+    fn val(src: &str) -> f64 {
+        let p = run(src);
+        assert!(p.errors.is_empty(), "{src}: {:?}", p.errors);
+        p.vars.iter().find(|(n, _)| n == "a").expect("a").1.re
+    }
+
+    /// ★ A comparison gives 1 or 0, because every value here is a number and
+    /// inventing a second kind would mean two of everything — two sets of
+    /// operators, two things a variable might hold, two ways to be wrong.
+    #[test]
+    fn a_question_is_answered_with_a_number() {
+        assert_eq!(val("a = 3 == 3"), 1.0);
+        assert_eq!(val("a = 3 == 4"), 0.0);
+        assert_eq!(val("a = 3 != 4"), 1.0);
+        assert_eq!(val("a = 2 < 3"), 1.0);
+        assert_eq!(val("a = 3 <= 3"), 1.0);
+        assert_eq!(val("a = 4 > 3"), 1.0);
+        assert_eq!(val("a = 2 >= 3"), 0.0);
+        // So an answer is arithmetic, which is the point.
+        assert_eq!(val("a = 5 + 10*(3 == 3)"), 15.0);
+    }
+
+    /// ★ Equality has a hair of slack. Exact equality between floats is a trap
+    /// — `0.1 + 0.2 == 0.3` is false — and a language for drawings and games
+    /// should not make anybody learn that before they can ask a question.
+    #[test]
+    fn equality_does_not_make_you_learn_about_floats_first() {
+        assert_eq!(val("a = 0.1 + 0.2 == 0.3"), 1.0);
+        assert_eq!(val("a = 1 == 1.0000001"), 0.0, "but it is slack, not blind");
+    }
+
+    /// ★ Comparison binds **looser** than `+`, so `a + b == c` asks what it
+    /// looks like it asks.
+    #[test]
+    fn a_comparison_binds_looser_than_arithmetic() {
+        assert_eq!(val("a = 1 + 2 == 3"), 1.0);
+        assert_eq!(val("a = 2*3 == 6"), 1.0);
+        assert_eq!(val("a = 1 == 2 - 1"), 1.0);
+    }
+
+    /// And two in a row are refused rather than quietly read as `(a<b)<c`,
+    /// which is a thing people write and almost never mean.
+    #[test]
+    fn two_comparisons_in_a_row_are_refused() {
+        assert!(!run("a = 1 < 2 < 3").errors.is_empty());
+    }
+
+    /// A lone `=` is still a binding, so nothing that worked before changed.
+    #[test]
+    fn a_single_equals_is_still_a_binding() {
+        assert_eq!(val("a = 3"), 3.0);
+        let p = run("a = 1
+b = a == 1");
+        assert!(p.errors.is_empty(), "{:?}", p.errors);
+        assert_eq!(p.vars.iter().find(|(n, _)| n == "b").expect("b").1.re, 1.0);
+    }
+
+    /// ★ **`if` is decided before its answers are worked out.** The whole point
+    /// is not to work them all out: `if(x == 0, 0, 1/x)` must not divide by
+    /// nothing on the way to deciding it should not divide by nothing.
+    #[test]
+    fn if_does_not_evaluate_the_answer_it_did_not_choose() {
+        assert_eq!(val("x = 0
+a = if(x == 0, 7, 1/x)"), 7.0);
+        assert_eq!(val("x = 4
+a = if(x == 0, 7, 1/x)"), 0.25);
+        // And the branch not taken may be outright nonsense.
+        assert_eq!(val("a = if(1, 5, ln(0))"), 5.0);
+    }
+
+    /// ★ `and` and `or` stop as soon as they know, for the same reason.
+    #[test]
+    fn and_and_or_stop_as_soon_as_they_know() {
+        assert_eq!(val("a = and(0, ln(0))"), 0.0, "false and anything is false");
+        assert_eq!(val("a = or(1, ln(0))"), 1.0, "true or anything is true");
+        assert_eq!(val("a = and(1, 1)"), 1.0);
+        assert_eq!(val("a = or(0, 0)"), 0.0);
+        assert_eq!(val("a = not(0)"), 1.0);
+        assert_eq!(val("a = not(3)"), 0.0, "anything away from zero is true");
+    }
+
+    /// ★ `pick` gives an indexed read without a second kind of value — and
+    /// only the one chosen is worked out, so the others may be nonsense at
+    /// this moment.
+    #[test]
+    fn pick_reads_by_number_without_needing_arrays() {
+        assert_eq!(val("a = pick(0, 10, 20, 30)"), 10.0);
+        assert_eq!(val("a = pick(2, 10, 20, 30)"), 30.0);
+        assert_eq!(val("k = 1
+a = pick(k, 10, 20, 30)"), 20.0);
+        assert_eq!(val("a = pick(0, 5, ln(0))"), 5.0, "the ones not picked are not worked out");
+        assert!(!run("a = pick(9, 1, 2)").errors.is_empty(), "and out of range says so");
+    }
+
+    /// A worked example of the sort of thing this was added for: a rule that
+    /// only fires under a condition, written as one expression.
+    #[test]
+    fn a_rule_can_now_ask_a_question() {
+        // "come out of the yard only on a six"
+        let out = |die: i32, at: i32| {
+            let src = format!("die = {die}
+at = {at}
+a = if(and(die == 6, at < 0), 0, at)");
+            val(&src)
+        };
+        assert_eq!(out(6, -1), 0.0, "a six brings it out");
+        assert_eq!(out(3, -1), -1.0, "anything else leaves it in the yard");
+        assert_eq!(out(6, 12), 12.0, "and one already out is left where it is");
+    }
+
     /// ★ `arg` and `ln` must agree about the same number. They did not: `arg`
     /// used `Cx::arg`, which does not normalise negative zero, so `ln(-1)`
     /// gave `+i pi` and `arg(-1)` gave `-pi`. The trap is that `-1` parses as

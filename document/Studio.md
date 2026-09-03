@@ -146,6 +146,10 @@ has a clock of its own.
 | `implicit(F, level)` | 1–2 | `F(x, y) = level`; `level` defaults to 0 |
 | `color(n)` | 1 | pins the colour from there on. `0xE0A44A` works. |
 
+There is no `if` **statement** and no loop. `if` is a function that gives back
+a value, which is all an expression language needs and is what keeps a row a
+row.
+
 And four the studio adds on top, which `plotkit::expr` has never heard of:
 
 ```text
@@ -160,6 +164,36 @@ there. That is the whole of showing and hiding one:
 
 ```text
 smiley(3.4, 1.5, max(0, 1.0 - 1.4*(time - cheer)))
+```
+
+### Asking questions
+
+Every value is a number, so a question is answered with `1` or `0` — which
+means an answer is arithmetic:
+
+```text
+a = 5 + 10*(die == 6)          15 on a six, 5 otherwise
+```
+
+| | |
+|---|---|
+| `==` `!=` | equal, with a hair of slack — `0.1 + 0.2 == 0.3` is **true** |
+| `<` `<=` `>` `>=` | on the **real part**, since complex numbers are not ordered |
+| `and(a,b)` `or(a,b)` `not(a)` | anything away from zero is true |
+| `if(question, yes, no)` | |
+| `pick(k, v0, v1, …)` | the `k`-th value — an indexed read without arrays |
+
+Comparison binds **looser** than `+`, so `a + b == c` asks what it looks like
+it asks. Two in a row (`a < b < c`) are refused rather than quietly read as
+`(a < b) < c`, which is a thing people write and almost never mean.
+
+**`if`, `and`, `or` and `pick` are decided before their arguments are worked
+out.** That is not an optimisation, it is the point:
+
+```text
+if(x == 0, 0, 1/x)             never divides by nothing
+and(0, ln(0))                  never takes the log of nothing
+pick(0, 5, ln(0))              only the one chosen is worked out
 ```
 
 ### Implicit multiplication
