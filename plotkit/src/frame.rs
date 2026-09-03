@@ -217,6 +217,16 @@ impl Frame {
         self.stage = Some((x, y, w, h));
     }
 
+    /// The shapes and their styles, for anything that wants to render a frame
+    /// itself rather than onto a canvas — a browser, a file, a plotter.
+    ///
+    /// [`Frame::draw`] is one such renderer and not a privileged one. Handing
+    /// the parts out means a second one needs nothing added here, and cannot
+    /// drift from the first, because there is only one list.
+    pub fn parts(&self) -> impl Iterator<Item = (&Shape, &Style)> {
+        self.items.iter().map(|(s, st)| (s, st))
+    }
+
     pub fn len(&self) -> usize {
         self.items.len()
     }

@@ -1,0 +1,81 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>studio</title>
+<link rel="stylesheet" href="/app.css">
+
+<div id="app">
+  <aside id="tree">
+    <header>
+      <span class="name">shapes</span>
+      <button id="add-shape" title="add a shape">+</button>
+    </header>
+    <div id="shapes" class="list"></div>
+
+    <header>
+      <span class="name">functions</span>
+      <button id="add-row" title="add a function">+</button>
+    </header>
+    <div id="rows" class="list"></div>
+
+    <div id="says"></div>
+  </aside>
+
+  <main>
+    <div id="bar">
+      <span class="set">
+        <button data-nib="0" class="on">quill</button>
+        <button data-nib="1">round</button>
+        <button data-nib="2">broad</button>
+      </span>
+      <span class="set">
+        <button data-tool="draw" class="on">draw</button>
+        <button data-tool="pick">pick</button>
+        <button data-tool="rub">rub out</button>
+      </span>
+      <span class="set">
+        <label><input type="color" id="ink" value="#e3e9ef"></label>
+      </span>
+      <span class="set" id="verbs">
+        <button data-verb="walk">walk</button>
+        <button data-verb="run">run</button>
+        <button data-verb="jump">jump</button>
+        <button data-verb="spin">spin</button>
+        <button data-verb="bob">bob</button>
+        <button data-verb="pulse">pulse</button>
+        <button data-verb="none">none</button>
+      </span>
+      <span class="set">
+        <button data-do="Step" data-forwards="false" title="previous key">|&lt;</button>
+        <button data-do="Key">key</button>
+        <button data-do="Step" data-forwards="true" title="next key">&gt;|</button>
+        <button data-do="Unkey">unkey</button>
+      </span>
+      <span class="set">
+        <button id="play">play</button>
+        <button data-do="Rewind">rewind</button>
+      </span>
+      <span class="set">
+        <button data-do="Group">group</button>
+        <button data-do="Ungroup">split</button>
+      </span>
+      <span class="set">
+        <button data-do="Undo">undo</button>
+        <button data-do="Redo">redo</button>
+        <button data-do="Smooth">even out</button>
+      </span>
+      <span class="set">
+        <button data-do="Save">save</button>
+        <button data-do="Open">open</button>
+        <button data-do="Clear">clear</button>
+      </span>
+      <span class="set">
+        <button id="full" title="just the drawing">&#x2922;</button>
+      </span>
+    </div>
+
+    <canvas id="paper"></canvas>
+    <div id="hint">drag to draw &middot; tap to choose &middot; shift-drag or middle-drag moves the paper &middot; wheel zooms</div>
+  </main>
+</div>
+
+<script src="/app.js"></script>

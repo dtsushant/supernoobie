@@ -18,6 +18,7 @@ pub mod script;
 pub mod sheet;
 pub mod track;
 pub mod tree;
+pub mod wire;
 
 pub use action::{Act, Action, Step};
 pub use bar::{Bar, Button, Cmd};
@@ -30,3 +31,4 @@ pub use script::{Row, Script};
 pub use sheet::Sheet;
 pub use track::{Ease, Key, Track};
 pub use tree::{Node, Poke, Tree};
+pub use wire::{scene, Look};

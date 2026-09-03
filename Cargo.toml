@@ -14,7 +14,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net"]
 minifb = { version = "0.28", optional = true }
 
 [workspace]
-members = ["easel", "physics", "plotkit", "shapes", "sound", "studio"]
+members = ["easel", "physics", "plotkit", "shapes", "sound", "studio", "web"]
 # `live` links cpal, which on Linux wants ALSA's headers at build time. Kept
 # out so that everything here compiles and tests on a bare machine; the cost of
 # hearing it live is paid only by whoever runs it.

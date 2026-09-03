@@ -1,0 +1,144 @@
+/* The studio, in a browser.
+ *
+ * Nothing here is clever. That is rather the point: every rule in this file
+ * replaces something that was hand-written in Rust — a layout that reflows, a
+ * list that scrolls, text at a size you can read, a colour picker.
+ */
+
+:root {
+  --ink: #e3e9ef;
+  --soft: #94a1ae;
+  --faint: #6b7987;
+  --paper: #0b1017;
+  --panel: #141c26;
+  --edge: #22303c;
+  --lit: #2e4257;
+  --warn: #e0704a;
+  --good: #6fcf97;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--paper);
+  color: var(--ink);
+  font: 14px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+#app { display: flex; height: 100vh; }
+
+/* ---- the list ---------------------------------------------------------- */
+
+#tree {
+  width: 340px;
+  flex: 0 0 auto;
+  background: var(--panel);
+  border-right: 1px solid var(--edge);
+  display: flex;
+  flex-direction: column;
+  /* The whole reason a browser: this is the scrolling. */
+  overflow-y: auto;
+}
+#app.full #tree, #app.full #bar, #app.full #hint { display: none; }
+
+#tree header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 10px 4px;
+  color: var(--faint);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  font-size: 11px;
+}
+#tree header button {
+  width: 26px; height: 26px;
+  font-size: 16px; line-height: 1;
+}
+
+.list { padding: 0 8px 6px; }
+
+.line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.line:hover { background: var(--edge); }
+.line.chosen { background: var(--lit); }
+.line.kid { margin-left: 18px; }
+
+.swatch { width: 14px; height: 18px; border-radius: 2px; flex: 0 0 auto; }
+.fold { width: 16px; color: #e0a44a; flex: 0 0 auto; }
+.count { color: var(--faint); }
+
+/* A row of the script: a real text input, with a real caret. */
+.row { display: flex; align-items: center; gap: 8px; padding: 3px 6px; }
+.row input[type=text] {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: var(--edge);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 15px;
+  padding: 6px 8px;
+}
+.row input[type=text]:focus { outline: none; border-color: var(--lit); background: #1b2530; }
+.row.off input[type=text] { color: var(--faint); }
+.row.wrong input[type=text] { border-color: var(--warn); }
+.row .why { color: var(--warn); font-size: 11px; padding: 0 6px 4px 34px; }
+.row input[type=checkbox] { accent-color: var(--good); width: 16px; height: 16px; }
+
+.dial { display: flex; align-items: center; gap: 8px; padding: 0 6px 6px 34px; }
+.dial input[type=range] { flex: 1 1 auto; accent-color: #e0a44a; }
+.dial .as { color: var(--faint); font-size: 11px; min-width: 84px; }
+
+#says { margin-top: auto; padding: 10px; color: var(--good); font-size: 12px; min-height: 1.4em; }
+
+/* ---- the tools --------------------------------------------------------- */
+
+main { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; }
+
+#bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  padding: 8px 10px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--edge);
+}
+.set { display: flex; gap: 4px; }
+
+button {
+  background: var(--edge);
+  color: var(--soft);
+  border: 0;
+  border-radius: 5px;
+  padding: 9px 12px;
+  font: inherit;
+  cursor: pointer;
+  /* Big enough to hit with a pen or a finger. */
+  min-height: 38px;
+  min-width: 38px;
+}
+button:hover { background: var(--lit); color: var(--ink); }
+button.on { background: var(--lit); color: #fff; }
+
+input[type=color] {
+  width: 44px; height: 38px;
+  background: none; border: 1px solid var(--edge); border-radius: 5px;
+  padding: 2px; cursor: pointer;
+}
+
+/* ---- the paper --------------------------------------------------------- */
+
+#paper { flex: 1 1 auto; display: block; width: 100%; touch-action: none; cursor: crosshair; }
+#hint { padding: 6px 10px; color: #46525e; font-size: 11px; border-top: 1px solid var(--edge); }

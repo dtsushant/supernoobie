@@ -23,3 +23,6 @@ live/Cargo.lock
 # OS
 .DS_Store
 Thumbs.db
+
+# the web crate builds its own lock of dependencies
+/web/target/

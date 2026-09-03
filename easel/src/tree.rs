@@ -309,7 +309,19 @@ impl Tree {
         t.adds.push((Half::Functions, y));
         y += HEAD + 2;
 
-        let dials = board.sheet.script.dials(board.clock);
+        // From what is actually in effect, not from the rows alone. A game's
+        // score lives in the tally, and `Script::dials` runs the rows with an
+        // empty one -- so a slider took its value from the starting position
+        // and sat there while the game moved on. The board already works this
+        // out once, for the drawing; asking it again is the only way the two
+        // cannot disagree.
+        let dials: Vec<(String, f64)> = board
+            .written()
+            .vars
+            .into_iter()
+            .filter(|(name, v)| name != "time" && v.im.abs() < 1e-12)
+            .map(|(name, v)| (name, v.re))
+            .collect();
         for (k, r) in board.sheet.script.rows.iter().enumerate() {
             let dial = r
                 .binds()
@@ -778,6 +790,30 @@ mod tests {
                 assert!(a.y + a.h <= c.y || c.y + c.h <= a.y, "{:?} and {:?} overlap", a.node, c.node);
             }
         }
+    }
+
+    /// ★ A slider shows what is **in effect**, not what the row says. A game's
+    /// score lives in the tally, and a dial computed from the rows alone sat
+    /// at the starting value while the game moved on -- which reads as the
+    /// game not working.
+    #[test]
+    fn a_slider_follows_the_game_and_not_just_the_row() {
+        let mut b = Board::new();
+        b.sheet.script.add("score = 0");
+        b.sheet.script.add("circle(0, 1 + score)");
+
+        let shown = |b: &Board| {
+            Tree::new(b)
+                .lines
+                .iter()
+                .find_map(|l| l.dial.clone())
+                .map(|(_, v, _)| v)
+                .expect("a dial")
+        };
+        assert_eq!(shown(&b), 0.0);
+
+        b.tally.values.insert("score".into(), 5.0);
+        assert_eq!(shown(&b), 5.0, "it should follow the game");
     }
 
     /// A row that binds a plain number gets a slider, and the ends of the
