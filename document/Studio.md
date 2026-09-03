@@ -251,6 +251,50 @@ This is what lets a rule say *"send home whichever token is on this square"*.
 Without it a rule can only change a number it already knows the name of, and a
 game cannot be written.
 
+### Repeating a deed
+
+A rule can do the same thing to every subscript in a range:
+
+```text
+when tap 1: each j in 0..16 (at[j] = if(at[j] == here, -1, at[j]))
+```
+
+That is *"send home whichever token is standing on this square"*, for sixteen
+tokens, in one line. Written a token at a time it was sixteen rules of fifteen
+deeds — 240 chances to mistype a subscript — and it is the reason the Ludo
+board had two tokens a seat before it had four.
+
+| | |
+|---|---|
+| `each j in 0..16 (…)` | `j` takes 0, 1, … 15 |
+| `each j in 16 (…)` | the same; a bare count starts at nought |
+| `each j in 2..5 (…)` | 2, 3, 4 |
+
+The body is **bracketed**, so a rule can carry on afterwards —
+`each j in 0..4 (at[j] = 0), turn = 1` — and two loops in a rule are two loops.
+They nest.
+
+Deeds inside a loop still see each other, and still see the passes before them,
+so a loop can **add things up**:
+
+```text
+when tap 1: total = 0, each j in 0..16 (total = total + at[j])
+```
+
+`j` wins over anything the game happens to have called `j`. A loop whose
+counter could be captured by the score would be a horrible thing to find.
+
+**The range is written down, not worked out.** `each j in 0..n` is refused, as
+is a range longer than 512. A range the game could change is a loop whose
+length the game could change, and a rule that fires once a frame with a length
+nothing bounds is a hung frame rather than a wrong answer. Nesting is bounded
+too: one rule makes at most 20 000 writes in a frame, however deep it goes.
+
+**There is no loop in the expressions**, only in the deeds. A deed already
+writes to a named slot, so a loop over `j` needs nothing new to write to; an
+expression has no slots and would want a fold, an accumulator, and somewhere to
+put it. Rows still spell their sums out.
+
 ### Implicit multiplication
 
 `2i`, `3x`, `2(1+i)` all mean what they look like. The one ambiguity is `f(x)`

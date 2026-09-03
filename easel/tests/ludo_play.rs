@@ -17,7 +17,7 @@ fn v(b: &Board, name: &str) -> f64 {
 
 /// The die is figure 9; tokens are figures 1..8.
 fn roll(b: &mut Board) -> f64 {
-    b.play_tap(9);
+    b.play_tap(17);
     // The die is thrown and takes a moment to settle, so the number is not the
     // number until it has stopped -- which is the whole point of throwing it.
     b.clock += 4.0;
@@ -31,7 +31,7 @@ fn roll(b: &mut Board) -> f64 {
 #[test]
 fn the_die_tumbles_and_then_settles() {
     let mut b = game();
-    b.play_tap(9);
+    b.play_tap(17);
 
     // While it is going, the face changes.
     let mut seen = std::collections::HashSet::new();
@@ -57,7 +57,7 @@ fn the_die_tumbles_and_then_settles() {
 #[test]
 fn the_die_slows_rather_than_halting() {
     let mut b = game();
-    b.play_tap(9);
+    b.play_tap(17);
     let turned = |b: &mut Board, from: f64, to: f64| {
         b.clock = from;
         let a = v(b, "tumbles");
@@ -73,7 +73,7 @@ fn the_die_slows_rather_than_halting() {
 #[test]
 fn the_die_stays_in_its_box() {
     let mut b = game();
-    b.play_tap(9);
+    b.play_tap(17);
     for k in 0..80 {
         b.clock = k as f64 * 0.05;
         let dx = v(&b, "dx");
@@ -88,7 +88,7 @@ fn the_die_stays_in_its_box() {
 fn you_cannot_move_while_the_die_is_still_going() {
     let mut b = game();
     b.tally.values.insert("at0".into(), 10.0);
-    b.play_tap(9);
+    b.play_tap(17);
     b.clock = 0.1;
     b.play_tap(1);
     assert_eq!(v(&b, "at0"), 10.0, "not while it is turning");
@@ -179,11 +179,11 @@ fn the_turn_passes_unless_it_was_a_six() {
     assert_eq!(v(&b, "rolled"), 0.0, "and the die must be rolled again");
 
     // Seat 1 rolls a six.
-    b.tally.values.insert("at2".into(), 10.0);
+    b.tally.values.insert("at4".into(), 10.0);
     b.tally.values.insert("rolled".into(), 1.0);
     b.clock = 99.0;
     b.tally.values.insert("die".into(), 6.0);
-    b.play_tap(3);
+    b.play_tap(5);
     assert_eq!(v(&b, "turn"), 1.0, "a six keeps the turn");
 }
 
@@ -192,7 +192,7 @@ fn the_turn_passes_unless_it_was_a_six() {
 #[test]
 fn you_cannot_move_on_somebody_elses_turn() {
     let mut b = game();
-    b.tally.values.insert("at2".into(), 10.0);
+    b.tally.values.insert("at4".into(), 10.0);
     b.tally.values.insert("rolled".into(), 1.0);
     b.clock = 99.0;
     b.tally.values.insert("die".into(), 3.0);
@@ -200,8 +200,8 @@ fn you_cannot_move_on_somebody_elses_turn() {
     // test is about the tap alone.
     b.tally.values.insert("at0".into(), 10.0);
     b.tally.values.insert("turn".into(), 0.0);
-    b.play_tap(3); // seat 1's token, on seat 0's turn
-    assert_eq!(v(&b, "at2"), 10.0, "it must not move");
+    b.play_tap(5); // seat 1's token, on seat 0's turn
+    assert_eq!(v(&b, "at4"), 10.0, "it must not move");
     assert_eq!(v(&b, "turn"), 0.0, "and the turn must not pass");
 }
 
@@ -214,8 +214,8 @@ fn landing_on_an_enemy_sends_it_home() {
     // Seat 0's token at step 10 is on square 10. Seat 1 starts at 13, so its
     // token needs step 10 - 13 + 52 = 49 to stand on the same square.
     b.tally.values.insert("at0".into(), 7.0);
-    b.tally.values.insert("at2".into(), 49.0);
-    assert_eq!(v(&b, "sq2"), 10.0, "the two are on the same square");
+    b.tally.values.insert("at4".into(), 49.0);
+    assert_eq!(v(&b, "sq4"), 10.0, "the two are on the same square");
 
     b.tally.values.insert("rolled".into(), 1.0);
     b.clock = 99.0;
@@ -223,7 +223,7 @@ fn landing_on_an_enemy_sends_it_home() {
     b.tally.values.insert("turn".into(), 0.0);
     b.play_tap(1);
     assert_eq!(v(&b, "at0"), 10.0, "it moved");
-    assert!(v(&b, "at2") < 0.0, "and sent the enemy home");
+    assert!(v(&b, "at4") < 0.0, "and sent the enemy home");
     assert_eq!(v(&b, "at1"), -2.0, "its team-mate is untouched");
 }
 
@@ -317,8 +317,8 @@ fn the_ring_you_can_see_is_the_rule_that_is_applied() {
 fn nobody_is_captured_on_a_safe_square() {
     let mut b = game();
     // Seat 1's token sits on square 13, which is seat 1's own start.
-    b.tally.values.insert("at2".into(), 0.0);
-    assert_eq!(v(&b, "sq2"), 13.0);
+    b.tally.values.insert("at4".into(), 0.0);
+    assert_eq!(v(&b, "sq4"), 13.0);
 
     // Seat 0 lands there: step 13, from 10, with a three.
     b.tally.values.insert("at0".into(), 10.0);
@@ -329,7 +329,7 @@ fn nobody_is_captured_on_a_safe_square() {
     b.play_tap(1);
 
     assert_eq!(v(&b, "at0"), 13.0, "it moved onto the square");
-    assert_eq!(v(&b, "at2"), 0.0, "and the one standing there is safe");
+    assert_eq!(v(&b, "at4"), 0.0, "and the one standing there is safe");
 }
 
 /// But an ordinary square is not safe.
@@ -337,8 +337,8 @@ fn nobody_is_captured_on_a_safe_square() {
 fn an_ordinary_square_is_not_safe() {
     let mut b = game();
     b.tally.values.insert("at0".into(), 8.0);
-    b.tally.values.insert("at2".into(), 48.0); // 13 + 48 mod 52 = 9
-    assert_eq!(v(&b, "sq2"), 9.0);
+    b.tally.values.insert("at4".into(), 48.0); // 13 + 48 mod 52 = 9
+    assert_eq!(v(&b, "sq4"), 9.0);
     assert_eq!(v(&b, "sq0"), 8.0);
 
     b.tally.values.insert("rolled".into(), 1.0);
@@ -347,7 +347,7 @@ fn an_ordinary_square_is_not_safe() {
     b.clock = 99.0;
     b.play_tap(1);
     assert_eq!(v(&b, "at0"), 9.0);
-    assert!(v(&b, "at2") < 0.0, "square 9 is nobody's start, so it is fair game");
+    assert!(v(&b, "at4") < 0.0, "square 9 is nobody's start, so it is fair game");
 }
 
 /// ★ Three sixes forfeit the turn. The face is not known until the die stops,
@@ -423,11 +423,62 @@ fn the_game_draws_without_complaint() {
     let made = b.written();
     assert!(made.errors.is_empty(), "{:?}", made.errors);
     assert!(made.shapes.len() > 90, "the board, the die and the numbers");
-    assert_eq!(b.sheet.len(), 9, "eight tokens and a die, all tappable");
+    assert_eq!(b.sheet.len(), 17, "sixteen tokens and a die, all tappable");
 
     // And the tokens are where their numbers say.
     b.tally.values.insert("at0".into(), 20.0);
     let env = b.sheet.script.env(0.0, &b.tally);
     let at = b.sheet.marks[0].pose_in(0.0, &env).apply(b.sheet.marks[0].anchor());
     assert!((at - plotkit::ludo::place(0, 20)).abs() < 0.05, "token 0 stands on square 20");
+}
+
+/// ★ **Four a seat, and the capture is still one line.** Three enemy tokens
+/// stacked on one square all go home together — which is the thing the loop
+/// bought, and which no amount of written-out pairs would have made pleasant.
+#[test]
+fn a_whole_stack_is_captured_at_once() {
+    let mut b = game();
+    b.tally.values.insert("turn".into(), 0.0);
+    b.tally.values.insert("rolled".into(), 1.0);
+    b.tally.values.insert("die".into(), 1.0);
+    b.tally.values.insert("blockade".into(), 0.0); // else the stack is a wall
+    b.tally.values.insert("at0".into(), 8.0);
+    // Seat 1 owns tokens 4..7. Three of them stand on square 9.
+    for k in [4, 5, 6] {
+        b.tally.values.insert(format!("at{k}"), 48.0);
+    }
+    b.play_tap(1);
+    assert_eq!(v(&b, "at0"), 9.0, "it moved on");
+    for k in [4, 5, 6] {
+        assert!(v(&b, &format!("at{k}")) < 0.0, "token {k} went home");
+    }
+    assert!(v(&b, "at7") < 0.0, "and the fourth was in the yard all along");
+    assert_eq!(v(&b, "cuts0"), 1.0, "one move, counted once");
+}
+
+/// Each captured token goes back to **its own** yard place, worked out from the
+/// index rather than written down sixteen times.
+#[test]
+fn a_captured_token_returns_to_its_own_place() {
+    let mut b = game();
+    b.tally.values.insert("turn".into(), 0.0);
+    b.tally.values.insert("rolled".into(), 1.0);
+    b.tally.values.insert("die".into(), 1.0);
+    b.tally.values.insert("blockade".into(), 0.0);
+    b.tally.values.insert("at0".into(), 8.0);
+    b.tally.values.insert("at5".into(), 48.0);
+    b.tally.values.insert("at6".into(), 48.0);
+    b.play_tap(1);
+    assert_eq!(v(&b, "at5"), -2.0, "token 5 is its seat's second");
+    assert_eq!(v(&b, "at6"), -3.0, "and token 6 its third");
+}
+
+/// Sixteen tokens, four seats, four each — and every one of them tappable.
+#[test]
+fn there_are_four_tokens_a_seat() {
+    let b = game();
+    for seat in 0..4 {
+        let mine = (0..16).filter(|k| v(&b, &format!("seat{k}")) == seat as f64).count();
+        assert_eq!(mine, 4, "seat {seat}");
+    }
 }

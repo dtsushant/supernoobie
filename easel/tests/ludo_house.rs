@@ -83,10 +83,10 @@ fn a_capture_is_counted() {
     let mut b = game();
     assert_eq!(v(&b, "cuts0"), 0.0);
     b.tally.values.insert("at0".into(), 8.0);
-    b.tally.values.insert("at2".into(), 48.0); // square 9
+    b.tally.values.insert("at4".into(), 48.0); // seat 1, square 9
     ready(&mut b, 1.0);
     b.play_tap(1);
-    assert!(v(&b, "at2") < 0.0, "it cut");
+    assert!(v(&b, "at4") < 0.0, "it cut");
     assert_eq!(v(&b, "cuts0"), 1.0, "and the seat's count went up");
     assert_eq!(v(&b, "cuts1"), 0.0, "and only that seat's");
 }
@@ -99,7 +99,7 @@ fn a_table_can_give_another_turn_for_a_capture() {
         let mut b = game();
         b.tally.values.insert("againcut".into(), again);
         b.tally.values.insert("at0".into(), 8.0);
-        b.tally.values.insert("at2".into(), 48.0);
+        b.tally.values.insert("at4".into(), 48.0);
         ready(&mut b, 1.0);
         b.play_tap(1);
         v(&b, "turn")
@@ -126,9 +126,9 @@ fn two_together_can_be_made_to_block() {
     let both_there = |blockade: f64| {
         let mut b = game();
         b.tally.values.insert("blockade".into(), blockade);
-        // Seat 1's two tokens both stand on square 9.
-        b.tally.values.insert("at2".into(), 48.0);
-        b.tally.values.insert("at3".into(), 48.0);
+        // Seat 1 owns tokens 4..7. Two of them stand together on square 9.
+        b.tally.values.insert("at4".into(), 48.0);
+        b.tally.values.insert("at5".into(), 48.0);
         b.tally.values.insert("at0".into(), 8.0);
         ready(&mut b, 1.0);
         b.play_tap(1);
@@ -142,7 +142,7 @@ fn two_together_can_be_made_to_block() {
 #[test]
 fn one_token_is_not_a_barrier() {
     let mut b = game();
-    b.tally.values.insert("at2".into(), 48.0);
+    b.tally.values.insert("at4".into(), 48.0);
     b.tally.values.insert("at0".into(), 8.0);
     ready(&mut b, 1.0);
     b.play_tap(1);

@@ -318,12 +318,17 @@ fn ludo() -> Board {
 
 /// **Four-player Ludo, hot seat.** Tap the die, then tap a token.
 ///
-/// ## Two tokens a seat, not four
+/// ## Four tokens a seat, because a rule may now repeat
 ///
-/// Every capture is a written line — "is that one standing where this one just
-/// landed?" — so four tokens each is 16 × 15 = 240 of them. Two each is 8 × 7 =
-/// 56, which is a game you can read. The repeat that would make four each
-/// bearable is the next thing the language wants, and this is the reason.
+/// The capture is one sentence — *anybody standing where I just landed goes
+/// back to the yard* — and written a token at a time it was one line per pair:
+/// 8 × 7 = 56 lines for two tokens a seat, and 16 × 15 = 240 for four. So the
+/// board had two.
+///
+/// `each j in 0..16 (…)` collapses all of it to one deed, and the whole
+/// tap rule went from **1706 characters to 730 while the board doubled** — it no
+/// longer grows with the number of tokens at all. That is the entire reason the
+/// loop exists, and the board is the proof it was worth adding.
 ///
 /// ## The die is thrown, and it settles
 ///
@@ -402,8 +407,8 @@ fn ludo() -> Board {
 /// how "nobody can be captured there" is said without a rule saying it.
 fn ludogame() -> Board {
     let mut b = Board::new();
-    let tokens = 8usize; // two each
-    let seat_of = |k: usize| k / 2;
+    let tokens = 16usize; // four each, which `each` is what made possible
+    let seat_of = |k: usize| k / 4;
 
     let mut rows: Vec<String> = Vec::new();
     macro_rules! add {
@@ -444,7 +449,7 @@ fn ludogame() -> Board {
     add!("turn = 0");
     for k in 0..tokens {
         rows.push(format!("seat{k} = {}", seat_of(k)));
-        rows.push(format!("at{k} = -{}", k % 2 + 1));
+        rows.push(format!("at{k} = -{}", k % 4 + 1));
     }
     for seat in 0..4 {
         rows.push(format!("cuts{seat} = 0"));
@@ -506,7 +511,7 @@ fn ludogame() -> Board {
     add!("# --- throwing it ------------------------------------------------");
     add!("# `flung` is WHEN, so everything above is a function of the clock and");
     add!("# nothing has to be stepped frame by frame.");
-    add!("when tap 9: rolls = rolls + if(rolled == 1, 0, 1), \
+    add!("when tap 17: rolls = rolls + if(rolled == 1, 0, 1), \
          flung = if(rolled == 1, flung, time), \
          rolled = 1");
 
@@ -522,16 +527,18 @@ fn ludogame() -> Board {
         // Out of the yard on whatever the house says opens it; and into the
         // home column only if the house does not ask for a cut first.
         let lands = format!("at{k} + die");
-        let blocked = (0..tokens)
-            .step_by(2)
-            .map(|j| {
-                format!(
-                    "and(and(seat{j} != seat{k}, at{j} >= 0), and(at{j} == at{jj}, \
-                     mod(13*seat{j} + at{j}, 52) == mod(13*seat{k} + {lands}, 52)))",
-                    jj = j + 1
-                )
-            })
-            .fold(String::from("0"), |acc, t| format!("or({acc}, {t})"));
+        // Two of ONE other seat standing together on the square this token
+        // would land on. `sq` already carries the seat offset, so a pair is
+        // two tokens of a seat with the same `sq` -- and the yard and the home
+        // column hold numbers no track square can, so they cannot make a wall.
+        let mut pairs: Vec<String> = Vec::new();
+        for (a, b) in (0..tokens).flat_map(|a| (a + 1..tokens).map(move |b| (a, b))) {
+            if seat_of(a) == seat_of(b) && seat_of(a) != seat_of(k) {
+                pairs.push(format!("and(sq{a} == sq{b}, sq{a} == land{k})"));
+            }
+        }
+        let blocked = pairs.into_iter().fold(String::from("0"), |acc, t| format!("or({acc}, {t})"));
+        rows.push(format!("land{k} = mod(13*seat{k} + {lands}, 52)"));
         rows.push(format!(
             "onto{k} = if(blockade == 0, 0, {blocked})"
         ));
@@ -585,37 +592,38 @@ fn ludogame() -> Board {
         deeds.push(format!("ok = can{k}"));
         // Out of the yard on a six goes to the start; otherwise walk on.
         deeds.push(format!("was = at{k}"));
-        for j in 0..tokens {
-            if j != k {
-                deeds.push(format!("was{j} = at{j}"));
-            }
-        }
+        // Where everybody stood, so a capture can be noticed afterwards.
+        deeds.push(format!("each j in 0..{tokens} (was[j] = at[j])"));
         deeds.push(format!("at[{k}] = if(ok, if(at{k} < 0, 0, at{k} + die), at{k})"));
         deeds.push(format!(
             "here = if(ok, if(was < 0, mod(13*seat{k}, 52), \
              if(at[{k}] > 50, 200 + 10*seat{k} + at[{k}], mod(13*seat{k} + at[{k}], 52))), -999)"
         ));
-        for j in 0..tokens {
-            if j == k {
-                continue;
-            }
-            // Not on a safe square. The four starts are at 0, 13, 26 and 39 and
-            // the four starred ones eight further on -- so "safe" is `here`
-            // being a multiple of thirteen, or eight past one. The whole rule
-            // in one `mod`, rather than a list of eight numbers to mistype.
-            deeds.push(format!(
-                "at[{j}] = if(and(and(and(seat{j} != seat{k}, sq{j} == here), and(here >= 0, here < 52)), \
-                 not(or(mod(here, 13) == 0, mod(here, 13) == 8))), -{}, at{j})",
-                j % 2 + 1
-            ));
-        }
-        // Did this move cut anybody? Counted, because a house rule may ask
-        // for a cut before a seat is allowed home.
-        let cut = (0..tokens)
-            .filter(|j| *j != k)
-            .map(|j| format!("and(at{j} < 0, was{j} >= 0)"))
-            .fold(String::from("0"), |acc, t| format!("or({acc}, {t})"));
-        deeds.push(format!("cut = if(ok, {cut}, 0)"));
+        // ANYBODY standing where this one just landed goes back to the yard.
+        // One line, for sixteen tokens -- written a token at a time it was
+        // sixteen rules of fifteen lines, which is why `each` exists and why
+        // there used to be two tokens a seat instead of four.
+        //
+        // Not on a safe square, though. The four starts are at 0, 13, 26 and 39
+        // and the four starred ones eight further on -- so "safe" is `here`
+        // being a multiple of thirteen, or eight past one. The whole rule in one
+        // `mod`, rather than a list of eight numbers to mistype.
+        //
+        // Back to `-1 - mod(j, 4)`: its own yard place, worked out from the
+        // index rather than written down sixteen times.
+        deeds.push(format!(
+            "each j in 0..{tokens} (at[j] = if(and(and(and(seat[j] != seat{k}, sq[j] == here), \
+             and(here >= 0, here < 52)), not(or(mod(here, 13) == 0, mod(here, 13) == 8))), \
+             0 - 1 - mod(j, 4), at[j]))"
+        ));
+        // Did this move cut anybody? Counted, because a house rule may ask for
+        // a cut before a seat is allowed home. A loop adds it up, so this is
+        // two lines rather than a fifteen-term `or`.
+        deeds.push("cut = 0".into());
+        deeds.push(format!(
+            "each j in 0..{tokens} (cut = cut + if(and(at[j] < 0, was[j] >= 0), 1, 0))"
+        ));
+        deeds.push("cut = if(ok, cut > 0, 0)".into());
         deeds.push(format!("cuts[seat{k}] = cuts[seat{k}] + cut"));
         // Another turn, on whatever the house says earns one.
         deeds.push(format!(
@@ -669,7 +677,7 @@ fn ludogame() -> Board {
     // and each follows its own numbers, which is what `place` is for.
     for k in 0..tokens {
         let seat = seat_of(k);
-        let at = plotkit::ludo::waiting(seat, k % 2 + 1);
+        let at = plotkit::ludo::waiting(seat, k % 4);
         let ring: Vec<Cx> = (0..=28).map(|j| at + Cx::polar(0.36, j as f64 / 28.0 * TAU)).collect();
         b.nib = Nib::Round(0.1);
         b.colour = shapes::ludo::SEATS[seat];

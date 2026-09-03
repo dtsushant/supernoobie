@@ -95,14 +95,52 @@ impl Target {
 }
 
 /// One rule: when this happens, do these.
+/// One thing a rule does.
+///
+/// ## Why there is a loop here and not in the expressions
+///
+/// Ludo’s capture is one sentence — *anybody standing where I just landed goes
+/// back to the yard* — and written out one token at a time it was sixteen rules
+/// of fifteen lines each. Two hundred and forty chances to mistype a subscript,
+/// and the reason the board had two tokens a seat instead of four.
+///
+/// A loop over an index fixes exactly that, and only that. It lives in the
+/// **deed** language, not in the expressions, because a deed already writes to a
+/// named slot — `at[j] = …` — so a loop over `j` needs nothing new to write to.
+/// An expression has no slots and would want a fold, an accumulator and
+/// somewhere to put it: a much larger language for a much smaller gain. Rows
+/// still spell their sums out, and that asymmetry is deliberate.
+///
+/// ## Why the range is written down and not worked out
+///
+/// `each j in 0..16` takes two whole numbers, not two expressions. A range the
+/// game could change is a loop whose length the game could change, and a rule
+/// that fires once a frame with a length nothing bounds is a hung frame rather
+/// than a wrong answer. So the count is visible in the text, and capped besides.
+#[derive(Clone, Debug)]
+pub enum Deed {
+    /// `name = expression`, or `name[k] = expression`.
+    Set(Target, Expr),
+    /// `each j in 0..16 (deeds)` — the deeds again for each whole number, with
+    /// `j` bound to it.
+    Each { name: String, lo: i64, hi: i64, deeds: Vec<Deed> },
+}
+
+/// The most any one `each` will count through. A longer one is refused when it
+/// is read, so it fails while you are typing rather than while you are playing.
+pub const MOST: i64 = 512;
+
+/// The most writes one rule may make in a frame, however deeply it is nested.
+pub const STEPS: usize = 20_000;
+
 #[derive(Clone, Debug)]
 pub struct Rule {
     /// Which row it was written on — how its edge is remembered between
     /// frames, since the rules themselves are read afresh each time.
     pub row: usize,
     pub on: On,
-    /// `name = expression`, in order.
-    pub deeds: Vec<(Target, Expr)>,
+    /// What it does, in order.
+    pub deeds: Vec<Deed>,
 }
 
 /// What the game has got to: values that shadow the rows while it runs.
@@ -169,25 +207,63 @@ pub fn read_on_row(text: &str, row: usize) -> Option<Rule> {
         _ => On::When(expr::parse(head.trim()).ok()?),
     };
 
-    let mut deeds = Vec::new();
-    // Split on the commas that separate deeds, not on every comma: a subscript
-    // may hold one — `at[mod(k, 4)] = 0` — and tearing it in half would leave
-    // two things neither of which parses.
-    for one in split_deeds(body) {
-        let Some((left, value)) = one.split_once('=') else {
-            continue;
-        };
-        let Some(target) = read_target(left) else {
-            continue;
-        };
-        // A deed that will not parse is dropped and the rest of the rule
-        // still works, for the same reason a bad row does not blank the
-        // drawing: half-typed text is the normal state of a row being edited.
-        if let Ok(e) = expr::parse(value.trim()) {
-            deeds.push((target, e));
-        }
-    }
+    let deeds = read_deeds(body);
     (!deeds.is_empty()).then_some(Rule { row, on, deeds })
+}
+
+/// Read a list of deeds separated by commas.
+///
+/// Split on the commas that *separate* deeds, not on every comma: a subscript
+/// may hold one — `at[mod(k, 4)] = 0` — and tearing it in half would leave two
+/// things neither of which parses. An `each` body is parenthesised, so the same
+/// depth counting keeps it whole.
+fn read_deeds(body: &str) -> Vec<Deed> {
+    split_deeds(body).iter().filter_map(|one| read_deed(one)).collect()
+}
+
+/// One deed: a loop, or a name and a value.
+///
+/// A deed that will not parse is dropped and the rest of the rule still works,
+/// for the same reason a bad row does not blank the drawing: half-typed text is
+/// the normal state of a row being edited.
+fn read_deed(one: &str) -> Option<Deed> {
+    let one = one.trim();
+    if let Some(rest) = one.strip_prefix("each ") {
+        return read_each(rest);
+    }
+    let (left, value) = one.split_once('=')?;
+    let target = read_target(left)?;
+    Some(Deed::Set(target, expr::parse(value.trim()).ok()?))
+}
+
+/// `j in 0..16 (deeds)`, or `j in 16 (deeds)` which starts at nought.
+fn read_each(rest: &str) -> Option<Deed> {
+    let rest = rest.trim_end();
+    let open = rest.find('(')?;
+    let body = rest[open..].strip_prefix('(')?.strip_suffix(')')?;
+    let mut word = rest[..open].split_whitespace();
+    let name = word.next()?.to_string();
+    if !name.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+        || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
+        return None;
+    }
+    if word.next()? != "in" {
+        return None;
+    }
+    let span = word.next()?;
+    if word.next().is_some() {
+        return None;
+    }
+    let (lo, hi) = match span.split_once("..") {
+        Some((a, b)) => (a.trim().parse().ok()?, b.trim().parse().ok()?),
+        None => (0i64, span.parse().ok()?),
+    };
+    if hi < lo || hi - lo > MOST {
+        return None;
+    }
+    let deeds = read_deeds(body);
+    (!deeds.is_empty()).then_some(Deed::Each { name, lo, hi, deeds })
 }
 
 /// `at` or `at[k]`, and nothing else — an expression on the left of an `=`
@@ -244,24 +320,59 @@ pub fn is_rule(text: &str) -> bool {
 /// once from a frozen snapshot would be defensible and is not what anybody
 /// reading the line left to right expects.
 pub fn carry_out(rule: &Rule, tally: &mut Tally, env: &HashMap<String, Cx>) {
-    for (target, value) in &rule.deeds {
-        let mut here = env.clone();
-        for (k, v) in &tally.values {
-            here.insert(k.clone(), Cx::new(*v, 0.0));
+    let mut left = STEPS;
+    do_deeds(&rule.deeds, tally, env, &[], &mut left);
+}
+
+/// The deeds, with whatever `each` has bound on top of them.
+fn do_deeds(
+    deeds: &[Deed],
+    tally: &mut Tally,
+    env: &HashMap<String, Cx>,
+    bound: &[(String, f64)],
+    left: &mut usize,
+) {
+    for deed in deeds {
+        if *left == 0 {
+            return;
         }
-        // The subscript is worked out **now**, against everything the deeds
-        // before it have already done — so `k = k + 1, at[k] = 0` writes to
-        // the new `k`, which is what reading it left to right says.
-        let Ok(name) = target.name_now(&here) else { continue };
-        match value.eval(&here) {
-            Ok(v) if v.re.is_finite() => {
-                tally.values.insert(name, v.re);
+        match deed {
+            Deed::Set(target, value) => {
+                *left -= 1;
+                let mut here = env.clone();
+                for (k, v) in &tally.values {
+                    here.insert(k.clone(), Cx::new(*v, 0.0));
+                }
+                // The loop’s index goes on last, so `each j …` means `j` even
+                // where the game happens to have a value of that name. An index
+                // that could be captured by the score would be a horrible thing
+                // to find.
+                for (k, v) in bound {
+                    here.insert(k.clone(), Cx::new(*v, 0.0));
+                }
+                // The subscript is worked out **now**, against everything the
+                // deeds before it have already done — so `k = k + 1, at[k] = 0`
+                // writes to the new `k`, which is what reading it left to right
+                // says.
+                let Ok(name) = target.name_now(&here) else { continue };
+                match value.eval(&here) {
+                    Ok(v) if v.re.is_finite() => {
+                        tally.values.insert(name, v.re);
+                    }
+                    // A deed that will not evaluate leaves the value alone. The
+                    // alternative is a score that becomes NaN on one bad tap and
+                    // stays NaN for ever, which looks like the game having
+                    // broken rather than one rule having a typo in it.
+                    _ => {}
+                }
             }
-            // A deed that will not evaluate leaves the value alone. The
-            // alternative is a score that becomes NaN on one bad tap and stays
-            // NaN for ever, which looks like the game having broken rather
-            // than one rule having a typo in it.
-            _ => {}
+            Deed::Each { name, lo, hi, deeds } => {
+                for k in *lo..*hi {
+                    let mut inner = bound.to_vec();
+                    inner.push((name.clone(), k as f64));
+                    do_deeds(deeds, tally, env, &inner, left);
+                }
+            }
         }
     }
 }
@@ -281,7 +392,10 @@ mod tests {
         let r = read("when tap 1: score = score + 1").expect("a rule");
         assert!(r.on.is_tap(1));
         assert_eq!(r.deeds.len(), 1);
-        assert_eq!(r.deeds[0].0.name, "score");
+        match &r.deeds[0] {
+            Deed::Set(t, _) => assert_eq!(t.name, "score"),
+            _ => panic!("a plain deed"),
+        }
     }
 
     /// Several deeds to one tap, separated by commas.
