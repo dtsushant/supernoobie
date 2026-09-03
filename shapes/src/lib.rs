@@ -66,6 +66,7 @@ pub mod face;
 pub mod fourier;
 pub mod glyph;
 pub mod grab;
+pub mod ludo;
 pub mod motion;
 pub mod recipe;
 pub mod stroke;
