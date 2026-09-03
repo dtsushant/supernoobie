@@ -274,13 +274,30 @@ impl Board {
         self.was_down = down;
     }
 
+    /// Is the pointer the game’s rather than the pencil’s?
+    ///
+    /// **Two flags, one question.** `playing_game` is set when a drawing with
+    /// rules is played; `watching` is set when the desk is put away to watch
+    /// one. Either means a press is the beginning of a tap and nothing else.
+    ///
+    /// They were asked separately, and not everywhere the same way — `tap`
+    /// wanted either, `press` and `drag` only `watching`. The browser sets only
+    /// `playing_game`, so in a browser every press quietly started an ink
+    /// stroke, the pointer drifted a pixel, `wandered` went true, and the lift
+    /// was ruled a drag instead of a tap. The die could not be rolled at all,
+    /// and every test missed it by pressing and releasing on the very same
+    /// point — which a mouse does and a pen never does.
+    pub fn in_play(&self) -> bool {
+        self.playing_game || self.watching
+    }
+
     fn press(&mut self, at: Cx) {
         self.pressed_at = Some(at);
         self.wandered = false;
-        if self.watching {
-            // Nothing is begun. A press while watching is the start of a tap
-            // and nothing else, and there is no ink to abandon if the hand
-            // moves.
+        if self.in_play() {
+            // Nothing is begun. A press while the game has the pointer is the
+            // start of a tap and nothing else, and there is no ink to abandon
+            // if the hand moves.
             return;
         }
         match self.tool {
@@ -314,7 +331,7 @@ impl Board {
                 self.wandered = true;
             }
         }
-        if self.watching {
+        if self.in_play() {
             return;
         }
         match self.tool {
@@ -367,7 +384,15 @@ impl Board {
         // lost step is one frame long -- but wrong, and wrong in the same
         // direction every time.
         self.drag(at);
-        let tapped = !self.wandered;
+        // **In play, a drift is not a drag.** There is nothing to drag while a
+        // game runs -- no mark can be moved, nothing chosen -- so the only
+        // question a lift asks is *which mark*, and that is settled in `tap` by
+        // requiring the press and the lift to be on the same one.
+        //
+        // Insisting on no movement at all is a rule only a mouse can keep. A
+        // pen or a fingertip always slides a pixel or two, so a tap that could
+        // not drift was a tap a person could not make.
+        let tapped = !self.wandered || self.in_play();
         if let Some(ink) = self.ink.take() {
             // A tap makes no mark anyway -- `Ink::lift` refuses anything under
             // two points -- so the gesture was going spare.
@@ -389,20 +414,25 @@ impl Board {
     /// A tap: choose what is under it, or let go of it if it was already
     /// chosen. Nothing under it means choose nothing.
     fn tap(&mut self, at: Cx) {
-        let Some(k) = self.sheet.at_in(at, self.touch, self.clock, &self.sheet.script.env(self.clock, &self.tally)) else {
-            if !self.playing_game && !self.watching {
-                self.selected.clear();
+        // Where it went down, so a drift within one mark is still a tap on it
+        // and a slide from one mark to another is a tap on neither.
+        if self.in_play() {
+            let env = self.sheet.script.env(self.clock, &self.tally);
+            let from = self.pressed_at.unwrap_or(at);
+            let began = self.sheet.at_in(from, self.touch, self.clock, &env);
+            let ended = self.sheet.at_in(at, self.touch, self.clock, &env);
+            if let (Some(a), Some(b)) = (began, ended) {
+                if self.sheet.marks[a].group == self.sheet.marks[b].group {
+                    let group = self.sheet.marks[b].group;
+                    self.play_tap(group);
+                }
             }
             return;
-        };
-        if self.playing_game || self.watching {
-            // While the game runs a tap is a move, not a choice. Nothing is
-            // selected and nothing is edited -- which is the point of it being
-            // a separate state rather than a guess.
-            let group = self.sheet.marks[k].group;
-            self.play_tap(group);
-            return;
         }
+        let Some(k) = self.sheet.at_in(at, self.touch, self.clock, &self.sheet.script.env(self.clock, &self.tally)) else {
+            self.selected.clear();
+            return;
+        };
         // Tapping any member of a figure takes the whole figure, which is the
         // point of having grouped it.
         let family = self.family_of(k);

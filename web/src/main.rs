@@ -458,6 +458,102 @@ mod tests {
         assert_eq!(score(&st), 0.0, "and a wrong one takes it back");
     }
 
+    fn ludo() -> Studio {
+        let mut board = Board::new();
+        board.load("../samples/ludogame.easel").expect("the game opens");
+        Studio { board, file: String::new(), say: String::new() }
+    }
+
+    fn var(st: &Studio, name: &str) -> f64 {
+        st.board.written().vars.iter().find(|(n, _)| n == name).map(|(_, v)| v.re).unwrap_or(f64::NAN)
+    }
+
+    /// ★ The whole path a browser takes to roll the die: open the game, press
+    /// play, put the pointer down on the die and lift it. Through the same
+    /// messages the page sends, because the board being right says nothing
+    /// about the page reaching it.
+    #[test]
+    fn the_die_rolls_through_the_wire() {
+        let mut st = ludo();
+        apply(&mut st, Ask::Play { on: true });
+        assert!(st.board.playing_game, "ludo has rules, so it plays as a game");
+
+        apply(&mut st, Ask::Pointer { x: 8.6, y: 4.2, down: true });
+        apply(&mut st, Ask::Pointer { x: 8.6, y: 4.2, down: false });
+        assert_eq!(var(&st, "rolled"), 1.0, "the die was thrown");
+        assert_eq!(var(&st, "rolls"), 1.0, "and counted");
+    }
+
+    /// ★ **A thrown die needs the clock.** Everything about the throw is a
+    /// function of `time - flung`, so with no ticks `age` stays at nought, the
+    /// die reads 1 for ever and `settled` never comes true — which looks
+    /// exactly like a die that will not roll, and means no token can be moved
+    /// either, since a move waits for it to stop.
+    #[test]
+    fn the_die_needs_the_clock_to_settle() {
+        let mut st = ludo();
+        apply(&mut st, Ask::Play { on: true });
+        apply(&mut st, Ask::Pointer { x: 8.6, y: 4.2, down: true });
+        apply(&mut st, Ask::Pointer { x: 8.6, y: 4.2, down: false });
+        assert_eq!(var(&st, "settled"), 0.0, "it has only just left the hand");
+
+        // Four time constants of 0.42, which is where `settled` turns true.
+        for _ in 0..40 {
+            apply(&mut st, Ask::Tick { seconds: 0.05 });
+        }
+        assert_eq!(var(&st, "settled"), 1.0, "and now it has stopped");
+        let face = var(&st, "die");
+        assert!((1.0..=6.0).contains(&face), "on a real face: {face}");
+    }
+
+    /// ★ **A tap that drifts is still a tap.** A mouse click lands on one
+    /// pixel; a pen or a finger never does. Every earlier test pressed and
+    /// released on the very same point, which is the one gesture no human
+    /// makes — and so all of them missed that in a browser a press was quietly
+    /// starting an ink stroke, the drift was ruled a drag, and the die could
+    /// not be rolled at all.
+    #[test]
+    fn a_tap_that_drifts_still_rolls_the_die() {
+        let mut st = ludo();
+        apply(&mut st, Ask::Play { on: true });
+        apply(&mut st, Ask::Pointer { x: 8.6, y: 4.2, down: true });
+        // A few pixels of drift, which is what a pen does.
+        apply(&mut st, Ask::Pointer { x: 8.72, y: 4.31, down: true });
+        apply(&mut st, Ask::Pointer { x: 8.75, y: 4.34, down: false });
+        assert_eq!(var(&st, "rolled"), 1.0, "the die was thrown");
+    }
+
+    /// And a drifting tap in play leaves no scribble behind, which is the
+    /// other half of the same bug.
+    #[test]
+    fn a_drifting_tap_in_play_draws_nothing() {
+        let mut st = ludo();
+        let marks = st.board.sheet.len();
+        apply(&mut st, Ask::Play { on: true });
+        apply(&mut st, Ask::Pointer { x: 2.0, y: 2.0, down: true });
+        for k in 1..12 {
+            apply(&mut st, Ask::Pointer { x: 2.0 + 0.2 * k as f64, y: 2.0, down: true });
+        }
+        apply(&mut st, Ask::Pointer { x: 4.2, y: 2.0, down: false });
+        assert_eq!(st.board.sheet.len(), marks, "nothing was drawn");
+    }
+
+    /// And the other edge of the same rule: a slide **from** one mark **to**
+    /// another is a tap on neither. Otherwise a swipe across the board would
+    /// move whichever token it happened to lift over.
+    #[test]
+    fn a_slide_between_marks_taps_neither() {
+        let mut st = ludo();
+        apply(&mut st, Ask::Play { on: true });
+        // Down on the die, up on a token in seat 0's yard.
+        let yard = plotkit::ludo::waiting(0, 0);
+        apply(&mut st, Ask::Pointer { x: 8.6, y: 4.2, down: true });
+        apply(&mut st, Ask::Pointer { x: yard.re, y: yard.im, down: true });
+        apply(&mut st, Ask::Pointer { x: yard.re, y: yard.im, down: false });
+        assert_eq!(var(&st, "rolled"), 0.0, "the die was not thrown");
+        assert!(var(&st, "at0") < 0.0, "and the token did not move");
+    }
+
     /// ★ A server that opens whatever path it is handed will one day be
     /// asked for something it should not have. That this one is meant for one
     /// person on one machine is not a reason to leave the door open -- it is a
