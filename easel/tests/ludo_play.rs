@@ -11,6 +11,13 @@ fn game() -> Board {
     b
 }
 
+/// Where the die is lying, worked out the same way the board works it out.
+/// A test that taps a fixed spot is a test of where the die used to be.
+fn die_at(b: &Board) -> plotkit::Cx {
+    let age = (b.clock - v(b, "flung")).max(0.0);
+    plotkit::dice::thrown(v(b, "seed"), v(b, "rolls"), age, 6.4).at
+}
+
 fn v(b: &Board, name: &str) -> f64 {
     b.written().vars.iter().find(|(n, _)| n == name).map(|(_, x)| x.re).unwrap_or(f64::NAN)
 }
@@ -52,34 +59,51 @@ fn the_die_tumbles_and_then_settles() {
     }
 }
 
-/// ★ And it slows down rather than stopping dead: it turns through far more
-/// faces in its first moment than in its last.
+/// ★ The board asks `plotkit::dice` for the throw rather than working it out
+/// in rows. What is left to check here is that it asks correctly — the throw
+/// itself has eleven tests of its own, where the sums are.
 #[test]
-fn the_die_slows_rather_than_halting() {
-    let mut b = game();
-    b.play_tap(17);
-    let turned = |b: &mut Board, from: f64, to: f64| {
-        b.clock = from;
-        let a = v(b, "tumbles");
-        b.clock = to;
-        v(b, "tumbles") - a
-    };
-    let early = turned(&mut b, 0.0, 0.2);
-    let late = turned(&mut b, 1.0, 1.2);
-    assert!(early > late * 5.0, "the first moment should turn far more: {early} then {late}");
-}
-
-/// ★ It bounces off the walls of its box rather than sliding out of it.
-#[test]
-fn the_die_stays_in_its_box() {
+fn the_board_shows_a_real_face_throughout_a_throw() {
     let mut b = game();
     b.play_tap(17);
     for k in 0..80 {
         b.clock = k as f64 * 0.05;
-        let dx = v(&b, "dx");
-        let box_w = v(&b, "box");
-        assert!((0.0..=box_w + 1e-9).contains(&dx), "it left the box at {}: {dx}", b.clock);
+        let face = v(&b, "die");
+        assert!((1.0..=6.0).contains(&face), "face {face} at {}", b.clock);
+        assert_eq!(face, face.round(), "and a whole one");
     }
+}
+
+/// ★ And that it knows when the throw is over — which is what every move in
+/// the game waits for.
+#[test]
+fn the_board_knows_when_the_die_has_stopped() {
+    let mut b = game();
+    b.clock = 10.0;
+    b.play_tap(17);
+    assert_eq!(v(&b, "settled"), 0.0, "it has only just left the hand");
+    b.clock = 10.0 + plotkit::dice::OVER + 0.1;
+    assert_eq!(v(&b, "settled"), 1.0, "and now it is lying still");
+}
+
+/// ★ **The die rolls across the whole board, not in a corner.** It is thrown
+/// into a square the size of the board and folds off its walls, so over a
+/// throw it should visit a good deal of it.
+#[test]
+fn the_die_uses_the_whole_board() {
+    let mut b = game();
+    b.clock = 10.0;
+    b.play_tap(17);
+    let span = 6.4;
+    let mut far: f64 = 0.0;
+    for k in 0..60 {
+        b.clock = 10.0 + k as f64 * 0.05;
+        let at = die_at(&b);
+        assert!(at.re.abs() <= span + 1e-6, "it left the board at {}", at.re);
+        assert!(at.im.abs() <= span + 1e-6, "it left the board at {}", at.im);
+        far = far.max(at.re.abs().max(at.im.abs()));
+    }
+    assert!(far > span * 0.7, "it never got near the edge: {far}");
 }
 
 /// ★ A move is refused until the die has stopped. Moving on a number that is
@@ -493,8 +517,9 @@ fn tapping_the_die_rolls_it() {
     let mut b = game();
     assert_eq!(v(&b, "rolled"), 0.0, "nothing thrown yet");
     // Straight at the middle of the box, where anybody would aim.
-    b.pointer(plotkit::Cx::new(8.6, 4.2), true);
-    b.pointer(plotkit::Cx::new(8.6, 4.2), false);
+    let at = die_at(&b);
+    b.pointer(at, true);
+    b.pointer(at, false);
     assert_eq!(v(&b, "rolled"), 1.0, "the die was thrown");
 }
 
@@ -522,8 +547,9 @@ fn a_tap_rolls_the_die_with_only_play_pressed() {
     b.load("../samples/ludogame.easel").expect("the game opens");
     b.play(true);
     b.playing_game = true; // exactly what the server does for `Play { on: true }`
-    b.pointer(plotkit::Cx::new(8.6, 4.2), true);
-    b.pointer(plotkit::Cx::new(8.6, 4.2), false);
+    let at = die_at(&b);
+    b.pointer(at, true);
+    b.pointer(at, false);
     assert_eq!(v(&b, "rolled"), 1.0, "the die was thrown");
 }
 
@@ -535,8 +561,9 @@ fn a_tap_rolls_the_die_with_only_play_pressed() {
 fn a_tap_does_nothing_while_still_editing() {
     let mut b = Board::new();
     b.load("../samples/ludogame.easel").expect("the game opens");
-    b.pointer(plotkit::Cx::new(8.6, 4.2), true);
-    b.pointer(plotkit::Cx::new(8.6, 4.2), false);
+    let at = die_at(&b);
+    b.pointer(at, true);
+    b.pointer(at, false);
     assert_eq!(v(&b, "rolled"), 0.0, "no rule fired");
     assert!(b.any_chosen(), "it was chosen instead, which is what editing means");
 }

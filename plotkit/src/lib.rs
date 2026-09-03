@@ -53,6 +53,7 @@
 //! a whole affine transform is `a*z + b` written exactly like that. A separate
 //! vector type would need all of that spelled out again and would buy nothing.
 
+pub mod dice;
 pub mod ludo;
 pub mod complex;
 pub mod expr;

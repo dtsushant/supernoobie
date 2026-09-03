@@ -110,6 +110,16 @@ impl Row {
 #[derive(Clone, Default)]
 pub struct Made {
     pub shapes: Vec<(Shape, u32)>,
+    /// The ones drawn **filled** rather than as outlines.
+    ///
+    /// A separate list rather than a flag on every shape, because filling is a
+    /// property of the *drawing*, not of the shape — the same ring is an
+    /// outline here and a disc there. Nearly everything a script draws is a
+    /// line, and a die is the first thing that genuinely could not be: pips
+    /// drawn as hairline rings do not read as pips at any size.
+    ///
+    /// Drawn after the outlines, so a solid thing covers what it is lying on.
+    pub solid: Vec<(Shape, u32)>,
     /// Every binding, for the sliders.
     pub vars: Vec<(String, Cx)>,
     /// `(row, message)`. Reported, never fatal.
@@ -208,6 +218,7 @@ impl Script {
                 .collect(),
             vars: program.vars.clone(),
             shapes: Vec::new(),
+            solid: Vec::new(),
         };
 
         let mut colour = PALETTE[0];
@@ -231,7 +242,9 @@ impl Script {
                 made.shapes.push((shape, col));
             }
         }
-        made.shapes.extend(self.shown(&env));
+        let (lines, solid) = self.shown(&env);
+        made.shapes.extend(lines);
+        made.solid.extend(solid);
         made
     }
 
@@ -244,8 +257,12 @@ impl Script {
     ///
     /// So this crate reads those rows itself, evaluates their arguments
     /// against everything else, and leaves the rest of the line to `expr`.
-    fn shown(&self, env: &std::collections::HashMap<String, Cx>) -> Vec<(Shape, u32)> {
+    fn shown(
+        &self,
+        env: &std::collections::HashMap<String, Cx>,
+    ) -> (Vec<(Shape, u32)>, Vec<(Shape, u32)>) {
         let mut out = Vec::new();
+        let mut solid: Vec<(Shape, u32)> = Vec::new();
         for r in &self.rows {
             if !r.on {
                 continue;
@@ -287,6 +304,29 @@ impl Script {
                         out.push((Shape::circle(at, size), shapes::ludo::SEATS[seat]));
                     }
                 }
+                // A die, mid-throw or lying still. `dice(face, x, y, size,
+                // turn)` -- everything about WHERE it is comes from the
+                // expressions, so the same command draws a die sliding across
+                // a board and a die sitting in a corner, and neither needs a
+                // notion of animation. See `plotkit::dice` for the throw.
+                "dice" => {
+                    let face = number(1.0).round().clamp(1.0, 6.0) as u8;
+                    let (x, y) = (number(0.0), number(0.0));
+                    let size = number(0.5).abs().min(4.0);
+                    let turn = number(0.0);
+                    if size > 0.01 {
+                        let mut parts = shapes::dice::die(face, Cx::new(x, y), size, turn);
+                        // Ivory body, dark pips -- fixed, like `digits`, because
+                        // a die whose pips were the same colour as its face is
+                        // not a die at all. Nothing else here has two colours
+                        // it cannot do without.
+                        let body = parts.remove(0);
+                        solid.push((body, 0xEDE6D6));
+                        for pip in parts {
+                            solid.push((pip, 0x24282E));
+                        }
+                    }
+                }
                 "digits" => {
                     let value = number(0.0);
                     let (x, y, size) = (number(0.0), number(0.0), number(1.0));
@@ -310,7 +350,7 @@ impl Script {
                 }
             }
         }
-        out
+        (out, solid)
     }
 
     /// The bindings that are plain real numbers, which are the ones a slider
@@ -401,7 +441,7 @@ fn split_args(args: &str) -> Vec<String> {
 pub const FACES: [&str; 2] = ["smiley", "ghost"];
 
 /// The rows this crate reads itself, beyond the faces and `digits`.
-pub const OURS: [&str; 2] = ["ludo", "token"];
+pub const OURS: [&str; 3] = ["ludo", "token", "dice"];
 
 /// Is this row one this crate handles rather than `plotkit::expr`?
 fn mine(text: &str) -> bool {

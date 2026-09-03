@@ -330,7 +330,19 @@ fn ludo() -> Board {
 /// longer grows with the number of tokens at all. That is the entire reason the
 /// loop exists, and the board is the proof it was worth adding.
 ///
-/// ## The die is thrown, and it settles
+/// ## The die is thrown across the whole board
+///
+/// The throw is not written here at all. It is [`plotkit::dice`], so any game
+/// can have one, and the board asks for it in five rows that differ only in the
+/// name at the front:
+///
+/// ```text
+///     die     = dieface(seed, rolls, age, span)
+///     settled = diedone(seed, rolls, age, span)
+///     dice(die, diex(…), diey(…), 0.62, dieturn(…))
+/// ```
+///
+/// ## The old die is worth remembering
 ///
 /// ```text
 ///     slow    = exp(-age/relax)        1 at the throw, nothing when it is over
@@ -463,51 +475,41 @@ fn ludogame() -> Board {
         ));
     }
     add!("");
-    add!("# --- the die, thrown -------------------------------------------");
+    add!("# --- the die, thrown across the board ---------------------------");
     add!("#");
-    add!("# A die is flung, tumbles fast, slows, and settles. All three are one");
-    add!("# number: exp(-age/relax), which is 1 at the throw and nothing when it");
-    add!("# is over -- the same e^(-t/tau) as a branch settling after a gust or a");
-    add!("# note dying away. Laplace, doing the only thing it ever does.");
-    add!("relax = 0.42");
+    add!("# Five rows, because the throw itself lives in `plotkit::dice` where");
+    add!("# any game can have one. All five take the same four things -- the");
+    add!("# seed, which throw this is, how long ago it left the hand, and how");
+    add!("# big the board is -- so they differ only in the name at the front.");
+    add!("#");
+    add!("# It slides with its speed dying away, so the distance it covers");
+    add!("# approaches a limit and never passes it; it folds off the walls,");
+    add!("# which IS the reflection, at the angle it struck; and it turns more");
+    add!("# slowly as it goes, landing square on a right angle.");
+    add!("span = 6.4");
     add!("age = max(0, time - flung)");
-    add!("slow = exp(-0 - age/relax)");
-    add!("");
-    add!("# how hard it was thrown. different every roll, and worked out rather");
-    add!("# than drawn from anywhere, so the same match replays exactly.");
-    add!("spin = 11 + mod(floor(seed + 29*rolls), 13)");
-    add!("");
-    add!("# faces turned through so far. the RATE decays, so it whirls, eases");
-    add!("# and stops -- it does not run at one speed and then halt.");
-    add!("tumbles = spin*(1 - slow)");
-    add!("");
-    add!("# four time constants is 98 percent of the way there, which is the");
-    add!("# usual answer to `when has an exponential finished`.");
-    add!("settled = age > 4*relax");
-    add!("die = if(settled, 1 + mod(floor(spin), 6), 1 + mod(floor(tumbles), 6))");
-    add!("");
-    add!("# and it slides, and bounces off the walls of its box. a reflection is");
-    add!("# a triangle wave: go a distance, fold it back at each edge.");
-    add!("box = 1.15");
-    add!("slid = 5.5*(1 - slow)");
-    add!("dx = box - abs(mod(slid, 2*box) - box)");
-    add!("dy = 0.55*box - abs(mod(1.7*slid, 1.1*box) - 0.55*box)");
+    add!("die = dieface(seed, rolls, age, span)");
+    add!("settled = diedone(seed, rolls, age, span)");
     add!("");
     add!("# --- what you can see ------------------------------------------");
-    add!("color(0xE3E9EF)");
-    add!("digits(die, 8.6 - box + dx, 4.2 - 0.3 + dy, 0.9)");
+    add!("# The die itself is a MARK, further down, so it can be tapped -- this");
+    add!("# is only its face, which has to be redrawn every frame because it");
+    add!("# changes, and a mark\'s points do not.");
+    add!("dice(die, diex(seed, rolls, age, span), diey(seed, rolls, age, span), \
+         0.78, dieturn(seed, rolls, age, span))");
     add!("");
-    add!("# whose turn it is, in that seat's own colour, beside the die.");
+    add!("# whose turn it is, in that seat\'s own colour, in the middle of the");
+    add!("# board where the four home paths meet.");
     add!("color(pick(turn, 0xE0704A, 0x6FCF97, 0x4FBCD4, 0xE0A44A))");
     add!("param(0.62*exp(i*t) + 8.6 + 1.5i, 0, tau)");
     add!("digits(turn + 1, 8.6, 1.5, 0.42)");
     add!("");
-    add!("# a ring round the die while it is still going, so it is plain that");
-    add!("# the number is not yet the number.");
+    add!("# a ring that shrinks onto the die as it settles, so it is plain that");
+    add!("# the number is not yet the number. it follows the die about.");
     add!("color(0x46525E)");
-    add!("param(if(settled, 0, 1.5)*exp(i*t) + 8.6 + 4.2i, 0, tau)");
+    add!("param(if(settled, 0, 1.2)*exp(i*t) + diex(seed, rolls, age, span) \
+         + i*diey(seed, rolls, age, span), 0, tau)");
 
-    add!("");
     add!("# --- throwing it ------------------------------------------------");
     add!("# `flung` is WHEN, so everything above is a function of the clock and");
     add!("# nothing has to be stepped frame by frame.");
@@ -688,15 +690,27 @@ fn ludogame() -> Board {
         b.selected = vec![b.sheet.len() - 1];
         b.group_alone();
     }
-    // The die: figure 9, in the corner.
-    b.colour = 0xE3E9EF;
-    b.nib = Nib::Round(0.08);
-    let at = Cx::new(8.6, 4.2);
-    let box_path: Vec<Cx> = [(-0.9, -0.9), (0.9, -0.9), (0.9, 0.9), (-0.9, 0.9), (-0.9, -0.9)]
+    // The die. A MARK, because only a mark can be tapped -- and placed AND
+    // TURNED by the throw, so the square you tap is the square you can see
+    // wherever it has slid to and however it is lying. That is what `placea`
+    // is for, and it is the piece that was missing: a thing that follows a
+    // number nearly always has to face somewhere too.
+    b.colour = 0xEDE6D6;
+    b.nib = Nib::Round(0.07);
+    let at = Cx::ZERO;
+    let half = 0.78;
+    let box_path: Vec<Cx> = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0), (-1.0, -1.0)]
         .windows(2)
-        .flat_map(|w| line(at + Cx::new(w[0].0, w[0].1), at + Cx::new(w[1].0, w[1].1)))
+        .flat_map(|w| {
+            line(at + Cx::new(w[0].0 * half, w[0].1 * half), at + Cx::new(w[1].0 * half, w[1].1 * half))
+        })
         .collect();
     stroke(&mut b, &box_path);
+    let m = b.sheet.marks.last_mut().expect("the die");
+    m.closed = true;
+    m.place =
+        Some(("diex(seed, rolls, age, span)".into(), "diey(seed, rolls, age, span)".into()));
+    m.spin = Some("dieturn(seed, rolls, age, span)".into());
     b.selected = vec![b.sheet.len() - 1];
     b.group_alone();
     b.selected.clear();

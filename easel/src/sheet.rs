@@ -163,6 +163,9 @@ impl Sheet {
                 let _ = writeln!(out, "placex {x}");
                 let _ = writeln!(out, "placey {y}");
             }
+            if let Some(a) = &m.spin {
+                let _ = writeln!(out, "placea {a}");
+            }
             for chunk in m.pts.chunks(PER_LINE) {
                 out.push('p');
                 for z in chunk {
@@ -234,6 +237,13 @@ impl Sheet {
                     (Some(m), Some((at, pose, ease))) => m.track.set(at, pose, ease),
                     _ => confused += 1,
                 },
+                Some("placea") => {
+                    let rest = line.trim_start().splitn(2, char::is_whitespace).nth(1).unwrap_or("").to_string();
+                    match sheet.marks.last_mut() {
+                        Some(m) => m.spin = Some(rest),
+                        None => confused += 1,
+                    }
+                }
                 Some(w @ ("placex" | "placey")) => {
                     let rest = line.trim_start().splitn(2, char::is_whitespace).nth(1).unwrap_or("").to_string();
                     match sheet.marks.last_mut() {
@@ -385,6 +395,7 @@ mod tests {
             assert_eq!(a.act, b.act, "what it does must survive too");
             assert_eq!(a.group, b.group, "and which figure it belongs to");
             assert_eq!(a.place, b.place, "and what it follows");
+            assert_eq!(a.spin, b.spin, "and which way it is turned");
             assert_eq!(a.track, b.track, "and every keyframe");
             assert_eq!(a.pts.len(), b.pts.len());
             for (p, q) in a.pts.iter().zip(&b.pts) {

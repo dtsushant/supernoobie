@@ -87,6 +87,18 @@ pub struct Mark {
     /// Kept as **text**, not as a parsed expression, for the same reason a
     /// `Mark` holds no closures: text is what saves.
     pub place: Option<(String, String)>,
+    /// Which way it is turned, as an expression — radians, anticlockwise.
+    ///
+    /// The other half of [`place`](Mark::place). A thing that follows a number
+    /// nearly always needs to *face* somewhere too: a die tumbling, a car on a
+    /// track, the hand of a clock. Without it a drawn shape can be moved by the
+    /// game but only ever sits the way it was drawn, which reads as sliding
+    /// rather than moving.
+    ///
+    /// It turns about the mark’s own anchor, so a shape spins in place rather
+    /// than orbiting the origin — and it is read only when `place` is set,
+    /// because turning without moving is what a verb is already for.
+    pub spin: Option<String>,
     /// Which group it belongs to. `0` is none.
     ///
     /// A number rather than a tree of parents, because a figure is a handful
@@ -100,7 +112,7 @@ pub struct Mark {
 impl Mark {
     /// A stroke as the pen made it.
     pub fn new(pts: impl Into<Vec<Cx>>, nib: Nib, colour: u32) -> Mark {
-        Mark { pts: pts.into(), nib, taper: 0.0, colour, filled: true, closed: false, act: Act::still(), track: Track::new(), place: None, group: 0 }
+        Mark { pts: pts.into(), nib, taper: 0.0, colour, filled: true, closed: false, act: Act::still(), track: Track::new(), place: None, spin: None, group: 0 }
     }
 
     pub fn taper(mut self, f: f64) -> Mark {
@@ -201,7 +213,16 @@ impl Mark {
             // Where it is *put*, not where it is nudged to: the anchor is
             // moved to the point, so the shape's own middle lands there.
             (Some(x), Some(y)) if x.is_finite() && y.is_finite() => {
-                shapes::Pose::new(Cx::ONE, Cx::new(x, y) - self.anchor())
+                // `posed` maps z ↦ a·(z − anchor) + b + anchor, so turning about
+                // the anchor costs nothing but the multiplier: the offset is
+                // the same either way.
+                let turn = self
+                    .spin
+                    .as_deref()
+                    .and_then(|src| read(src))
+                    .filter(|a| a.is_finite())
+                    .unwrap_or(0.0);
+                shapes::Pose::new(Cx::polar(1.0, turn), Cx::new(x, y) - self.anchor())
             }
             // A half-typed expression leaves it where it was rather than
             // throwing it to the origin, which is the one place you would not

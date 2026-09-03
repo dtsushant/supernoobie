@@ -85,50 +85,38 @@ row on sq13 = if(at13 < 0, -100 - 13, if(at13 > 50, 200 + 10*seat13 + at13, mod(
 row on sq14 = if(at14 < 0, -100 - 14, if(at14 > 50, 200 + 10*seat14 + at14, mod(13*seat14 + at14, 52)))
 row on sq15 = if(at15 < 0, -100 - 15, if(at15 > 50, 200 + 10*seat15 + at15, mod(13*seat15 + at15, 52)))
 row on 
-row on # --- the die, thrown -------------------------------------------
+row on # --- the die, thrown across the board ---------------------------
 row on #
-row on # A die is flung, tumbles fast, slows, and settles. All three are one
-row on # number: exp(-age/relax), which is 1 at the throw and nothing when it
-row on # is over -- the same e^(-t/tau) as a branch settling after a gust or a
-row on # note dying away. Laplace, doing the only thing it ever does.
-row on relax = 0.42
+row on # Five rows, because the throw itself lives in `plotkit::dice` where
+row on # any game can have one. All five take the same four things -- the
+row on # seed, which throw this is, how long ago it left the hand, and how
+row on # big the board is -- so they differ only in the name at the front.
+row on #
+row on # It slides with its speed dying away, so the distance it covers
+row on # approaches a limit and never passes it; it folds off the walls,
+row on # which IS the reflection, at the angle it struck; and it turns more
+row on # slowly as it goes, landing square on a right angle.
+row on span = 6.4
 row on age = max(0, time - flung)
-row on slow = exp(-0 - age/relax)
-row on 
-row on # how hard it was thrown. different every roll, and worked out rather
-row on # than drawn from anywhere, so the same match replays exactly.
-row on spin = 11 + mod(floor(seed + 29*rolls), 13)
-row on 
-row on # faces turned through so far. the RATE decays, so it whirls, eases
-row on # and stops -- it does not run at one speed and then halt.
-row on tumbles = spin*(1 - slow)
-row on 
-row on # four time constants is 98 percent of the way there, which is the
-row on # usual answer to `when has an exponential finished`.
-row on settled = age > 4*relax
-row on die = if(settled, 1 + mod(floor(spin), 6), 1 + mod(floor(tumbles), 6))
-row on 
-row on # and it slides, and bounces off the walls of its box. a reflection is
-row on # a triangle wave: go a distance, fold it back at each edge.
-row on box = 1.15
-row on slid = 5.5*(1 - slow)
-row on dx = box - abs(mod(slid, 2*box) - box)
-row on dy = 0.55*box - abs(mod(1.7*slid, 1.1*box) - 0.55*box)
+row on die = dieface(seed, rolls, age, span)
+row on settled = diedone(seed, rolls, age, span)
 row on 
 row on # --- what you can see ------------------------------------------
-row on color(0xE3E9EF)
-row on digits(die, 8.6 - box + dx, 4.2 - 0.3 + dy, 0.9)
+row on # The die itself is a MARK, further down, so it can be tapped -- this
+row on # is only its face, which has to be redrawn every frame because it
+row on # changes, and a mark's points do not.
+row on dice(die, diex(seed, rolls, age, span), diey(seed, rolls, age, span), 0.78, dieturn(seed, rolls, age, span))
 row on 
-row on # whose turn it is, in that seat's own colour, beside the die.
+row on # whose turn it is, in that seat's own colour, in the middle of the
+row on # board where the four home paths meet.
 row on color(pick(turn, 0xE0704A, 0x6FCF97, 0x4FBCD4, 0xE0A44A))
 row on param(0.62*exp(i*t) + 8.6 + 1.5i, 0, tau)
 row on digits(turn + 1, 8.6, 1.5, 0.42)
 row on 
-row on # a ring round the die while it is still going, so it is plain that
-row on # the number is not yet the number.
+row on # a ring that shrinks onto the die as it settles, so it is plain that
+row on # the number is not yet the number. it follows the die about.
 row on color(0x46525E)
-row on param(if(settled, 0, 1.5)*exp(i*t) + 8.6 + 4.2i, 0, tau)
-row on 
+row on param(if(settled, 0, 1.2)*exp(i*t) + diex(seed, rolls, age, span) + i*diey(seed, rolls, age, span), 0, tau)
 row on # --- throwing it ------------------------------------------------
 row on # `flung` is WHEN, so everything above is a function of the clock and
 row on # nothing has to be stepped frame by frame.
@@ -421,19 +409,22 @@ p -4.9497 -2.6800 -5.0220 -2.6785 -5.0928 -2.6925 -5.1589 -2.7216 -5.2168 -2.764
 p -5.3190 -3.0231 -5.3059 -3.0936 -5.2774 -3.1593 -5.2350 -3.2171 -5.1808 -3.2640 -5.1175 -3.2976 -5.0483 -3.3163 -4.9767 -3.3191
 p -4.9063 -3.3059 -4.8406 -3.2774 -4.7829 -3.2350 -4.7360 -3.1808 -4.7024 -3.1175 -4.6806 -3.0764 -4.6664 -3.0496 -4.6571 -3.0323
 p -4.6511 -3.0210 -4.6472 -3.0136 -4.6447 -3.0089
-mark round 0.0800 taper 0.1200 colour E3E9EF fill closed
+mark round 0.0700 taper 0.1200 colour EDE6D6 fill closed
 group 17
-p 7.7000 3.3000 7.7262 3.3000 7.7696 3.3000 7.8240 3.3000 7.8856 3.3000 7.9519 3.3000 8.0212 3.3000 8.0925 3.3000
-p 8.1652 3.3000 8.2386 3.3000 8.3126 3.3000 8.3869 3.3000 8.4615 3.3000 8.5362 3.3000 8.6110 3.3000 8.6859 3.3000
-p 8.7609 3.3000 8.8358 3.3000 8.9108 3.3000 8.9858 3.3000 9.0607 3.3000 9.1357 3.3000 9.2107 3.3000 9.2857 3.3000
-p 9.3607 3.3000 9.4095 3.3000 9.4412 3.3263 9.4617 3.3696 9.4751 3.4240 9.4838 3.4856 9.4895 3.5519 9.4932 3.6212
-p 9.4956 3.6925 9.4971 3.7652 9.4981 3.8386 9.4988 3.9126 9.4992 3.9869 9.4995 4.0615 9.4997 4.1362 9.4998 4.2110
-p 9.4999 4.2859 9.4999 4.3609 9.4999 4.4358 9.5000 4.5108 9.5000 4.5858 9.5000 4.6607 9.5000 4.7357 9.5000 4.8107
-p 9.5000 4.8857 9.5000 4.9607 9.5000 5.0095 9.4737 5.0412 9.4304 5.0617 9.3760 5.0751 9.3144 5.0838 9.2481 5.0895
-p 9.1788 5.0932 9.1075 5.0956 9.0348 5.0971 8.9614 5.0981 8.8874 5.0988 8.8131 5.0992 8.7385 5.0995 8.6638 5.0997
-p 8.5890 5.0998 8.5141 5.0999 8.4391 5.0999 8.3642 5.0999 8.2892 5.1000 8.2142 5.1000 8.1393 5.1000 8.0643 5.1000
-p 7.9893 5.1000 7.9143 5.1000 7.8393 5.1000 7.7905 5.1000 7.7588 5.0737 7.7383 5.0304 7.7249 4.9760 7.7162 4.9144
-p 7.7105 4.8481 7.7068 4.7788 7.7044 4.7075 7.7029 4.6348 7.7019 4.5614 7.7012 4.4874 7.7008 4.4131 7.7005 4.3385
-p 7.7003 4.2638 7.7002 4.1890 7.7001 4.1141 7.7001 4.0391 7.7001 3.9642 7.7000 3.8892 7.7000 3.8142 7.7000 3.7393
-p 7.7000 3.6643 7.7000 3.5893 7.7000 3.5143 7.7000 3.4393 7.7000 3.3905 7.7000 3.3588 7.7000 3.3383 7.7000 3.3249
-p 7.7000 3.3162 7.7000 3.3105
+placex diex(seed, rolls, age, span)
+placey diey(seed, rolls, age, span)
+placea dieturn(seed, rolls, age, span)
+p -0.7800 -0.7800 -0.7573 -0.7800 -0.7197 -0.7800 -0.6726 -0.7800 -0.6192 -0.7800 -0.5617 -0.7800 -0.5016 -0.7800 -0.4398 -0.7800
+p -0.3769 -0.7800 -0.3132 -0.7800 -0.2491 -0.7800 -0.1847 -0.7800 -0.1200 -0.7800 -0.0553 -0.7800 0.0096 -0.7800 0.0745 -0.7800
+p 0.1394 -0.7800 0.2044 -0.7800 0.2693 -0.7800 0.3343 -0.7800 0.3993 -0.7800 0.4643 -0.7800 0.5293 -0.7800 0.5943 -0.7800
+p 0.6593 -0.7800 0.7015 -0.7800 0.7290 -0.7573 0.7468 -0.7197 0.7585 -0.6726 0.7660 -0.6192 0.7709 -0.5617 0.7741 -0.5016
+p 0.7762 -0.4398 0.7775 -0.3769 0.7784 -0.3132 0.7789 -0.2491 0.7793 -0.1847 0.7796 -0.1200 0.7797 -0.0553 0.7798 0.0096
+p 0.7799 0.0745 0.7799 0.1394 0.7799 0.2044 0.7800 0.2693 0.7800 0.3343 0.7800 0.3993 0.7800 0.4643 0.7800 0.5293
+p 0.7800 0.5943 0.7800 0.6593 0.7800 0.7015 0.7572 0.7290 0.7197 0.7468 0.6726 0.7585 0.6192 0.7660 0.5617 0.7709
+p 0.5016 0.7741 0.4398 0.7762 0.3769 0.7775 0.3132 0.7784 0.2491 0.7789 0.1847 0.7793 0.1200 0.7796 0.0553 0.7797
+p -0.0096 0.7798 -0.0745 0.7799 -0.1394 0.7799 -0.2044 0.7799 -0.2693 0.7800 -0.3343 0.7800 -0.3993 0.7800 -0.4643 0.7800
+p -0.5293 0.7800 -0.5943 0.7800 -0.6593 0.7800 -0.7015 0.7800 -0.7290 0.7572 -0.7468 0.7197 -0.7585 0.6726 -0.7660 0.6192
+p -0.7709 0.5617 -0.7741 0.5016 -0.7762 0.4398 -0.7775 0.3769 -0.7784 0.3132 -0.7789 0.2491 -0.7793 0.1847 -0.7796 0.1200
+p -0.7797 0.0553 -0.7798 -0.0096 -0.7799 -0.0745 -0.7799 -0.1394 -0.7799 -0.2044 -0.7800 -0.2693 -0.7800 -0.3343 -0.7800 -0.3993
+p -0.7800 -0.4643 -0.7800 -0.5293 -0.7800 -0.5943 -0.7800 -0.6593 -0.7800 -0.7015 -0.7800 -0.7290 -0.7800 -0.7468 -0.7800 -0.7585
+p -0.7800 -0.7660 -0.7800 -0.7709

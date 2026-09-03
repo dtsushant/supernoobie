@@ -464,6 +464,13 @@ mod tests {
         Studio { board, file: String::new(), say: String::new() }
     }
 
+    /// Where the die is lying. The board throws it across the whole square, so
+    /// there is no fixed spot to tap any more.
+    fn die_at(st: &Studio) -> Cx {
+        let age = (st.board.clock - var(st, "flung")).max(0.0);
+        plotkit::dice::thrown(var(st, "seed"), var(st, "rolls"), age, 6.4).at
+    }
+
     fn var(st: &Studio, name: &str) -> f64 {
         st.board.written().vars.iter().find(|(n, _)| n == name).map(|(_, v)| v.re).unwrap_or(f64::NAN)
     }
@@ -478,8 +485,9 @@ mod tests {
         apply(&mut st, Ask::Play { on: true });
         assert!(st.board.playing_game, "ludo has rules, so it plays as a game");
 
-        apply(&mut st, Ask::Pointer { x: 8.6, y: 4.2, down: true });
-        apply(&mut st, Ask::Pointer { x: 8.6, y: 4.2, down: false });
+        let d = die_at(&st);
+        apply(&mut st, Ask::Pointer { x: d.re, y: d.im, down: true });
+        apply(&mut st, Ask::Pointer { x: d.re, y: d.im, down: false });
         assert_eq!(var(&st, "rolled"), 1.0, "the die was thrown");
         assert_eq!(var(&st, "rolls"), 1.0, "and counted");
     }
@@ -493,12 +501,16 @@ mod tests {
     fn the_die_needs_the_clock_to_settle() {
         let mut st = ludo();
         apply(&mut st, Ask::Play { on: true });
-        apply(&mut st, Ask::Pointer { x: 8.6, y: 4.2, down: true });
-        apply(&mut st, Ask::Pointer { x: 8.6, y: 4.2, down: false });
+        let d = die_at(&st);
+        apply(&mut st, Ask::Pointer { x: d.re, y: d.im, down: true });
+        apply(&mut st, Ask::Pointer { x: d.re, y: d.im, down: false });
         assert_eq!(var(&st, "settled"), 0.0, "it has only just left the hand");
 
-        // Four time constants of 0.42, which is where `settled` turns true.
-        for _ in 0..40 {
+        // Past `plotkit::dice::OVER`, which is where the throw ends. Taken
+        // from there rather than written down, so a change to the physics
+        // moves this test with it instead of breaking it.
+        let ticks = (plotkit::dice::OVER / 0.05).ceil() as usize + 2;
+        for _ in 0..ticks {
             apply(&mut st, Ask::Tick { seconds: 0.05 });
         }
         assert_eq!(var(&st, "settled"), 1.0, "and now it has stopped");
@@ -516,10 +528,11 @@ mod tests {
     fn a_tap_that_drifts_still_rolls_the_die() {
         let mut st = ludo();
         apply(&mut st, Ask::Play { on: true });
-        apply(&mut st, Ask::Pointer { x: 8.6, y: 4.2, down: true });
+        let d = die_at(&st);
+        apply(&mut st, Ask::Pointer { x: d.re, y: d.im, down: true });
         // A few pixels of drift, which is what a pen does.
-        apply(&mut st, Ask::Pointer { x: 8.72, y: 4.31, down: true });
-        apply(&mut st, Ask::Pointer { x: 8.75, y: 4.34, down: false });
+        apply(&mut st, Ask::Pointer { x: d.re + 0.09, y: d.im + 0.08, down: true });
+        apply(&mut st, Ask::Pointer { x: d.re + 0.12, y: d.im + 0.1, down: false });
         assert_eq!(var(&st, "rolled"), 1.0, "the die was thrown");
     }
 
@@ -547,7 +560,8 @@ mod tests {
         apply(&mut st, Ask::Play { on: true });
         // Down on the die, up on a token in seat 0's yard.
         let yard = plotkit::ludo::waiting(0, 0);
-        apply(&mut st, Ask::Pointer { x: 8.6, y: 4.2, down: true });
+        let d = die_at(&st);
+        apply(&mut st, Ask::Pointer { x: d.re, y: d.im, down: true });
         apply(&mut st, Ask::Pointer { x: yard.re, y: yard.im, down: true });
         apply(&mut st, Ask::Pointer { x: yard.re, y: yard.im, down: false });
         assert_eq!(var(&st, "rolled"), 0.0, "the die was not thrown");

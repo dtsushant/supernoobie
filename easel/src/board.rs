@@ -490,6 +490,7 @@ impl Board {
                 act: crate::Act::still(),
                 track: crate::Track::new(),
                 place: None,
+                spin: None,
                 group: 0,
             }
         })
@@ -1037,8 +1038,15 @@ impl Board {
         let mut f = Frame::new();
         // The written half first, so hand-drawn marks sit on top of the
         // scaffolding they were drawn over.
-        for (shape, colour) in self.written().shapes {
+        let made = self.written();
+        for (shape, colour) in made.shapes {
             f.add(shape).color(colour).width(2);
+        }
+        // After the outlines, so a solid thing covers what it is lying on --
+        // a die sliding over the board hides the squares it is on, which is
+        // what a die lying on a board does.
+        for (shape, colour) in made.solid {
+            f.add(shape).color(colour).fill();
         }
         let env = self.sheet.script.env(self.clock, &self.tally);
         for m in &self.sheet.marks {

@@ -251,6 +251,68 @@ This is what lets a rule say *"send home whichever token is on this square"*.
 Without it a rule can only change a number it already knows the name of, and a
 game cannot be written.
 
+### A die
+
+A thrown die is not a random number with a picture on it, and it is not
+written in rows. It lives in `plotkit::dice`, so any drawing can have one:
+
+```text
+span = 6.4
+age  = max(0, time - flung)
+die     = dieface(seed, rolls, age, span)
+settled = diedone(seed, rolls, age, span)
+dice(die, diex(seed, rolls, age, span), diey(seed, rolls, age, span),
+     0.78, dieturn(seed, rolls, age, span))
+```
+
+All five take the same four things — the game’s seed, which throw this is, how
+long ago it left the hand, and the half-width of the square it is thrown across
+— so they differ only in the name at the front.
+
+| | |
+|---|---|
+| `dieface(…)` | the face it is showing, 1 to 6 |
+| `diex(…)` `diey(…)` | where it is |
+| `dieturn(…)` | how far round it has turned, in radians |
+| `diedone(…)` | whether it has stopped |
+| `dice(face, x, y, size, turn)` | draws it — body and pips |
+
+`flung` is *when* it was thrown, so everything is a function of the clock and
+nothing is stepped frame by frame. A throw can be replayed, scrubbed, or watched
+at half speed and looks the same every time.
+
+**It slides, bounces and slows with one decay.** The speed dies away as
+`e^{-t/τ}`, so the distance covered approaches a limit and never passes it —
+that is why a die thrown hard does not slide for ever. It folds off the walls,
+which *is* the reflection at the angle it struck, exact rather than detected:
+there is no frame on which the die is a little way through the wall and has to
+be pushed back. And it lands square, on a right angle.
+
+**No random number generator.** The throw is worked out from the seed and the
+throw number, so it is unpredictable in play and exactly repeatable — which is
+what lets a match be replayed and makes “he cheated” answerable.
+
+Be honest about the face: a real die tumbles in three dimensions, and this is a
+flat drawing with one angle. So the face is a *consequence* — how far it turned
+and how many walls it struck — not a simulation. What matters is that it is
+entirely determined by the throw.
+
+### Turning a mark by a number
+
+`placex` and `placey` move a mark; `placea` **turns** it, in radians, about its
+own anchor:
+
+```text
+placex diex(seed, rolls, age, span)
+placey diey(seed, rolls, age, span)
+placea dieturn(seed, rolls, age, span)
+```
+
+A thing that follows a number nearly always has to face somewhere too — a die
+tumbling, a car on a track, the hand of a clock. Without it a mark can be moved
+by the game but only ever sits the way it was drawn, which reads as sliding
+rather than moving. It is read only when `placex`/`placey` are set.
+
 ### Repeating a deed
 
 A rule can do the same thing to every subscript in a range:

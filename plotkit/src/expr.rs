@@ -185,7 +185,7 @@ pub enum Expr {
 }
 
 /// Names that parse as function calls rather than implicit multiplication.
-pub const FUNCS: [&str; 25] = [
+pub const FUNCS: [&str; 30] = [
     "exp", "ln", "sin", "cos", "tan", "sqrt", "abs", "arg", "conj", "re", "im", "polar", "pow",
     // Whole numbers. A language with no way to say "the integer part" cannot
     // say "a number between 1 and 9", which is most of what a counting game
@@ -196,6 +196,11 @@ pub const FUNCS: [&str; 25] = [
     "if", "and", "or", "not", "pick",
     // Where a token stands on a board of squares. See `crate::ludo`.
     "ludox", "ludoy",
+    // A die in mid-throw. See `crate::dice`. All five take the same four
+    // things -- the game’s seed, which throw this is, how long ago it left the
+    // hand, and the half-width of the board it is thrown across -- so a whole
+    // die is five rows that differ only in the name at the front.
+    "diex", "diey", "dieturn", "dieface", "diedone",
 ];
 
 /// Names that draw something.
@@ -319,6 +324,25 @@ impl Expr {
                             crate::ludo::place(seat, (step as usize).min(crate::ludo::FINISH))
                         };
                         Cx::new(if f == "ludox" { at.re } else { at.im }, 0.0)
+                    }
+                    // A die in mid-throw. Five functions rather than one giving
+                    // a die, for the same reason `ludox` and `ludoy` are two:
+                    // a row holds one number, and numbers are what save.
+                    "diex" | "diey" | "dieturn" | "dieface" | "diedone" => {
+                        if a.len() != 4 {
+                            return Err(format!("'{f}' takes a seed, a throw, an age and a span"));
+                        }
+                        let r = crate::dice::thrown(a[0].re, a[1].re, a[2].re, a[3].re);
+                        Cx::new(
+                            match f.as_str() {
+                                "diex" => r.at.re,
+                                "diey" => r.at.im,
+                                "dieturn" => r.turn,
+                                "dieface" => r.face as f64,
+                                _ => r.done as u8 as f64,
+                            },
+                            0.0,
+                        )
                     }
                     "not" => Cx::new(if one(0)?.re.abs() > NEAR { 0.0 } else { 1.0 }, 0.0),
                     "floor" => Cx::new(one(0)?.re.floor(), 0.0),
