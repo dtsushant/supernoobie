@@ -56,6 +56,15 @@ use std::collections::HashMap;
 // tokens
 // ---------------------------------------------------------------------------
 
+/// The name `at[3]` means: `at3`.
+///
+/// Rounded, and negatives keep their sign — `at[-1]` is `at-1`, which is a
+/// name nobody can type by accident and so cannot collide with one somebody
+/// meant.
+pub fn indexed(name: &str, k: f64) -> String {
+    format!("{name}{}", k.round() as i64)
+}
+
 /// How close two numbers have to be to count as the same.
 ///
 /// Exact equality between floats is a trap — `0.1 + 0.2 == 0.3` is false — and
@@ -75,6 +84,8 @@ enum Tok {
     Eq,
     /// A comparison: `==`, `!=`, `<`, `<=`, `>`, `>=`.
     Cmp(&'static str),
+    OpenSquare,
+    CloseSquare,
 }
 
 fn lex(s: &str) -> Result<Vec<Tok>, String> {
@@ -137,6 +148,8 @@ fn lex(s: &str) -> Result<Vec<Tok>, String> {
             k += 1;
             match c {
                 '(' => out.push(Tok::Open),
+                '[' => out.push(Tok::OpenSquare),
+                ']' => out.push(Tok::CloseSquare),
                 ')' => out.push(Tok::Close),
                 ',' => out.push(Tok::Comma),
                 '+' | '-' | '*' | '/' | '^' => out.push(Tok::Op(c)),
@@ -153,6 +166,13 @@ fn lex(s: &str) -> Result<Vec<Tok>, String> {
 
 #[derive(Clone, Debug)]
 pub enum Expr {
+    /// `at[k]` — the variable **named** `at` followed by the number `k`.
+    ///
+    /// Not an array. There is no second kind of value anywhere in this
+    /// language, and adding one would mean two of everything: two ways to
+    /// bind, two ways to save, two ways to be wrong. `at[3]` is spelling for
+    /// the name `at3`, and `at[k]` works out `k` first.
+    Index(String, Box<Expr>),
     /// A comparison, giving `1` for true and `0` for false — because every
     /// value here is a number and inventing a second kind would mean two of
     /// everything.
@@ -206,6 +226,10 @@ impl Expr {
                     '^' => cpow(x, y),
                     _ => return Err(format!("bad operator '{op}'")),
                 }
+            }
+            Expr::Index(name, k) => {
+                let full = indexed(name, k.eval(env)?.re);
+                *env.get(full.as_str()).ok_or_else(|| format!("unknown name '{full}'"))?
             }
             Expr::Cmp(op, a, b) => {
                 let (x, y) = (a.eval(env)?, b.eval(env)?);
@@ -479,6 +503,14 @@ impl P {
                 self.k += 1;
                 Ok(Expr::Num(v))
             }
+            Some(Tok::Ident(n)) if matches!(self.t.get(self.k + 1), Some(Tok::OpenSquare)) => {
+                self.k += 2;
+                let inside = self.expr()?;
+                if !self.eat(&Tok::CloseSquare) {
+                    return Err(format!("'{n}[' was never closed"));
+                }
+                Ok(Expr::Index(n, Box::new(inside)))
+            }
             Some(Tok::Ident(n)) => {
                 self.k += 1;
                 // `f(` is a call only when f is a known function; otherwise it
@@ -719,6 +751,52 @@ pub fn env_of(p: &Program) -> HashMap<String, Cx> {
 // ===========================================================================
 #[cfg(test)]
 mod tests {
+    /// ★ `at[k]` is **spelling**, not an array. There is no second kind of
+    /// value anywhere in this language, and adding one would mean two of
+    /// everything: two ways to bind, two ways to save, two ways to be wrong.
+    #[test]
+    fn a_subscript_is_a_name_worked_out() {
+        let p = run("at0 = 5\nat1 = 9\nk = 1\na = at[k]\nb = at[0]");
+        assert!(p.errors.is_empty(), "{:?}", p.errors);
+        let get = |n: &str| p.vars.iter().find(|(k, _)| k == n).expect(n).1.re;
+        assert_eq!(get("a"), 9.0);
+        assert_eq!(get("b"), 5.0);
+    }
+
+    /// The index is worked out first, so it can be anything.
+    #[test]
+    fn the_index_can_be_a_sum() {
+        let p = run("at2 = 7\nk = 1\na = at[k + 1]");
+        assert!(p.errors.is_empty(), "{:?}", p.errors);
+        assert_eq!(p.vars.iter().find(|(n, _)| n == "a").expect("a").1.re, 7.0);
+    }
+
+    /// ★ A subscript that names nothing says so, exactly as a plain name does
+    /// — rather than quietly becoming zero, which is how a typo turns into a
+    /// drawing that is subtly wrong instead of visibly broken.
+    #[test]
+    fn a_subscript_that_names_nothing_says_so() {
+        let p = run("at0 = 1\na = at[9]");
+        assert!(!p.errors.is_empty());
+        assert!(p.errors[0].1.contains("at9"), "it should say which name: {:?}", p.errors);
+    }
+
+    /// Negative subscripts keep their sign, so they cannot collide with a name
+    /// anybody meant.
+    #[test]
+    fn a_negative_subscript_is_its_own_name() {
+        assert_eq!(indexed("at", -1.0), "at-1");
+        assert_eq!(indexed("at", 3.4), "at3");
+        assert_ne!(indexed("at", -1.0), indexed("at", 1.0));
+    }
+
+    /// An unclosed subscript is a mistake with a message, not a silent
+    /// misreading.
+    #[test]
+    fn an_unclosed_subscript_is_refused() {
+        assert!(!run("a = at[1").errors.is_empty());
+    }
+
     /// Read one binding out of a script.
     fn val(src: &str) -> f64 {
         let p = run(src);

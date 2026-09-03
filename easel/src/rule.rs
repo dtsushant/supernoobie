@@ -47,7 +47,7 @@
 
 use std::collections::HashMap;
 
-use plotkit::expr::{self, Expr};
+use plotkit::expr::{self, indexed, Expr};
 use plotkit::Cx;
 
 /// What sets a rule off.
@@ -57,12 +57,36 @@ pub enum On {
     Tap(u32),
 }
 
+/// What a deed writes to: a name, or a name with a number worked out.
+///
+/// `at[k] = -1` is the whole reason this exists. Without it a rule can change
+/// a number it knows the name of and nothing else — so "send home whichever
+/// token is on this square" cannot be said at all, and a game cannot be
+/// written.
+#[derive(Clone, Debug)]
+pub struct Target {
+    pub name: String,
+    /// The subscript, if there is one. Worked out when the deed happens, not
+    /// when it is read, so it can depend on what the deeds before it did.
+    pub at: Option<Expr>,
+}
+
+impl Target {
+    /// The name this actually writes to, now.
+    pub fn name_now(&self, env: &HashMap<String, Cx>) -> Result<String, String> {
+        match &self.at {
+            None => Ok(self.name.clone()),
+            Some(k) => Ok(indexed(&self.name, k.eval(env)?.re)),
+        }
+    }
+}
+
 /// One rule: when this happens, do these.
 #[derive(Clone, Debug)]
 pub struct Rule {
     pub on: On,
     /// `name = expression`, in order.
-    pub deeds: Vec<(String, Expr)>,
+    pub deeds: Vec<(Target, Expr)>,
 }
 
 /// What the game has got to: values that shadow the rows while it runs.
@@ -119,22 +143,65 @@ pub fn read(text: &str) -> Option<Rule> {
     };
 
     let mut deeds = Vec::new();
-    for one in body.split(',') {
-        let Some((name, value)) = one.split_once('=') else {
+    // Split on the commas that separate deeds, not on every comma: a subscript
+    // may hold one — `at[mod(k, 4)] = 0` — and tearing it in half would leave
+    // two things neither of which parses.
+    for one in split_deeds(body) {
+        let Some((left, value)) = one.split_once('=') else {
             continue;
         };
-        let name = name.trim().to_string();
-        if name.is_empty() {
+        let Some(target) = read_target(left) else {
             continue;
-        }
+        };
         // A deed that will not parse is dropped and the rest of the rule
         // still works, for the same reason a bad row does not blank the
         // drawing: half-typed text is the normal state of a row being edited.
         if let Ok(e) = expr::parse(value.trim()) {
-            deeds.push((name, e));
+            deeds.push((target, e));
         }
     }
     (!deeds.is_empty()).then_some(Rule { on, deeds })
+}
+
+/// `at` or `at[k]`, and nothing else — an expression on the left of an `=`
+/// would be an equation, and this language does not solve those.
+fn read_target(left: &str) -> Option<Target> {
+    let left = left.trim();
+    let ok_name = |n: &str| {
+        !n.is_empty()
+            && n.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+            && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    };
+    match left.split_once('[') {
+        None => ok_name(left).then(|| Target { name: left.to_string(), at: None }),
+        Some((name, rest)) => {
+            let inside = rest.strip_suffix(']')?;
+            let name = name.trim();
+            let at = expr::parse(inside.trim()).ok()?;
+            ok_name(name).then(|| Target { name: name.to_string(), at: Some(at) })
+        }
+    }
+}
+
+/// Split a rule's body on the commas between deeds, at the outermost level.
+fn split_deeds(body: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut depth = 0i32;
+    let mut here = String::new();
+    for c in body.chars() {
+        match c {
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth -= 1,
+            ',' if depth == 0 => {
+                out.push(std::mem::take(&mut here));
+                continue;
+            }
+            _ => {}
+        }
+        here.push(c);
+    }
+    out.push(here);
+    out
 }
 
 /// Is this row a rule? Cheap enough to ask on every row, every frame.
@@ -150,14 +217,18 @@ pub fn is_rule(text: &str) -> bool {
 /// once from a frozen snapshot would be defensible and is not what anybody
 /// reading the line left to right expects.
 pub fn carry_out(rule: &Rule, tally: &mut Tally, env: &HashMap<String, Cx>) {
-    for (name, value) in &rule.deeds {
+    for (target, value) in &rule.deeds {
         let mut here = env.clone();
         for (k, v) in &tally.values {
             here.insert(k.clone(), Cx::new(*v, 0.0));
         }
+        // The subscript is worked out **now**, against everything the deeds
+        // before it have already done — so `k = k + 1, at[k] = 0` writes to
+        // the new `k`, which is what reading it left to right says.
+        let Ok(name) = target.name_now(&here) else { continue };
         match value.eval(&here) {
             Ok(v) if v.re.is_finite() => {
-                tally.values.insert(name.clone(), v.re);
+                tally.values.insert(name, v.re);
             }
             // A deed that will not evaluate leaves the value alone. The
             // alternative is a score that becomes NaN on one bad tap and stays
@@ -183,7 +254,7 @@ mod tests {
         let r = read("when tap 1: score = score + 1").expect("a rule");
         assert_eq!(r.on, On::Tap(1));
         assert_eq!(r.deeds.len(), 1);
-        assert_eq!(r.deeds[0].0, "score");
+        assert_eq!(r.deeds[0].0.name, "score");
     }
 
     /// Several deeds to one tap, separated by commas.
@@ -237,6 +308,84 @@ mod tests {
     fn a_half_typed_deed_does_not_lose_the_rule() {
         let r = read("when tap 1: score = score + 1, a = ((((").expect("a rule");
         assert_eq!(r.deeds.len(), 1);
+    }
+
+    /// ★ **A deed can write to a name it works out.** Without this a rule can
+    /// change a number it already knows the name of and nothing else — so
+    /// "send home whichever token is on this square" cannot be said at all,
+    /// and a game cannot be written.
+    #[test]
+    fn a_deed_can_write_to_a_name_it_works_out() {
+        let r = read("when tap 1: at[k] = -1").expect("a rule");
+        let mut t = Tally::new();
+        t.values.insert("k".into(), 2.0);
+        t.values.insert("at2".into(), 9.0);
+        carry_out(&r, &mut t, &env());
+        assert_eq!(t.get("at2"), Some(-1.0), "it should have written to at2");
+        assert_eq!(t.get("k"), Some(2.0), "and nothing else");
+    }
+
+    /// ★ The subscript is worked out **now**, against everything the deeds
+    /// before it have done — so `k = k + 1, at[k] = 0` writes to the new `k`,
+    /// which is what reading it left to right says.
+    #[test]
+    fn a_subscript_sees_the_deeds_before_it() {
+        let r = read("when tap 1: k = k + 1, at[k] = 7").expect("a rule");
+        let mut t = Tally::new();
+        t.values.insert("k".into(), 0.0);
+        carry_out(&r, &mut t, &env());
+        assert_eq!(t.get("k"), Some(1.0));
+        assert_eq!(t.get("at1"), Some(7.0), "the NEW k");
+        assert_eq!(t.get("at0"), None, "not the old one");
+    }
+
+    /// ★ A rule's body splits on the commas between **deeds**, not on every
+    /// comma — a subscript may hold one, and tearing it in half would leave
+    /// two things neither of which parses.
+    #[test]
+    fn a_comma_inside_a_subscript_does_not_split_the_deed() {
+        let r = read("when tap 1: at[mod(k, 4)] = 3, score = 1").expect("a rule");
+        assert_eq!(r.deeds.len(), 2, "two deeds, four commas");
+
+        let mut t = Tally::new();
+        t.values.insert("k".into(), 6.0);
+        carry_out(&r, &mut t, &env());
+        assert_eq!(t.get("at2"), Some(3.0), "6 mod 4 is 2");
+        assert_eq!(t.get("score"), Some(1.0));
+    }
+
+    /// The left of an `=` is a name or a subscripted name and nothing else. An
+    /// expression there would be an equation, and this language does not solve
+    /// those — so it is refused rather than half-understood.
+    #[test]
+    fn only_a_name_can_be_written_to() {
+        assert!(read("when tap 1: at[k] = 1").is_some());
+        assert!(read("when tap 1: a + b = 1").is_none());
+        assert!(read("when tap 1: 2 = 1").is_none());
+        assert!(read("when tap 1: at[ = 1").is_none());
+    }
+
+    /// A worked example of the thing that could not be said before: a token
+    /// standing on the same square as another goes home.
+    #[test]
+    fn a_rule_can_send_home_whoever_is_here() {
+        // Four tokens, positions in at0..at3. Token 0 lands on square 12,
+        // where token 2 already stands.
+        let r = read(
+            "when tap 1: at[0] = 12, \
+             at[0*4] = at[0], \
+             at[2] = if(at[2] == 12, -1, at[2]), \
+             at[3] = if(at[3] == 12, -1, at[3])",
+        )
+        .expect("a rule");
+        let mut t = Tally::new();
+        for (k, v) in [("at0", 0.0), ("at1", 5.0), ("at2", 12.0), ("at3", 30.0)] {
+            t.values.insert(k.into(), v);
+        }
+        carry_out(&r, &mut t, &env());
+        assert_eq!(t.get("at0"), Some(12.0), "it moved");
+        assert_eq!(t.get("at2"), Some(-1.0), "and sent the one that was there home");
+        assert_eq!(t.get("at3"), Some(30.0), "and left the others alone");
     }
 
     /// Things that are not rules are not rules.

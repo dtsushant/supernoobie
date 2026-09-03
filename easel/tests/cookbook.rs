@@ -41,6 +41,28 @@ a = if(x == 0, 0, 1/x)"), 0.0, "if never divides by nothing");
     assert!(!run("a = 1 < 2 < 3").errors.is_empty(), "two comparisons in a row are refused");
 }
 
+/// ★ The cookbook's claims about names worked out: `at[k]` is spelling, the
+/// subscript sees the deeds before it, and a negative one is its own name.
+#[test]
+fn names_worked_out_behave_as_written() {
+    use easel::rule;
+    let made = run("at0 = 5
+at1 = 9
+k = 1
+a = at[k]");
+    assert!(made.errors.is_empty(), "{:?}", made.errors);
+    assert_eq!(made.vars.iter().find(|(n, _)| n == "a").expect("a").1.re, 9.0);
+
+    let r = rule::read("when tap 1: k = k + 1, at[k] = 0").expect("a rule");
+    let mut t = rule::Tally::new();
+    t.values.insert("k".into(), 0.0);
+    rule::carry_out(&r, &mut t, &std::collections::HashMap::new());
+    assert_eq!(t.get("at1"), Some(0.0), "the NEW k");
+    assert_eq!(t.get("at0"), None, "not the old one");
+
+    assert_eq!(plotkit::expr::indexed("at", -1.0), "at-1", "a negative subscript is its own name");
+}
+
 /// ★ A curve that only **touches** the level is drawn if and only if the grid
 /// happens to land on it — which is worse than never being drawn, because it
 /// depends on where you are looking.

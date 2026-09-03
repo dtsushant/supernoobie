@@ -181,7 +181,7 @@ a = 5 + 10*(die == 6)          15 on a six, 5 otherwise
 | `<` `<=` `>` `>=` | on the **real part**, since complex numbers are not ordered |
 | `and(a,b)` `or(a,b)` `not(a)` | anything away from zero is true |
 | `if(question, yes, no)` | |
-| `pick(k, v0, v1, …)` | the `k`-th value — an indexed read without arrays |
+| `pick(k, v0, v1, …)` | the `k`-th value, chosen without working out the rest |
 
 Comparison binds **looser** than `+`, so `a + b == c` asks what it looks like
 it asks. Two in a row (`a < b < c`) are refused rather than quietly read as
@@ -195,6 +195,32 @@ if(x == 0, 0, 1/x)             never divides by nothing
 and(0, ln(0))                  never takes the log of nothing
 pick(0, 5, ln(0))              only the one chosen is worked out
 ```
+
+### Names worked out
+
+`at[k]` is the variable **named** `at` followed by the number `k`. It is
+spelling, not an array — there is no second kind of value anywhere in this
+language, and adding one would mean two of everything: two ways to bind, two
+ways to save, two ways to be wrong.
+
+```text
+at0 = 5
+at1 = 9
+k = 1
+a = at[k]                      9
+when tap 1: at[k] = -1         and a rule can write to one
+```
+
+The subscript is worked out **when the deed happens**, against everything the
+deeds before it have already done — so `k = k + 1, at[k] = 0` writes to the
+*new* `k`, which is what reading it left to right says.
+
+`at[-1]` is the name `at-1`, which nobody can type by accident, so a negative
+subscript cannot collide with a name you meant.
+
+This is what lets a rule say *"send home whichever token is on this square"*.
+Without it a rule can only change a number it already knows the name of, and a
+game cannot be written.
 
 ### Implicit multiplication
 
