@@ -211,7 +211,13 @@ impl Expr {
                     }
                     "sqrt" => cpow(one(0)?, Cx::new(0.5, 0.0)),
                     "abs" => Cx::new(one(0)?.abs(), 0.0),
-                    "arg" => Cx::new(one(0)?.arg(), 0.0),
+                    // The SAME `arg` that `ln` uses. It was `Cx::arg`, which
+                    // does not normalise negative zero -- so `ln(-1)` gave
+                    // `+i pi` and `arg(-1)` gave `-pi`, two answers for one
+                    // number, from one expression language. The trap is that
+                    // `-1` parses as `Neg(1)`, and negating `0.0` gives `-0.0`,
+                    // and `(-0.0).atan2(-1.0)` is `-pi`.
+                    "arg" => Cx::new(principal_arg(one(0)?), 0.0),
                     "conj" => one(0)?.conj(),
                     "re" => Cx::new(one(0)?.re, 0.0),
                     "im" => Cx::new(one(0)?.im, 0.0),
@@ -599,6 +605,25 @@ pub fn env_of(p: &Program) -> HashMap<String, Cx> {
 // ===========================================================================
 #[cfg(test)]
 mod tests {
+    /// ★ `arg` and `ln` must agree about the same number. They did not: `arg`
+    /// used `Cx::arg`, which does not normalise negative zero, so `ln(-1)`
+    /// gave `+i pi` and `arg(-1)` gave `-pi`. The trap is that `-1` parses as
+    /// `Neg(1)`, negating `0.0` gives `-0.0`, and `(-0.0).atan2(-1.0)` is
+    /// `-pi`.
+    #[test]
+    fn arg_and_ln_agree_about_the_same_number() {
+        let val = |src: &str| {
+            let p = run(&format!("a = {src}"));
+            assert!(p.errors.is_empty(), "{src}: {:?}", p.errors);
+            p.vars.iter().find(|(n, _)| n == "a").expect("a").1
+        };
+        let pi = std::f64::consts::PI;
+        assert!((val("arg(-1)").re - pi).abs() < 1e-12, "arg(-1) should be +pi, got {}", val("arg(-1)").re);
+        assert!((val("im(ln(-1))").re - pi).abs() < 1e-12, "and ln(-1) should agree");
+        assert!(val("arg(1)").re.abs() < 1e-12);
+        assert!((val("arg(i)").re - pi / 2.0).abs() < 1e-12);
+    }
+
     /// ★ Whole numbers. Without a way to say "the integer part" the language
     /// cannot say "a number between 1 and 9", which is most of what a counting
     /// game needs.

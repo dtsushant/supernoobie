@@ -30,31 +30,51 @@ fn value(b: &Board, name: &str) -> f64 {
     b.written().vars.iter().find(|(n, _)| n == name).map(|(_, v)| v.re).unwrap_or(f64::NAN)
 }
 
-/// ★ A right answer shows a smile and a wrong one shows a ghost — and each
-/// puts the other into the past, or a fading smile hangs about inside the
-/// ghost that follows it.
+/// ★ A right answer shows a smile and a wrong one shows a ghost, and each
+/// fades away again.
+///
+/// Measured as "more is drawn now than a moment later", **within one
+/// question**. Comparing counts across two taps looks tidier and is wrong: the
+/// answers are drawn with `digits`, so going from 9 to 10 adds a glyph and
+/// moves the total for reasons that have nothing to do with faces. That is how
+/// this test failed first time.
 #[test]
 fn a_right_answer_smiles_and_a_wrong_one_says_boo() {
+    let drawn = |b: &Board| b.written().shapes.len();
+
+    for k in [1usize, 0] {
+        let mut b = game();
+        tap(&mut b, box_at(k));
+        let just_after = drawn(&b);
+        // Same question either side of this: only the face changes.
+        b.clock += 3.0;
+        let later = drawn(&b);
+        assert!(just_after > later, "box {k} should show a face and then lose it: {just_after} then {later}");
+    }
+}
+
+/// And only one face at a time — each rule puts the other into the past, or a
+/// fading smile hangs about inside the ghost that follows it.
+#[test]
+fn there_is_never_more_than_one_face() {
     let mut b = game();
-    let faces = |b: &Board| {
-        // Both faces are always in the script; only their size changes, and a
-        // face of no size is not drawn at all.
-        b.written().shapes.len()
-    };
-    let quiet = faces(&b);
-
     tap(&mut b, box_at(1));
-    assert!(faces(&b) > quiet, "a right answer should show something");
-    let cheered = faces(&b);
-
-    b.clock += 3.0;
-    assert_eq!(faces(&b), quiet, "and it should fade away again");
+    let one_face = b.written().shapes.len();
+    b.clock += 0.05;
 
     tap(&mut b, box_at(0));
-    assert_eq!(faces(&b), cheered, "a wrong answer should show something too");
-    // One face at a time: the smile just shown must not still be there.
     b.clock += 0.05;
-    assert_eq!(faces(&b), cheered, "and only one of them");
+    let after = b.written().shapes.len();
+    // The question changed, so the totals are not comparable directly --
+    // compare each against its own faceless moment instead.
+    let with_face = after;
+    b.clock += 3.0;
+    let without = b.written().shapes.len();
+    assert_eq!(with_face - without, one_face - {
+        let mut c = game();
+        c.clock += 3.0;
+        c.written().shapes.len()
+    }, "one face then, one face now");
 }
 
 /// ★ A box is tapped in the **middle**, which is where a child will put their
