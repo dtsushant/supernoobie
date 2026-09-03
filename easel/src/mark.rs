@@ -75,6 +75,18 @@ pub struct Mark {
     /// impossible to reason about and impossible to edit, because undoing what
     /// you can see means guessing which half caused it.
     pub track: Track,
+    /// Where it is put, as two expressions — `x` and `y`, in the script's own
+    /// language.
+    ///
+    /// **The piece that lets a drawn shape follow a number.** A mark's points
+    /// are where the hand made it and a pose is what an animation does to it;
+    /// neither can depend on `score` or `at3`. Without this a token cannot be
+    /// both tappable — which needs it to be a mark — and moved by a rule,
+    /// which needs it to follow a variable.
+    ///
+    /// Kept as **text**, not as a parsed expression, for the same reason a
+    /// `Mark` holds no closures: text is what saves.
+    pub place: Option<(String, String)>,
     /// Which group it belongs to. `0` is none.
     ///
     /// A number rather than a tree of parents, because a figure is a handful
@@ -88,7 +100,7 @@ pub struct Mark {
 impl Mark {
     /// A stroke as the pen made it.
     pub fn new(pts: impl Into<Vec<Cx>>, nib: Nib, colour: u32) -> Mark {
-        Mark { pts: pts.into(), nib, taper: 0.0, colour, filled: true, closed: false, act: Act::still(), track: Track::new(), group: 0 }
+        Mark { pts: pts.into(), nib, taper: 0.0, colour, filled: true, closed: false, act: Act::still(), track: Track::new(), place: None, group: 0 }
     }
 
     pub fn taper(mut self, f: f64) -> Mark {
@@ -176,9 +188,36 @@ impl Mark {
         }
     }
 
+    /// The same, but following its expressions if it has any.
+    ///
+    /// A placed mark ignores its keys and verbs. Two things deciding where one
+    /// shape is would be a shape pushed by two hands, and undoing what you can
+    /// see would mean guessing which half caused it — the same reason keys win
+    /// over verbs rather than adding to them.
+    pub fn pose_in(&self, t: f64, env: &std::collections::HashMap<String, Cx>) -> shapes::Pose {
+        let Some((x, y)) = &self.place else { return self.pose_at(t) };
+        let read = |src: &str| plotkit::expr::parse(src).ok().and_then(|e| e.eval(env).ok()).map(|z| z.re);
+        match (read(x), read(y)) {
+            // Where it is *put*, not where it is nudged to: the anchor is
+            // moved to the point, so the shape's own middle lands there.
+            (Some(x), Some(y)) if x.is_finite() && y.is_finite() => {
+                shapes::Pose::new(Cx::ONE, Cx::new(x, y) - self.anchor())
+            }
+            // A half-typed expression leaves it where it was rather than
+            // throwing it to the origin, which is the one place you would not
+            // notice it had gone wrong.
+            _ => self.pose_at(t),
+        }
+    }
+
+    /// What it looks like `t` seconds in, following its expressions.
+    pub fn at_in(&self, t: f64, env: &std::collections::HashMap<String, Cx>) -> Shape {
+        self.posed(self.pose_in(t, env))
+    }
+
     /// Whether anything at all makes it move.
     pub fn moves(&self) -> bool {
-        !self.track.is_empty() || !self.act.steps.is_empty()
+        !self.track.is_empty() || !self.act.steps.is_empty() || self.place.is_some()
     }
 
     /// What it looks like `t` seconds in.

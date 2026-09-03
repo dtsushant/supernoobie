@@ -100,12 +100,20 @@ impl Sheet {
     /// drawn last, and that is the one a person means when they point at an
     /// overlap.
     pub fn at(&self, p: Cx, tolerance: f64, t: f64) -> Option<usize> {
+        self.at_in(p, tolerance, t, &std::collections::HashMap::new())
+    }
+
+    /// The same, following whatever the script says. **A placed mark has to be
+    /// caught where it is drawn**, and where it is drawn depends on the
+    /// numbers — so hit testing needs them too, or a token you can see cannot
+    /// be tapped.
+    pub fn at_in(&self, p: Cx, tolerance: f64, t: f64, env: &std::collections::HashMap<String, Cx>) -> Option<usize> {
         let lo = Cx::new(p.re - 1e4, p.im - 1e4);
         let hi = Cx::new(p.re + 1e4, p.im + 1e4);
         (0..self.marks.len()).rev().find(|k| {
             let m = &self.marks[*k];
-            let (pose, here) = (m.pose_at(t), m.anchor());
-            let shape = m.at(t);
+            let (pose, here) = (m.pose_in(t, env), m.anchor());
+            let shape = m.at_in(t, env);
             if shape.touches(p, tolerance, lo, hi, 800) {
                 return true;
             }
@@ -148,6 +156,12 @@ impl Sheet {
             );
             if m.group != 0 {
                 let _ = writeln!(out, "group {}", m.group);
+            }
+            if let Some((x, y)) = &m.place {
+                // One line each, so an expression may hold anything at all --
+                // including whatever character would have been the separator.
+                let _ = writeln!(out, "placex {x}");
+                let _ = writeln!(out, "placey {y}");
             }
             for chunk in m.pts.chunks(PER_LINE) {
                 out.push('p');
@@ -220,6 +234,16 @@ impl Sheet {
                     (Some(m), Some((at, pose, ease))) => m.track.set(at, pose, ease),
                     _ => confused += 1,
                 },
+                Some(w @ ("placex" | "placey")) => {
+                    let rest = line.trim_start().splitn(2, char::is_whitespace).nth(1).unwrap_or("").to_string();
+                    match sheet.marks.last_mut() {
+                        Some(m) => {
+                            let (x, y) = m.place.clone().unwrap_or_default();
+                            m.place = Some(if w == "placex" { (rest, y) } else { (x, rest) });
+                        }
+                        None => confused += 1,
+                    }
+                }
                 Some("group") => match (sheet.marks.last_mut(), word.next().and_then(|w| w.parse().ok())) {
                     (Some(m), Some(g)) => m.group = g,
                     _ => confused += 1,
@@ -360,6 +384,7 @@ mod tests {
             assert!((a.taper - b.taper).abs() < 1e-4);
             assert_eq!(a.act, b.act, "what it does must survive too");
             assert_eq!(a.group, b.group, "and which figure it belongs to");
+            assert_eq!(a.place, b.place, "and what it follows");
             assert_eq!(a.track, b.track, "and every keyframe");
             assert_eq!(a.pts.len(), b.pts.len());
             for (p, q) in a.pts.iter().zip(&b.pts) {

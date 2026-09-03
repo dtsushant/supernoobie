@@ -290,7 +290,7 @@ impl Board {
                 self.ink = Some(ink);
             }
             Tool::Pick => {
-                if let Some(k) = self.sheet.at(at, self.touch, self.clock) {
+                if let Some(k) = self.sheet.at_in(at, self.touch, self.clock, &self.sheet.script.env(self.clock, &self.tally)) {
                     // Remembered on the press, so the whole drag is one step
                     // back rather than sixty. Choosing is left to the release,
                     // where a tap can be told from a drag.
@@ -389,7 +389,7 @@ impl Board {
     /// A tap: choose what is under it, or let go of it if it was already
     /// chosen. Nothing under it means choose nothing.
     fn tap(&mut self, at: Cx) {
-        let Some(k) = self.sheet.at(at, self.touch, self.clock) else {
+        let Some(k) = self.sheet.at_in(at, self.touch, self.clock, &self.sheet.script.env(self.clock, &self.tally)) else {
             if !self.playing_game && !self.watching {
                 self.selected.clear();
             }
@@ -427,7 +427,7 @@ impl Board {
 
     /// Take out whatever is under the pointer.
     fn rub(&mut self, at: Cx) {
-        if let Some(k) = self.sheet.at(at, self.touch, self.clock) {
+        if let Some(k) = self.sheet.at_in(at, self.touch, self.clock, &self.sheet.script.env(self.clock, &self.tally)) {
             self.sheet.marks.remove(k);
             // Everything above it has just shifted down one. A selection left
             // pointing at an index rather than at a mark would silently start
@@ -459,6 +459,7 @@ impl Board {
                 closed: false,
                 act: crate::Act::still(),
                 track: crate::Track::new(),
+                place: None,
                 group: 0,
             }
         })
@@ -1009,8 +1010,9 @@ impl Board {
         for (shape, colour) in self.written().shapes {
             f.add(shape).color(colour).width(2);
         }
+        let env = self.sheet.script.env(self.clock, &self.tally);
         for m in &self.sheet.marks {
-            let item = f.add(m.at(self.clock)).color(m.colour);
+            let item = f.add(m.at_in(self.clock, &env)).color(m.colour);
             if m.filled {
                 item.fill();
             }

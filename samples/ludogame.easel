@@ -1,0 +1,158 @@
+easel 1
+row on # LUDO, four players, one screen. tap the DIE, then tap a token.
+row on ludo()
+row on 
+row on # --- the state -------------------------------------------------
+row on seed = 137
+row on rolls = 0
+row on die = 0
+row on rolled = 0
+row on turn = 0
+row on seat0 = 0
+row on at0 = -1
+row on seat1 = 0
+row on at1 = -2
+row on seat2 = 1
+row on at2 = -1
+row on seat3 = 1
+row on at3 = -2
+row on seat4 = 2
+row on at4 = -1
+row on seat5 = 2
+row on at5 = -2
+row on seat6 = 3
+row on at6 = -1
+row on seat7 = 3
+row on at7 = -2
+row on 
+row on # where each token counts as standing. the yard and the home column
+row on # get numbers no other token can hold, so nobody can be caught there.
+row on sq0 = if(at0 < 0, -100 - 0, if(at0 > 50, 200 + 10*seat0 + at0, mod(13*seat0 + at0, 52)))
+row on sq1 = if(at1 < 0, -100 - 1, if(at1 > 50, 200 + 10*seat1 + at1, mod(13*seat1 + at1, 52)))
+row on sq2 = if(at2 < 0, -100 - 2, if(at2 > 50, 200 + 10*seat2 + at2, mod(13*seat2 + at2, 52)))
+row on sq3 = if(at3 < 0, -100 - 3, if(at3 > 50, 200 + 10*seat3 + at3, mod(13*seat3 + at3, 52)))
+row on sq4 = if(at4 < 0, -100 - 4, if(at4 > 50, 200 + 10*seat4 + at4, mod(13*seat4 + at4, 52)))
+row on sq5 = if(at5 < 0, -100 - 5, if(at5 > 50, 200 + 10*seat5 + at5, mod(13*seat5 + at5, 52)))
+row on sq6 = if(at6 < 0, -100 - 6, if(at6 > 50, 200 + 10*seat6 + at6, mod(13*seat6 + at6, 52)))
+row on sq7 = if(at7 < 0, -100 - 7, if(at7 > 50, 200 + 10*seat7 + at7, mod(13*seat7 + at7, 52)))
+row on 
+row on # --- what you can see ------------------------------------------
+row on color(0xE3E9EF)
+row on digits(die, 8.6, 4.2, 0.9)
+row on # whose turn it is, in that seat's colour
+row on color(0x6B7987)
+row on digits(turn + 1, 8.6, 1.6, 0.5)
+row on color(0x46525E)
+row on param(0.55*exp(i*t) + 8.6 + 4.2i, 0, tau)
+row on 
+row on # --- the die ----------------------------------------------------
+row on # a six rolls again, so the turn does not pass. three sixes would
+row on # forfeit in a real game; that wants a counter and is left out.
+row on when tap 9: rolls = rolls + if(rolled == 1, 0, 1), die = if(rolled == 1, die, 1 + floor(6*abs(sin(seed + 97*(rolls + 1))))), rolled = 1
+row on 
+row on # --- moving a token ---------------------------------------------
+row on when tap 1: ok = and(and(seat0 == turn, rolled == 1), if(at0 < 0, die == 6, at0 + die <= 57)), was = at0, at[0] = if(ok, if(at0 < 0, 0, at0 + die), at0), here = if(ok, if(was < 0, mod(13*seat0, 52), if(at[0] > 50, 200 + 10*seat0 + at[0], mod(13*seat0 + at[0], 52))), -999), at[1] = if(and(and(seat1 != seat0, sq1 == here), and(here >= 0, here < 52)), -2, at1), at[2] = if(and(and(seat2 != seat0, sq2 == here), and(here >= 0, here < 52)), -1, at2), at[3] = if(and(and(seat3 != seat0, sq3 == here), and(here >= 0, here < 52)), -2, at3), at[4] = if(and(and(seat4 != seat0, sq4 == here), and(here >= 0, here < 52)), -1, at4), at[5] = if(and(and(seat5 != seat0, sq5 == here), and(here >= 0, here < 52)), -2, at5), at[6] = if(and(and(seat6 != seat0, sq6 == here), and(here >= 0, here < 52)), -1, at6), at[7] = if(and(and(seat7 != seat0, sq7 == here), and(here >= 0, here < 52)), -2, at7), turn = if(ok, if(die == 6, turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
+row on when tap 2: ok = and(and(seat1 == turn, rolled == 1), if(at1 < 0, die == 6, at1 + die <= 57)), was = at1, at[1] = if(ok, if(at1 < 0, 0, at1 + die), at1), here = if(ok, if(was < 0, mod(13*seat1, 52), if(at[1] > 50, 200 + 10*seat1 + at[1], mod(13*seat1 + at[1], 52))), -999), at[0] = if(and(and(seat0 != seat1, sq0 == here), and(here >= 0, here < 52)), -1, at0), at[2] = if(and(and(seat2 != seat1, sq2 == here), and(here >= 0, here < 52)), -1, at2), at[3] = if(and(and(seat3 != seat1, sq3 == here), and(here >= 0, here < 52)), -2, at3), at[4] = if(and(and(seat4 != seat1, sq4 == here), and(here >= 0, here < 52)), -1, at4), at[5] = if(and(and(seat5 != seat1, sq5 == here), and(here >= 0, here < 52)), -2, at5), at[6] = if(and(and(seat6 != seat1, sq6 == here), and(here >= 0, here < 52)), -1, at6), at[7] = if(and(and(seat7 != seat1, sq7 == here), and(here >= 0, here < 52)), -2, at7), turn = if(ok, if(die == 6, turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
+row on when tap 3: ok = and(and(seat2 == turn, rolled == 1), if(at2 < 0, die == 6, at2 + die <= 57)), was = at2, at[2] = if(ok, if(at2 < 0, 0, at2 + die), at2), here = if(ok, if(was < 0, mod(13*seat2, 52), if(at[2] > 50, 200 + 10*seat2 + at[2], mod(13*seat2 + at[2], 52))), -999), at[0] = if(and(and(seat0 != seat2, sq0 == here), and(here >= 0, here < 52)), -1, at0), at[1] = if(and(and(seat1 != seat2, sq1 == here), and(here >= 0, here < 52)), -2, at1), at[3] = if(and(and(seat3 != seat2, sq3 == here), and(here >= 0, here < 52)), -2, at3), at[4] = if(and(and(seat4 != seat2, sq4 == here), and(here >= 0, here < 52)), -1, at4), at[5] = if(and(and(seat5 != seat2, sq5 == here), and(here >= 0, here < 52)), -2, at5), at[6] = if(and(and(seat6 != seat2, sq6 == here), and(here >= 0, here < 52)), -1, at6), at[7] = if(and(and(seat7 != seat2, sq7 == here), and(here >= 0, here < 52)), -2, at7), turn = if(ok, if(die == 6, turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
+row on when tap 4: ok = and(and(seat3 == turn, rolled == 1), if(at3 < 0, die == 6, at3 + die <= 57)), was = at3, at[3] = if(ok, if(at3 < 0, 0, at3 + die), at3), here = if(ok, if(was < 0, mod(13*seat3, 52), if(at[3] > 50, 200 + 10*seat3 + at[3], mod(13*seat3 + at[3], 52))), -999), at[0] = if(and(and(seat0 != seat3, sq0 == here), and(here >= 0, here < 52)), -1, at0), at[1] = if(and(and(seat1 != seat3, sq1 == here), and(here >= 0, here < 52)), -2, at1), at[2] = if(and(and(seat2 != seat3, sq2 == here), and(here >= 0, here < 52)), -1, at2), at[4] = if(and(and(seat4 != seat3, sq4 == here), and(here >= 0, here < 52)), -1, at4), at[5] = if(and(and(seat5 != seat3, sq5 == here), and(here >= 0, here < 52)), -2, at5), at[6] = if(and(and(seat6 != seat3, sq6 == here), and(here >= 0, here < 52)), -1, at6), at[7] = if(and(and(seat7 != seat3, sq7 == here), and(here >= 0, here < 52)), -2, at7), turn = if(ok, if(die == 6, turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
+row on when tap 5: ok = and(and(seat4 == turn, rolled == 1), if(at4 < 0, die == 6, at4 + die <= 57)), was = at4, at[4] = if(ok, if(at4 < 0, 0, at4 + die), at4), here = if(ok, if(was < 0, mod(13*seat4, 52), if(at[4] > 50, 200 + 10*seat4 + at[4], mod(13*seat4 + at[4], 52))), -999), at[0] = if(and(and(seat0 != seat4, sq0 == here), and(here >= 0, here < 52)), -1, at0), at[1] = if(and(and(seat1 != seat4, sq1 == here), and(here >= 0, here < 52)), -2, at1), at[2] = if(and(and(seat2 != seat4, sq2 == here), and(here >= 0, here < 52)), -1, at2), at[3] = if(and(and(seat3 != seat4, sq3 == here), and(here >= 0, here < 52)), -2, at3), at[5] = if(and(and(seat5 != seat4, sq5 == here), and(here >= 0, here < 52)), -2, at5), at[6] = if(and(and(seat6 != seat4, sq6 == here), and(here >= 0, here < 52)), -1, at6), at[7] = if(and(and(seat7 != seat4, sq7 == here), and(here >= 0, here < 52)), -2, at7), turn = if(ok, if(die == 6, turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
+row on when tap 6: ok = and(and(seat5 == turn, rolled == 1), if(at5 < 0, die == 6, at5 + die <= 57)), was = at5, at[5] = if(ok, if(at5 < 0, 0, at5 + die), at5), here = if(ok, if(was < 0, mod(13*seat5, 52), if(at[5] > 50, 200 + 10*seat5 + at[5], mod(13*seat5 + at[5], 52))), -999), at[0] = if(and(and(seat0 != seat5, sq0 == here), and(here >= 0, here < 52)), -1, at0), at[1] = if(and(and(seat1 != seat5, sq1 == here), and(here >= 0, here < 52)), -2, at1), at[2] = if(and(and(seat2 != seat5, sq2 == here), and(here >= 0, here < 52)), -1, at2), at[3] = if(and(and(seat3 != seat5, sq3 == here), and(here >= 0, here < 52)), -2, at3), at[4] = if(and(and(seat4 != seat5, sq4 == here), and(here >= 0, here < 52)), -1, at4), at[6] = if(and(and(seat6 != seat5, sq6 == here), and(here >= 0, here < 52)), -1, at6), at[7] = if(and(and(seat7 != seat5, sq7 == here), and(here >= 0, here < 52)), -2, at7), turn = if(ok, if(die == 6, turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
+row on when tap 7: ok = and(and(seat6 == turn, rolled == 1), if(at6 < 0, die == 6, at6 + die <= 57)), was = at6, at[6] = if(ok, if(at6 < 0, 0, at6 + die), at6), here = if(ok, if(was < 0, mod(13*seat6, 52), if(at[6] > 50, 200 + 10*seat6 + at[6], mod(13*seat6 + at[6], 52))), -999), at[0] = if(and(and(seat0 != seat6, sq0 == here), and(here >= 0, here < 52)), -1, at0), at[1] = if(and(and(seat1 != seat6, sq1 == here), and(here >= 0, here < 52)), -2, at1), at[2] = if(and(and(seat2 != seat6, sq2 == here), and(here >= 0, here < 52)), -1, at2), at[3] = if(and(and(seat3 != seat6, sq3 == here), and(here >= 0, here < 52)), -2, at3), at[4] = if(and(and(seat4 != seat6, sq4 == here), and(here >= 0, here < 52)), -1, at4), at[5] = if(and(and(seat5 != seat6, sq5 == here), and(here >= 0, here < 52)), -2, at5), at[7] = if(and(and(seat7 != seat6, sq7 == here), and(here >= 0, here < 52)), -2, at7), turn = if(ok, if(die == 6, turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
+row on when tap 8: ok = and(and(seat7 == turn, rolled == 1), if(at7 < 0, die == 6, at7 + die <= 57)), was = at7, at[7] = if(ok, if(at7 < 0, 0, at7 + die), at7), here = if(ok, if(was < 0, mod(13*seat7, 52), if(at[7] > 50, 200 + 10*seat7 + at[7], mod(13*seat7 + at[7], 52))), -999), at[0] = if(and(and(seat0 != seat7, sq0 == here), and(here >= 0, here < 52)), -1, at0), at[1] = if(and(and(seat1 != seat7, sq1 == here), and(here >= 0, here < 52)), -2, at1), at[2] = if(and(and(seat2 != seat7, sq2 == here), and(here >= 0, here < 52)), -1, at2), at[3] = if(and(and(seat3 != seat7, sq3 == here), and(here >= 0, here < 52)), -2, at3), at[4] = if(and(and(seat4 != seat7, sq4 == here), and(here >= 0, here < 52)), -1, at4), at[5] = if(and(and(seat5 != seat7, sq5 == here), and(here >= 0, here < 52)), -2, at5), at[6] = if(and(and(seat6 != seat7, sq6 == here), and(here >= 0, here < 52)), -1, at6), turn = if(ok, if(die == 6, turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
+row on 
+row on # --- winning ----------------------------------------------------
+row on when and(at0 == 57, at1 == 57): won = 1
+row on when and(at2 == 57, at3 == 57): won = 2
+row on when and(at4 == 57, at5 == 57): won = 3
+row on when and(at6 == 57, at7 == 57): won = 4
+row on won = 0
+row on color(0x6FCF97)
+row on digits(won, 8.6, -1.2, 0.5)
+mark round 0.1000 taper 0.1200 colour E0704A fill closed
+group 1
+placex ludox(seat0, at0)
+placey ludoy(seat0, at0)
+p -2.6400 3.0000 -2.6432 3.0280 -2.6545 3.0729 -2.6769 3.1259 -2.7114 3.1804 -2.7578 3.2308 -2.8145 3.2728 -2.8794 3.3033
+p -2.9497 3.3200 -3.0220 3.3215 -3.0928 3.3075 -3.1589 3.2784 -3.2168 3.2357 -3.2637 3.1812 -3.2974 3.1178 -3.3162 3.0485
+p -3.3190 2.9769 -3.3059 2.9064 -3.2774 2.8407 -3.2350 2.7829 -3.1808 2.7360 -3.1175 2.7024 -3.0483 2.6837 -2.9767 2.6809
+p -2.9063 2.6941 -2.8406 2.7226 -2.7829 2.7650 -2.7360 2.8192 -2.7024 2.8825 -2.6806 2.9236 -2.6664 2.9504 -2.6571 2.9677
+p -2.6511 2.9790 -2.6472 2.9864 -2.6447 2.9911
+mark round 0.1000 taper 0.1200 colour E0704A fill closed
+group 2
+placex ludox(seat1, at1)
+placey ludoy(seat1, at1)
+p -4.6400 5.0000 -4.6432 5.0280 -4.6545 5.0729 -4.6769 5.1259 -4.7114 5.1804 -4.7578 5.2308 -4.8145 5.2728 -4.8794 5.3033
+p -4.9497 5.3200 -5.0220 5.3215 -5.0928 5.3075 -5.1589 5.2784 -5.2168 5.2357 -5.2637 5.1812 -5.2974 5.1178 -5.3162 5.0485
+p -5.3190 4.9769 -5.3059 4.9064 -5.2774 4.8407 -5.2350 4.7829 -5.1808 4.7360 -5.1175 4.7024 -5.0483 4.6837 -4.9767 4.6809
+p -4.9063 4.6941 -4.8406 4.7226 -4.7829 4.7650 -4.7360 4.8192 -4.7024 4.8825 -4.6806 4.9236 -4.6664 4.9504 -4.6571 4.9677
+p -4.6511 4.9790 -4.6472 4.9864 -4.6447 4.9911
+mark round 0.1000 taper 0.1200 colour 6FCF97 fill closed
+group 3
+placex ludox(seat2, at2)
+placey ludoy(seat2, at2)
+p 3.3600 3.0000 3.3568 3.0280 3.3455 3.0729 3.3231 3.1259 3.2886 3.1804 3.2422 3.2308 3.1855 3.2728 3.1206 3.3033
+p 3.0503 3.3200 2.9780 3.3215 2.9072 3.3075 2.8411 3.2784 2.7832 3.2357 2.7363 3.1812 2.7026 3.1178 2.6838 3.0485
+p 2.6810 2.9769 2.6941 2.9064 2.7226 2.8407 2.7650 2.7829 2.8192 2.7360 2.8825 2.7024 2.9517 2.6837 3.0233 2.6809
+p 3.0937 2.6941 3.1594 2.7226 3.2171 2.7650 3.2640 2.8192 3.2976 2.8825 3.3194 2.9236 3.3336 2.9504 3.3429 2.9677
+p 3.3489 2.9790 3.3528 2.9864 3.3553 2.9911
+mark round 0.1000 taper 0.1200 colour 6FCF97 fill closed
+group 4
+placex ludox(seat3, at3)
+placey ludoy(seat3, at3)
+p 5.3600 5.0000 5.3568 5.0280 5.3455 5.0729 5.3231 5.1259 5.2886 5.1804 5.2422 5.2308 5.1855 5.2728 5.1206 5.3033
+p 5.0503 5.3200 4.9780 5.3215 4.9072 5.3075 4.8411 5.2784 4.7832 5.2357 4.7363 5.1812 4.7026 5.1178 4.6838 5.0485
+p 4.6810 4.9769 4.6941 4.9064 4.7226 4.8407 4.7650 4.7829 4.8192 4.7360 4.8825 4.7024 4.9517 4.6837 5.0233 4.6809
+p 5.0937 4.6941 5.1594 4.7226 5.2171 4.7650 5.2640 4.8192 5.2976 4.8825 5.3194 4.9236 5.3336 4.9504 5.3429 4.9677
+p 5.3489 4.9790 5.3528 4.9864 5.3553 4.9911
+mark round 0.1000 taper 0.1200 colour 4FBCD4 fill closed
+group 5
+placex ludox(seat4, at4)
+placey ludoy(seat4, at4)
+p 3.3600 -3.0000 3.3568 -2.9720 3.3455 -2.9271 3.3231 -2.8741 3.2886 -2.8196 3.2422 -2.7692 3.1855 -2.7272 3.1206 -2.6967
+p 3.0503 -2.6800 2.9780 -2.6785 2.9072 -2.6925 2.8411 -2.7216 2.7832 -2.7643 2.7363 -2.8188 2.7026 -2.8822 2.6838 -2.9515
+p 2.6810 -3.0231 2.6941 -3.0936 2.7226 -3.1593 2.7650 -3.2171 2.8192 -3.2640 2.8825 -3.2976 2.9517 -3.3163 3.0233 -3.3191
+p 3.0937 -3.3059 3.1594 -3.2774 3.2171 -3.2350 3.2640 -3.1808 3.2976 -3.1175 3.3194 -3.0764 3.3336 -3.0496 3.3429 -3.0323
+p 3.3489 -3.0210 3.3528 -3.0136 3.3553 -3.0089
+mark round 0.1000 taper 0.1200 colour 4FBCD4 fill closed
+group 6
+placex ludox(seat5, at5)
+placey ludoy(seat5, at5)
+p 5.3600 -5.0000 5.3568 -4.9720 5.3455 -4.9271 5.3231 -4.8741 5.2886 -4.8196 5.2422 -4.7692 5.1855 -4.7272 5.1206 -4.6967
+p 5.0503 -4.6800 4.9780 -4.6785 4.9072 -4.6925 4.8411 -4.7216 4.7832 -4.7643 4.7363 -4.8188 4.7026 -4.8822 4.6838 -4.9515
+p 4.6810 -5.0231 4.6941 -5.0936 4.7226 -5.1593 4.7650 -5.2171 4.8192 -5.2640 4.8825 -5.2976 4.9517 -5.3163 5.0233 -5.3191
+p 5.0937 -5.3059 5.1594 -5.2774 5.2171 -5.2350 5.2640 -5.1808 5.2976 -5.1175 5.3194 -5.0764 5.3336 -5.0496 5.3429 -5.0323
+p 5.3489 -5.0210 5.3528 -5.0136 5.3553 -5.0089
+mark round 0.1000 taper 0.1200 colour E0A44A fill closed
+group 7
+placex ludox(seat6, at6)
+placey ludoy(seat6, at6)
+p -2.6400 -3.0000 -2.6432 -2.9720 -2.6545 -2.9271 -2.6769 -2.8741 -2.7114 -2.8196 -2.7578 -2.7692 -2.8145 -2.7272 -2.8794 -2.6967
+p -2.9497 -2.6800 -3.0220 -2.6785 -3.0928 -2.6925 -3.1589 -2.7216 -3.2168 -2.7643 -3.2637 -2.8188 -3.2974 -2.8822 -3.3162 -2.9515
+p -3.3190 -3.0231 -3.3059 -3.0936 -3.2774 -3.1593 -3.2350 -3.2171 -3.1808 -3.2640 -3.1175 -3.2976 -3.0483 -3.3163 -2.9767 -3.3191
+p -2.9063 -3.3059 -2.8406 -3.2774 -2.7829 -3.2350 -2.7360 -3.1808 -2.7024 -3.1175 -2.6806 -3.0764 -2.6664 -3.0496 -2.6571 -3.0323
+p -2.6511 -3.0210 -2.6472 -3.0136 -2.6447 -3.0089
+mark round 0.1000 taper 0.1200 colour E0A44A fill closed
+group 8
+placex ludox(seat7, at7)
+placey ludoy(seat7, at7)
+p -4.6400 -5.0000 -4.6432 -4.9720 -4.6545 -4.9271 -4.6769 -4.8741 -4.7114 -4.8196 -4.7578 -4.7692 -4.8145 -4.7272 -4.8794 -4.6967
+p -4.9497 -4.6800 -5.0220 -4.6785 -5.0928 -4.6925 -5.1589 -4.7216 -5.2168 -4.7643 -5.2637 -4.8188 -5.2974 -4.8822 -5.3162 -4.9515
+p -5.3190 -5.0231 -5.3059 -5.0936 -5.2774 -5.1593 -5.2350 -5.2171 -5.1808 -5.2640 -5.1175 -5.2976 -5.0483 -5.3163 -4.9767 -5.3191
+p -4.9063 -5.3059 -4.8406 -5.2774 -4.7829 -5.2350 -4.7360 -5.1808 -4.7024 -5.1175 -4.6806 -5.0764 -4.6664 -5.0496 -4.6571 -5.0323
+p -4.6511 -5.0210 -4.6472 -5.0136 -4.6447 -5.0089
+mark round 0.0800 taper 0.1200 colour E3E9EF fill closed
+group 9
+p 7.7000 3.3000 7.7262 3.3000 7.7696 3.3000 7.8240 3.3000 7.8856 3.3000 7.9519 3.3000 8.0212 3.3000 8.0925 3.3000
+p 8.1652 3.3000 8.2386 3.3000 8.3126 3.3000 8.3869 3.3000 8.4615 3.3000 8.5362 3.3000 8.6110 3.3000 8.6859 3.3000
+p 8.7609 3.3000 8.8358 3.3000 8.9108 3.3000 8.9858 3.3000 9.0607 3.3000 9.1357 3.3000 9.2107 3.3000 9.2857 3.3000
+p 9.3607 3.3000 9.4095 3.3000 9.4412 3.3263 9.4617 3.3696 9.4751 3.4240 9.4838 3.4856 9.4895 3.5519 9.4932 3.6212
+p 9.4956 3.6925 9.4971 3.7652 9.4981 3.8386 9.4988 3.9126 9.4992 3.9869 9.4995 4.0615 9.4997 4.1362 9.4998 4.2110
+p 9.4999 4.2859 9.4999 4.3609 9.4999 4.4358 9.5000 4.5108 9.5000 4.5858 9.5000 4.6607 9.5000 4.7357 9.5000 4.8107
+p 9.5000 4.8857 9.5000 4.9607 9.5000 5.0095 9.4737 5.0412 9.4304 5.0617 9.3760 5.0751 9.3144 5.0838 9.2481 5.0895
+p 9.1788 5.0932 9.1075 5.0956 9.0348 5.0971 8.9614 5.0981 8.8874 5.0988 8.8131 5.0992 8.7385 5.0995 8.6638 5.0997
+p 8.5890 5.0998 8.5141 5.0999 8.4391 5.0999 8.3642 5.0999 8.2892 5.1000 8.2142 5.1000 8.1393 5.1000 8.0643 5.1000
+p 7.9893 5.1000 7.9143 5.1000 7.8393 5.1000 7.7905 5.1000 7.7588 5.0737 7.7383 5.0304 7.7249 4.9760 7.7162 4.9144
+p 7.7105 4.8481 7.7068 4.7788 7.7044 4.7075 7.7029 4.6348 7.7019 4.5614 7.7012 4.4874 7.7008 4.4131 7.7005 4.3385
+p 7.7003 4.2638 7.7002 4.1890 7.7001 4.1141 7.7001 4.0391 7.7001 3.9642 7.7000 3.8892 7.7000 3.8142 7.7000 3.7393
+p 7.7000 3.6643 7.7000 3.5893 7.7000 3.5143 7.7000 3.4393 7.7000 3.3905 7.7000 3.3588 7.7000 3.3383 7.7000 3.3249
+p 7.7000 3.3162 7.7000 3.3105

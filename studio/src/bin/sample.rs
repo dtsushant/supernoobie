@@ -39,6 +39,7 @@ fn main() {
         ("walker", walker as fn() -> Board),
         ("adding", adding as fn() -> Board),
         ("ludo", ludo as fn() -> Board),
+        ("ludogame", ludogame as fn() -> Board),
     ] {
         let path = dir.join(format!("{name}.easel"));
         let board = build();
@@ -312,5 +313,165 @@ fn ludo() -> Board {
     for r in rows {
         b.sheet.script.add(r);
     }
+    b
+}
+
+/// **Four-player Ludo, hot seat.** Tap the die, then tap a token.
+///
+/// ## Two tokens a seat, not four
+///
+/// Every capture is a written line — "is that one standing where this one just
+/// landed?" — so four tokens each is 16 × 15 = 240 of them. Two each is 8 × 7 =
+/// 56, which is a game you can read. The repeat that would make four each
+/// bearable is the next thing the language wants, and this is the reason.
+///
+/// ## The die is real
+///
+/// ```text
+///     die = 1 + floor(6*abs(sin(seed + 97*rolls)))
+/// ```
+///
+/// No random number generator anywhere. `sin` of a large multiple of a whole
+/// number wanders across its range without settling into a pattern anybody
+/// spots, and `seed` is a number you are not looking at. So it is unpredictable
+/// in play and **exactly repeatable** from its seed — which is what lets a
+/// match be replayed, and what makes "he cheated" answerable.
+///
+/// ## Squares, not steps
+///
+/// Two seats at the same *step* are on different *squares*: they start a
+/// quarter of the loop apart. So a capture compares `sq`, not `at`:
+///
+/// ```text
+///     sq = mod(13*seat + at, 52)      on the track
+///          -100 - k                   in the yard: its own, so never shared
+///          200 + 10*seat + at         in the home column: private to a seat
+/// ```
+///
+/// The yard and the home column get numbers no other token can hold, which is
+/// how "nobody can be captured there" is said without a rule saying it.
+fn ludogame() -> Board {
+    let mut b = Board::new();
+    let tokens = 8usize; // two each
+    let seat_of = |k: usize| k / 2;
+
+    let mut rows: Vec<String> = Vec::new();
+    macro_rules! add {
+        ($t:expr) => {
+            rows.push(($t).to_string())
+        };
+    }
+
+    add!("# LUDO, four players, one screen. tap the DIE, then tap a token.");
+    add!("ludo()");
+    add!("");
+    add!("# --- the state -------------------------------------------------");
+    add!("seed = 137");
+    add!("rolls = 0");
+    add!("die = 0");
+    add!("rolled = 0");
+    add!("turn = 0");
+    for k in 0..tokens {
+        rows.push(format!("seat{k} = {}", seat_of(k)));
+        rows.push(format!("at{k} = -{}", k % 2 + 1));
+    }
+    add!("");
+    add!("# where each token counts as standing. the yard and the home column");
+    add!("# get numbers no other token can hold, so nobody can be caught there.");
+    for k in 0..tokens {
+        rows.push(format!(
+            "sq{k} = if(at{k} < 0, -100 - {k}, if(at{k} > 50, 200 + 10*seat{k} + at{k}, mod(13*seat{k} + at{k}, 52)))"
+        ));
+    }
+    add!("");
+    add!("# --- what you can see ------------------------------------------");
+    add!("color(0xE3E9EF)");
+    add!("digits(die, 8.6, 4.2, 0.9)");
+    add!("# whose turn it is, in that seat's colour");
+    add!("color(0x6B7987)");
+    add!("digits(turn + 1, 8.6, 1.6, 0.5)");
+    add!("color(0x46525E)");
+    add!("param(0.55*exp(i*t) + 8.6 + 4.2i, 0, tau)");
+
+    add!("");
+    add!("# --- the die ----------------------------------------------------");
+    add!("# a six rolls again, so the turn does not pass. three sixes would");
+    add!("# forfeit in a real game; that wants a counter and is left out.");
+    add!("when tap 9: rolls = rolls + if(rolled == 1, 0, 1), \
+         die = if(rolled == 1, die, 1 + floor(6*abs(sin(seed + 97*(rolls + 1))))), \
+         rolled = 1");
+
+    add!("");
+    add!("# --- moving a token ---------------------------------------------");
+    for k in 0..tokens {
+        let mut deeds: Vec<String> = Vec::new();
+        // May this token move at all? Its seat's turn, a die rolled, and
+        // either it is out or the die is a six.
+        deeds.push(format!(
+            "ok = and(and(seat{k} == turn, rolled == 1), if(at{k} < 0, die == 6, at{k} + die <= 57))"
+        ));
+        // Out of the yard on a six goes to the start; otherwise walk on.
+        deeds.push(format!("was = at{k}"));
+        deeds.push(format!("at[{k}] = if(ok, if(at{k} < 0, 0, at{k} + die), at{k})"));
+        deeds.push(format!(
+            "here = if(ok, if(was < 0, mod(13*seat{k}, 52), \
+             if(at[{k}] > 50, 200 + 10*seat{k} + at[{k}], mod(13*seat{k} + at[{k}], 52))), -999)"
+        ));
+        for j in 0..tokens {
+            if j == k {
+                continue;
+            }
+            deeds.push(format!(
+                "at[{j}] = if(and(and(seat{j} != seat{k}, sq{j} == here), and(here >= 0, here < 52)), -{}, at{j})",
+                j % 2 + 1
+            ));
+        }
+        // The turn passes unless it was a six, and the die must be rolled again.
+        deeds.push("turn = if(ok, if(die == 6, turn, mod(turn + 1, 4)), turn)".into());
+        deeds.push("rolled = if(ok, 0, rolled)".into());
+        rows.push(format!("when tap {}: {}", k + 1, deeds.join(", \\\n         ")));
+    }
+
+    add!("");
+    add!("# --- winning ----------------------------------------------------");
+    for seat in 0..4 {
+        let mine: Vec<String> = (0..tokens).filter(|k| seat_of(*k) == seat).map(|k| format!("at{k} == 57")).collect();
+        rows.push(format!("when and({}, {}): won = {}", mine[0], mine[1], seat + 1));
+    }
+    add!("won = 0");
+    add!("color(0x6FCF97)");
+    add!("digits(won, 8.6, -1.2, 0.5)");
+
+    for r in &rows {
+        b.sheet.script.add(r.replace(" \\\n         ", " ").replace("\\\n         ", " "));
+    }
+
+    // The tokens and the die are MARKS, because only a mark can be tapped --
+    // and each follows its own numbers, which is what `place` is for.
+    for k in 0..tokens {
+        let seat = seat_of(k);
+        let at = plotkit::ludo::waiting(seat, k % 2 + 1);
+        let ring: Vec<Cx> = (0..=28).map(|j| at + Cx::polar(0.36, j as f64 / 28.0 * TAU)).collect();
+        b.nib = Nib::Round(0.1);
+        b.colour = shapes::ludo::SEATS[seat];
+        stroke(&mut b, &ring);
+        let m = b.sheet.marks.last_mut().expect("a token");
+        m.closed = true;
+        m.place = Some((format!("ludox(seat{k}, at{k})"), format!("ludoy(seat{k}, at{k})")));
+        b.selected = vec![b.sheet.len() - 1];
+        b.group_alone();
+    }
+    // The die: figure 9, in the corner.
+    b.colour = 0xE3E9EF;
+    b.nib = Nib::Round(0.08);
+    let at = Cx::new(8.6, 4.2);
+    let box_path: Vec<Cx> = [(-0.9, -0.9), (0.9, -0.9), (0.9, 0.9), (-0.9, 0.9), (-0.9, -0.9)]
+        .windows(2)
+        .flat_map(|w| line(at + Cx::new(w[0].0, w[0].1), at + Cx::new(w[1].0, w[1].1)))
+        .collect();
+    stroke(&mut b, &box_path);
+    b.selected = vec![b.sheet.len() - 1];
+    b.group_alone();
+    b.selected.clear();
     b
 }

@@ -517,7 +517,7 @@ mod tests {
         }
         let made = b.written();
         assert!(made.errors.is_empty(), "{:?}", made.errors);
-        assert!(made.shapes.len() > shapes::ludo::TRACK, "the board and some tokens");
+        assert!(made.shapes.len() > plotkit::ludo::TRACK, "the board and some tokens");
 
         // And the tokens walk when the clock runs.
         b.clock = 3.0;

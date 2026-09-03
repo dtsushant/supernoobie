@@ -185,7 +185,7 @@ pub enum Expr {
 }
 
 /// Names that parse as function calls rather than implicit multiplication.
-pub const FUNCS: [&str; 23] = [
+pub const FUNCS: [&str; 25] = [
     "exp", "ln", "sin", "cos", "tan", "sqrt", "abs", "arg", "conj", "re", "im", "polar", "pow",
     // Whole numbers. A language with no way to say "the integer part" cannot
     // say "a number between 1 and 9", which is most of what a counting game
@@ -194,6 +194,8 @@ pub const FUNCS: [&str; 23] = [
     // Asking questions. `if`, `and`, `or` and `pick` are decided before
     // their arguments are worked out; see `Expr::eval`.
     "if", "and", "or", "not", "pick",
+    // Where a token stands on a board of squares. See `crate::ludo`.
+    "ludox", "ludoy",
 ];
 
 /// Names that draw something.
@@ -300,6 +302,23 @@ impl Expr {
                         }
                         let (x, y) = (a[0].re, a[1].re);
                         Cx::new(if f == "max" { x.max(y) } else { x.min(y) }, 0.0)
+                    }
+                    // `ludox(seat, step)` and `ludoy(...)`. Two functions
+                    // rather than one giving a point, because a mark is placed
+                    // by two expressions -- and two expressions is what makes
+                    // it text, which is what saves.
+                    "ludox" | "ludoy" => {
+                        if a.len() != 2 {
+                            return Err(format!("'{f}' takes a seat and a step"));
+                        }
+                        let seat = a[0].re.round().rem_euclid(4.0) as usize;
+                        let step = a[1].re.round();
+                        let at = if step < 0.0 {
+                            crate::ludo::waiting(seat, (-step - 1.0).max(0.0) as usize)
+                        } else {
+                            crate::ludo::place(seat, (step as usize).min(crate::ludo::FINISH))
+                        };
+                        Cx::new(if f == "ludox" { at.re } else { at.im }, 0.0)
                     }
                     "not" => Cx::new(if one(0)?.re.abs() > NEAR { 0.0 } else { 1.0 }, 0.0),
                     "floor" => Cx::new(one(0)?.re.floor(), 0.0),
@@ -751,6 +770,32 @@ pub fn env_of(p: &Program) -> HashMap<String, Cx> {
 // ===========================================================================
 #[cfg(test)]
 mod tests {
+    /// ★ Where a token stands, from inside an expression — which is what lets
+    /// a drawn mark follow a game's numbers.
+    #[test]
+    fn a_square_can_be_asked_for_by_seat_and_step() {
+        let p = run("s = 1
+k = 20
+a = ludox(s, k)
+b = ludoy(s, k)");
+        assert!(p.errors.is_empty(), "{:?}", p.errors);
+        let get = |n: &str| p.vars.iter().find(|(k, _)| k == n).expect(n).1.re;
+        let want = crate::ludo::place(1, 20);
+        assert!((get("a") - want.re).abs() < 1e-9);
+        assert!((get("b") - want.im).abs() < 1e-9);
+    }
+
+    /// And a negative step is the yard, the same as everywhere else.
+    #[test]
+    fn a_negative_step_asks_for_the_yard() {
+        let p = run("a = ludox(0, -1)
+b = ludoy(0, -1)");
+        assert!(p.errors.is_empty(), "{:?}", p.errors);
+        let get = |n: &str| p.vars.iter().find(|(k, _)| k == n).expect(n).1.re;
+        let want = crate::ludo::waiting(0, 0);
+        assert!((get("a") - want.re).abs() < 1e-9 && (get("b") - want.im).abs() < 1e-9);
+    }
+
     /// ★ `at[k]` is **spelling**, not an array. There is no second kind of
     /// value anywhere in this language, and adding one would mean two of
     /// everything: two ways to bind, two ways to save, two ways to be wrong.
