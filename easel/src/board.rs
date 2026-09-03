@@ -204,6 +204,19 @@ pub struct Board {
     /// playing with it are different intentions, and a program that guessed
     /// would guess wrong at the worst moment.
     pub playing_game: bool,
+    /// The drawing is being **watched**, not edited.
+    ///
+    /// The pen taps and does nothing else: no ink, no rubbing out, no moving,
+    /// no choosing. Separate from [`playing_game`](Board::playing_game),
+    /// which is about whether a tap sets a rule off — a drawing with no rules
+    /// in it is still something you can watch, and dragging across it should
+    /// not leave a line.
+    pub watching: bool,
+    /// Which condition rules were true last time they were looked at.
+    ///
+    /// Keyed by the row they are written on, because the rules themselves are
+    /// read afresh every frame — a rule is a row, and the row is what persists.
+    settled: std::collections::HashMap<usize, bool>,
 }
 
 impl Default for Board {
@@ -239,6 +252,8 @@ impl Board {
             scrolled: 0.0,
             tally: Tally::new(),
             playing_game: false,
+            watching: false,
+            settled: std::collections::HashMap::new(),
         }
     }
 
@@ -262,6 +277,12 @@ impl Board {
     fn press(&mut self, at: Cx) {
         self.pressed_at = Some(at);
         self.wandered = false;
+        if self.watching {
+            // Nothing is begun. A press while watching is the start of a tap
+            // and nothing else, and there is no ink to abandon if the hand
+            // moves.
+            return;
+        }
         match self.tool {
             Tool::Draw => {
                 let mut ink = Ink::new(self.nib, self.colour).with_pull(self.pull).with_taper(self.taper);
@@ -292,6 +313,9 @@ impl Board {
             if (at - from).abs() > self.touch {
                 self.wandered = true;
             }
+        }
+        if self.watching {
+            return;
         }
         match self.tool {
             Tool::Draw => {
@@ -366,12 +390,12 @@ impl Board {
     /// chosen. Nothing under it means choose nothing.
     fn tap(&mut self, at: Cx) {
         let Some(k) = self.sheet.at(at, self.touch, self.clock) else {
-            if !self.playing_game {
+            if !self.playing_game && !self.watching {
                 self.selected.clear();
             }
             return;
         };
-        if self.playing_game {
+        if self.playing_game || self.watching {
             // While the game runs a tap is a move, not a choice. Nothing is
             // selected and nothing is edited -- which is the point of it being
             // a separate state rather than a guess.
@@ -448,6 +472,10 @@ impl Board {
     pub fn tick(&mut self, dt: f64) {
         if self.playing {
             self.clock += dt.max(0.0);
+            // The clock moving can make a question true — `when time > 3:`.
+            if !self.sheet.script.rules().is_empty() {
+                self.settle();
+            }
         }
     }
 
@@ -460,6 +488,20 @@ impl Board {
     pub fn rewind(&mut self) {
         self.clock = 0.0;
         self.playing = false;
+    }
+
+    /// Watch it, or go back to editing it.
+    ///
+    /// Ends any stroke in progress: a pen held down when the tools go away
+    /// would otherwise finish its line the next time it moved, minutes later.
+    pub fn watch(&mut self, on: bool) {
+        self.watching = on;
+        if on {
+            self.ink = None;
+            self.holding = None;
+            self.selected.clear();
+            self.editing = None;
+        }
     }
 
     // ---- what things do ----------------------------------------------------
@@ -985,7 +1027,7 @@ impl Board {
     /// rather than leaving somebody tapping a shape that has no rule.
     pub fn play_tap(&mut self, group: u32) -> bool {
         let rules = self.sheet.script.rules();
-        let wanted: Vec<_> = rules.iter().filter(|r| r.on == rule::On::Tap(group)).collect();
+        let wanted: Vec<_> = rules.iter().filter(|r| r.on.is_tap(group)).collect();
         if wanted.is_empty() {
             return false;
         }
@@ -1001,13 +1043,52 @@ impl Board {
         for r in wanted {
             rule::carry_out(r, &mut self.tally, &env);
         }
+        // A tap changes things, and a question may have become true because of
+        // it. Asking here rather than only on the clock means a game answers
+        // even while it is paused.
+        self.settle();
         true
     }
 
     /// Start the game again from the beginning.
     pub fn restart(&mut self) {
         self.tally.clear();
+        self.settled.clear();
         self.clock = 0.0;
+    }
+
+    /// Set off every condition rule whose question has just **become** true.
+    ///
+    /// Became, not is: a rule that fired while its condition held would fire
+    /// sixty times a second, and `turn = turn + 1` would run the game to the
+    /// end of time inside one frame.
+    ///
+    /// Repeated, because one rule can make another's question true and the
+    /// answer should not have to wait for the next frame — but **bounded**,
+    /// because two rules can each make the other true and that is a loop
+    /// nobody would find by reading. Eight passes is far more than a game
+    /// needs and far less than a hang.
+    pub fn settle(&mut self) -> usize {
+        let mut done = 0;
+        for _ in 0..8 {
+            let rules = self.sheet.script.rules();
+            let env = self.sheet.script.env(self.clock, &self.tally);
+            let mut fired = false;
+            for r in &rules {
+                let rule::On::When(q) = &r.on else { continue };
+                let now = q.eval(&env).map(|v| v.re.abs() > plotkit::expr::NEAR).unwrap_or(false);
+                let was = self.settled.insert(r.row, now).unwrap_or(false);
+                if now && !was {
+                    rule::carry_out(r, &mut self.tally, &env);
+                    fired = true;
+                    done += 1;
+                }
+            }
+            if !fired {
+                return done;
+            }
+        }
+        done
     }
 
     /// Run the script at the current clock.
@@ -2011,6 +2092,128 @@ mod tests {
         let (lo, hi) = b.sheet.marks[k].bounds().expect("bounds");
         let middle = (lo + hi).scale(0.5);
         assert!((middle - Cx::new(20.0, 20.0)).abs() < 1.5, "it landed at {middle:?}");
+    }
+
+    /// ★ **While it is being watched the pen only taps.** Dragging across a
+    /// drawing you are watching left a line through it -- which is the first
+    /// thing anybody does, because a drawing invites a hand.
+    #[test]
+    fn nothing_is_drawn_while_it_is_being_watched() {
+        let mut b = Board::new();
+        b.watch(true);
+        draw(&mut b, &line(Cx::new(-2.0, 0.0), Cx::new(2.0, 1.0), 40));
+        assert!(b.sheet.is_empty(), "watching means the pen leaves nothing");
+
+        b.watch(false);
+        draw(&mut b, &line(Cx::new(-2.0, 0.0), Cx::new(2.0, 1.0), 40));
+        assert_eq!(b.sheet.len(), 1, "and editing means it does");
+    }
+
+    /// Nor rubbed out, nor moved, nor chosen.
+    #[test]
+    fn nothing_is_changed_at_all_while_watching() {
+        let mut b = Board::new();
+        draw(&mut b, &ring(1.0, Cx::ZERO, 60));
+        let before = b.sheet.clone();
+        b.watch(true);
+
+        for tool in [Tool::Erase, Tool::Pick, Tool::Draw] {
+            b.tool = tool;
+            b.pointer(Cx::new(1.0, 0.0), true);
+            b.pointer(Cx::new(3.0, 2.0), true);
+            b.pointer(Cx::new(3.0, 2.0), false);
+        }
+        assert_eq!(b.sheet, before, "nothing may change while watching");
+        assert!(b.selected.is_empty(), "and nothing is chosen either");
+    }
+
+    /// ★ A pen held down when the tools go away must not finish its line the
+    /// next time it moves, minutes later.
+    #[test]
+    fn a_stroke_in_progress_is_dropped_when_the_tools_go_away() {
+        let mut b = Board::new();
+        for k in 0..10 {
+            b.pointer(Cx::new(k as f64 * 0.2, 0.0), true);
+        }
+        assert!(b.drawing().is_some(), "a stroke is under way");
+
+        b.watch(true);
+        assert!(b.drawing().is_none(), "and it is gone");
+        b.pointer(Cx::new(5.0, 5.0), true);
+        b.pointer(Cx::new(5.0, 5.0), false);
+        assert!(b.sheet.is_empty(), "with nothing left to finish");
+    }
+
+    /// ★ A question fires when it **becomes** true, once. Firing while it
+    /// held would run `turn = turn + 1` to the end of time inside one frame.
+    #[test]
+    fn a_question_fires_on_becoming_true_and_not_again() {
+        let mut b = Board::new();
+        b.sheet.script.add("die = 1");
+        b.sheet.script.add("when die == 6: sixes = sixes + 1");
+        b.tally.values.insert("sixes".into(), 0.0);
+
+        assert_eq!(b.settle(), 0, "not true yet");
+        b.tally.values.insert("die".into(), 6.0);
+        assert_eq!(b.settle(), 1, "and now it is");
+        assert_eq!(b.tally.get("sixes"), Some(1.0));
+
+        for _ in 0..20 {
+            b.settle();
+        }
+        assert_eq!(b.tally.get("sixes"), Some(1.0), "still once, however long it stays true");
+
+        b.tally.values.insert("die".into(), 3.0);
+        b.settle();
+        b.tally.values.insert("die".into(), 6.0);
+        b.settle();
+        assert_eq!(b.tally.get("sixes"), Some(2.0), "but again after it goes away and comes back");
+    }
+
+    /// ★ One rule can make another's question true, and the answer does not
+    /// wait for the next frame.
+    #[test]
+    fn one_question_can_set_off_another() {
+        let mut b = Board::new();
+        b.sheet.script.add("a = 0");
+        b.sheet.script.add("when a == 1: bb = 1");
+        b.sheet.script.add("when bb == 1: c = 1");
+        b.tally.values.insert("a".into(), 1.0);
+
+        assert!(b.settle() >= 2, "both should have gone off");
+        assert_eq!(b.tally.get("c"), Some(1.0));
+    }
+
+    /// ★ But two rules that set each other off are a loop nobody would find
+    /// by reading, so the asking is bounded rather than clever.
+    #[test]
+    fn rules_that_chase_each_other_stop_rather_than_hang() {
+        let mut b = Board::new();
+        b.sheet.script.add("n = 0");
+        b.sheet.script.add("when n < 100: n = n + 1");
+        b.tally.values.insert("n".into(), 0.0);
+        // If this hangs, the test never finishes -- which is the point of the
+        // bound existing at all.
+        let fired = b.settle();
+        assert!(fired <= 8, "it stopped after a bounded number of passes, not {fired}");
+    }
+
+    /// Rewinding forgets which questions had been answered, so a game asked
+    /// again starts asking again.
+    #[test]
+    fn starting_again_forgets_which_questions_had_fired() {
+        let mut b = Board::new();
+        b.sheet.script.add("when go == 1: went = went + 1");
+        b.tally.values.insert("go".into(), 1.0);
+        b.tally.values.insert("went".into(), 0.0);
+        b.settle();
+        assert_eq!(b.tally.get("went"), Some(1.0));
+
+        b.restart();
+        b.tally.values.insert("go".into(), 1.0);
+        b.tally.values.insert("went".into(), 0.0);
+        b.settle();
+        assert_eq!(b.tally.get("went"), Some(1.0), "it fires again after a restart");
     }
 
     /// A tap leaves nothing — no invisible speck that can still be clicked on.

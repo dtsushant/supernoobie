@@ -681,6 +681,8 @@ fn main() {
         .on('b', |s| s.obey(Cmd::Rewind))
         .on('~', |s| {
             s.full = !s.full;
+            // The tools going away and the pen going down are the same act.
+            s.board.watch(s.full);
             s.say = if s.full { "just the drawing -- ~ brings the tools back".into() } else { String::new() };
         })
         .on('n', |s| s.heed(Poke::Verb(None)))

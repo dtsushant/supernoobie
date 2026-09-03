@@ -132,6 +132,8 @@ function paint() {
 
 function show() {
   paint();
+  // Nothing to draw with while watching, and the pointer says so.
+  paper.style.cursor = scene.watching ? 'pointer' : 'crosshair';
   const shapes = document.getElementById('shapes');
   const rows = document.getElementById('rows');
   // The focused input is rebuilt below, so where the caret was has to be put
@@ -334,10 +336,16 @@ document.getElementById('ink').oninput = (e) => ask({ do: 'Paint', colour: e.tar
 document.getElementById('add-row').onclick = () => ask({ do: 'AddRow' });
 document.getElementById('add-shape').onclick = () => ask({ do: 'AddShape' });
 document.getElementById('play').onclick = () => ask({ do: 'Play', on: !scene.playing });
-document.getElementById('full').onclick = () => {
-  document.getElementById('app').classList.toggle('full');
+// Putting the tools away and picking the pen up are the same act: a drawing
+// with no tools on screen invites a hand, and a hand that leaves a line
+// through it is the first thing anybody does.
+function setFull(on) {
+  document.getElementById('app').classList.toggle('full', on);
   requestAnimationFrame(paint);
-};
+  return ask({ do: 'Watch', on });
+}
+document.getElementById('full').onclick = () =>
+  setFull(!document.getElementById('app').classList.contains('full'));
 
 // ---- the clock -----------------------------------------------------------
 
@@ -367,7 +375,7 @@ document.getElementById('shown-file').textContent = file || 'drawing.easel';
   if (file) await ask({ do: 'OpenFile', name: file });
   else await refresh();
   if (wanted.get('play')) {
-    document.getElementById('app').classList.add('full');
+    setFull(true);
     await ask({ do: 'Play', on: true });
   }
 })();

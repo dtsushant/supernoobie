@@ -156,8 +156,37 @@ And four the studio adds on top, which `plotkit::expr` has never heard of:
 digits(value, x, y, size)        a number, written out
 smiley(x, y, size)               a face
 ghost(x, y, size)                the other face
-when tap N: name = expr, …       a rule
+ludo()                           the board
+token(seat, step, size)          a token on it. a NEGATIVE step is the yard
+when tap N: name = expr, …       a rule set off by a tap on figure N
+when question: name = expr, …    a rule set off when something becomes true
 ```
+
+A rule waits on a **gesture** or on a **question**:
+
+```text
+when tap 2: score = score + 1, cheer = time
+when die == 6: again = 1
+```
+
+**Became true, not is true.** A rule that fired while its question held would
+fire sixty times a second, and `turn = turn + 1` would run a game to the end of
+time inside one frame.
+
+One rule can make another's question true, and the answer does not wait for the
+next frame — but the asking is **bounded** at eight passes, because two rules
+can each make the other true and that is a loop nobody would find by reading.
+
+`when tap` with no figure is refused rather than read as a question about a
+variable named `tap`: it is nearly always `when tap 3:` typed wrong, and a rule
+that quietly never fires is the worst way to learn that.
+
+### Watching versus editing
+
+While a drawing is being **watched** — the `play` link, or `~` in the window —
+the pen taps and does nothing else. No ink, no rubbing out, no moving, no
+choosing. A drawing with no tools on screen invites a hand, and a hand that
+leaves a line through it is the first thing anybody does.
 
 A face is drawn **at a size**, so a size of nothing is a face that is not
 there. That is the whole of showing and hiding one:

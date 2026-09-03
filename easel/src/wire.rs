@@ -108,7 +108,7 @@ pub fn with_word(board: &Board, look: Look, word: &str) -> String {
     out.push(']');
 
     let _ = write!(out, ",\"clock\":{:.3},\"playing\":{}", board.clock, board.playing);
-    let _ = write!(out, ",\"game\":{}", board.playing_game);
+    let _ = write!(out, ",\"game\":{},\"watching\":{}", board.playing_game, board.watching);
     out.push_str(",\"say\":");
     text(&mut out, word);
     out.push_str(",\"tree\":");

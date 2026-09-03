@@ -198,6 +198,8 @@ enum Ask {
     Group,
     Ungroup,
     Play { on: bool },
+    /// Watch it rather than edit it: the pen taps and nothing else.
+    Watch { on: bool },
     Rewind,
     Key,
     Unkey,
@@ -317,6 +319,7 @@ fn apply(st: &mut Studio, ask: Ask) {
             st.board.play(on);
             st.board.playing_game = on && !st.board.sheet.script.rules().is_empty();
         }
+        Ask::Watch { on } => st.board.watch(on),
         Ask::Rewind => {
             st.board.rewind();
             st.board.restart();

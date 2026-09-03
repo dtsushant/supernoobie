@@ -51,10 +51,23 @@ use plotkit::expr::{self, indexed, Expr};
 use plotkit::Cx;
 
 /// What sets a rule off.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub enum On {
     /// A figure was tapped, by its group number.
     Tap(u32),
+    /// Something **became** true.
+    ///
+    /// Became, not is. A rule that fired while its condition held would fire
+    /// sixty times a second, and `turn = turn + 1` would run the game to the
+    /// end of time in a frame. So the edge is what counts, exactly as it does
+    /// for [`physics::Trigger`] and for the same reason.
+    When(Expr),
+}
+
+impl On {
+    pub fn is_tap(&self, group: u32) -> bool {
+        matches!(self, On::Tap(g) if *g == group)
+    }
 }
 
 /// What a deed writes to: a name, or a name with a number worked out.
@@ -84,6 +97,9 @@ impl Target {
 /// One rule: when this happens, do these.
 #[derive(Clone, Debug)]
 pub struct Rule {
+    /// Which row it was written on — how its edge is remembered between
+    /// frames, since the rules themselves are read afresh each time.
+    pub row: usize,
     pub on: On,
     /// `name = expression`, in order.
     pub deeds: Vec<(Target, Expr)>,
@@ -134,12 +150,23 @@ impl Tally {
 ///     when tap 1: score = score + 1, a = a + 2
 /// ```
 pub fn read(text: &str) -> Option<Rule> {
+    read_on_row(text, 0)
+}
+
+/// The same, remembering which row it came from.
+pub fn read_on_row(text: &str, row: usize) -> Option<Rule> {
     let rest = text.trim().strip_prefix("when ")?;
     let (head, body) = rest.split_once(':')?;
     let mut word = head.split_whitespace();
     let on = match (word.next()?, word.next()) {
         ("tap", Some(g)) => On::Tap(g.trim().parse().ok()?),
-        _ => return None,
+        // `tap` without a figure is refused rather than read as a question
+        // about a variable called `tap`. It is nearly always `when tap 3:`
+        // typed wrong, and a rule that quietly never fires is the worst way to
+        // find that out.
+        ("tap", _) => return None,
+        // Anything else is a question. `when die == 6:` rather than a gesture.
+        _ => On::When(expr::parse(head.trim()).ok()?),
     };
 
     let mut deeds = Vec::new();
@@ -160,7 +187,7 @@ pub fn read(text: &str) -> Option<Rule> {
             deeds.push((target, e));
         }
     }
-    (!deeds.is_empty()).then_some(Rule { on, deeds })
+    (!deeds.is_empty()).then_some(Rule { row, on, deeds })
 }
 
 /// `at` or `at[k]`, and nothing else — an expression on the left of an `=`
@@ -252,7 +279,7 @@ mod tests {
     #[test]
     fn a_rule_says_what_a_tap_does() {
         let r = read("when tap 1: score = score + 1").expect("a rule");
-        assert_eq!(r.on, On::Tap(1));
+        assert!(r.on.is_tap(1));
         assert_eq!(r.deeds.len(), 1);
         assert_eq!(r.deeds[0].0.name, "score");
     }
@@ -388,14 +415,29 @@ mod tests {
         assert_eq!(t.get("at3"), Some(30.0), "and left the others alone");
     }
 
+    /// ★ A rule can wait on a **question** rather than a gesture, which is what
+    /// a turn needs: nobody taps "the turn ended".
+    #[test]
+    fn a_rule_can_wait_on_a_question() {
+        let r = read("when die == 6: again = 1").expect("a rule");
+        assert!(matches!(r.on, On::When(_)));
+        assert!(!r.on.is_tap(6), "and it is not a tap on figure six");
+    }
+
     /// Things that are not rules are not rules.
     #[test]
     fn it_knows_a_rule_from_an_ordinary_row() {
         assert!(read("circle(0, 2)").is_none());
         assert!(read("a = 3").is_none());
         assert!(read("when tap 1").is_none(), "no deeds");
+        // `tap` with no figure is refused rather than read as a question about
+        // a variable named `tap` -- it is nearly always `when tap 3:` typed
+        // wrong, and a rule that quietly never fires is the worst way to learn
+        // that.
         assert!(read("when tap: score = 1").is_none(), "no figure named");
         assert!(read("when tap x: score = 1").is_none(), "and it has to be a number");
+        // But a question that merely mentions something is a question.
+        assert!(read("when die == 6: a = 1").is_some());
         assert!(read("when tap 1:").is_none(), "an empty rule is not a rule");
 
         assert!(is_rule("when tap 1: a = 2"));

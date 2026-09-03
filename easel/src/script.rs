@@ -179,7 +179,12 @@ impl Script {
 
     /// Every rule in the script.
     pub fn rules(&self) -> Vec<Rule> {
-        self.rows.iter().filter(|r| r.on).filter_map(|r| rule::read(&r.text)).collect()
+        self.rows
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.on)
+            .filter_map(|(k, r)| rule::read_on_row(&r.text, k))
+            .collect()
     }
 
     /// Run it, with the clock bound as `time`.
