@@ -84,6 +84,7 @@
 //!     1 2 3        nib: quill, round, broad        D E P   draw, rub, pick
 //!     [ ]          thinner / thicker               SPACE   play or stop
 //!     ; '          the broad nib's angle           B       back to the start
+//!     A            add a shape                     ~       just the drawing
 //!     , .          step between keys                K L     leave / remove a key
 //!     - =          more / less spring              G H     group, split up
 //!                                                  N       do nothing (clear the act)
@@ -204,6 +205,9 @@ struct Studio {
     lifting: Option<Node>,
     /// The furniture put away, so there is only the drawing.
     full: bool,
+    /// The arrows last frame, so a press moves the caret once rather than
+    /// sixty times a second.
+    was_arrows: Cx,
     /// Where the drawing lives: `(left, top)` in pixels.
     ///
     /// Shared with the window, because the graph has to know before the sketch
@@ -235,6 +239,7 @@ impl Studio {
             tree: Tree::default(),
             lifting: None,
             full: false,
+            was_arrows: Cx::ZERO,
             stage: Rc::new(Cell::new((tree::WIDTH, BAR_DEEP))),
             size: (1200, 780),
         };
@@ -429,12 +434,23 @@ impl Studio {
                 self.board.choose_only(k);
             }
             Poke::Choose(_) => {}
-            Poke::Add(Half::Functions) => self.board.add_row(),
+            Poke::Add(Half::Functions) => {
+                self.board.add_row();
+                // Scrolled to, or a new row on a long list appears somewhere
+                // below the window and looks like nothing having happened.
+                let tree = Tree::new(&self.board);
+                self.board.scrolled = tree.most(self.size.1);
+                self.say = "type the function, then press enter for another".into();
+            }
             Poke::Add(Half::Shapes) => {
-                self.say = if self.board.new_group() {
+                // With two or more chosen, `+` means "make these one figure".
+                // With anything else, it means what `+` means everywhere:
+                // there is now one more of them.
+                self.say = if self.board.selected.len() >= 2 && self.board.new_group() {
                     "one figure now -- tap any part to take it all".into()
                 } else {
-                    "choose two or more shapes first, then + makes them a figure".into()
+                    let k = self.board.add_shape();
+                    format!("shape {k} added, and chosen. drag it, colour it, tell it to walk.")
                 };
             }
             Poke::Paint(c) => {
@@ -597,6 +613,23 @@ fn main() {
         // the shortcuts so the row has the keyboard first -- though what
         // really settles it is that every shortcut below asks `not typing`.
         .on_keys(|s, keys| {
+            // The arrows move the caret while a row is being typed. Edge
+            // triggered against last frame: held down at sixty a second the
+            // caret would cross the row before you let go.
+            if s.board.editing.is_some() {
+                let now = keys.arrows();
+                if now.re != 0.0 && s.was_arrows.re == 0.0 {
+                    s.board.nudge_caret(now.re.signum() as i32);
+                }
+                // Up and down go to the ends, which is what there is room for
+                // on one line.
+                if now.im != 0.0 && s.was_arrows.im == 0.0 {
+                    s.board.caret_to_end(now.im < 0.0);
+                }
+                s.was_arrows = now;
+            } else {
+                s.was_arrows = Cx::ZERO;
+            }
             // The wheel over the tree scrolls the tree.
             let wheel = keys.scroll();
             if wheel.abs() > 1e-6 && Tree::covers_at(keys.at_px().0, Tree::width(&s.board)) {
@@ -652,6 +685,7 @@ fn main() {
         })
         .on('n', |s| s.heed(Poke::Verb(None)))
         .on('g', |s| s.obey(Cmd::Group))
+        .on('a', |s| s.heed(Poke::Add(Half::Shapes)))
         .on('k', |s| s.obey(Cmd::Key))
         .on('l', |s| s.obey(Cmd::Unkey))
         .on(',', |s| s.obey(Cmd::Step(false)))

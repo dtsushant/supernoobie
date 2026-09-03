@@ -550,13 +550,27 @@ impl Tree {
                     } else {
                         0x6B7987
                     };
-                    let text = if typing { format!("{}_", r.text) } else { r.text.clone() };
+                    // The caret goes **where the caret is**, not always at the
+                    // end. A bar that always sat at the end while typing went
+                    // in somewhere else would be worse than none at all.
+                    let text = if typing {
+                        let at = r.text.char_indices().nth(board.caret).map_or(r.text.len(), |(b, _)| b);
+                        format!("{}|{}", &r.text[..at], &r.text[at..])
+                    } else {
+                        r.text.clone()
+                    };
                     let room = ((WIDTH - PAD - x - KNOB - 8) / Canvas::text_w("n", TEXT).max(1)) as usize;
                     // The END of a long row, not the beginning: what you are
                     // typing is at the end, and a box that scrolled away from
                     // the cursor would be useless to type into.
-                    let shown: String = if text.chars().count() > room {
-                        text.chars().skip(text.chars().count() - room).collect()
+                    let n = text.chars().count();
+                    let shown: String = if n > room {
+                        // Scrolled to keep the **caret** in view, not always to
+                        // the end. Editing the middle of a long row and being
+                        // shown its end instead is typing blind.
+                        let want = if typing { board.caret + 1 } else { n };
+                        let from = want.saturating_sub(room).min(n - room);
+                        text.chars().skip(from).take(room).collect()
                     } else {
                         text
                     };

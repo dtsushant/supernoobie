@@ -96,6 +96,15 @@ use crate::rule::{self, Tally};
 use crate::track::Ease;
 use shapes::Pose;
 
+/// Where a character index falls in the bytes of a string.
+///
+/// Rust strings are bytes, and a caret counted in bytes lands in the middle of
+/// a character the first time somebody types one that is not ASCII. Counting
+/// characters and converting here means that cannot happen.
+fn byte_of(text: &str, chars: usize) -> usize {
+    text.char_indices().nth(chars).map_or(text.len(), |(b, _)| b)
+}
+
 /// What a drag means.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tool {
@@ -164,6 +173,12 @@ pub struct Board {
     /// pick tool, and the way to be sure is that there is exactly one place
     /// that decides — here.
     pub editing: Option<usize>,
+    /// Where in that row the next character goes, counted in **characters**.
+    ///
+    /// Not bytes. A byte index into text somebody typed will one day land in
+    /// the middle of a character and panic — and it will be the day somebody
+    /// types an accent, not the day it was written.
+    pub caret: usize,
 
     // --- the tree -------------------------------------------------------------
     /// Which figures are folded shut in the tree.
@@ -217,6 +232,7 @@ impl Board {
             clock: 0.0,
             playing: false,
             editing: None,
+            caret: 0,
             folded: Vec::new(),
             dropping: None,
             tree_shut: false,
@@ -553,6 +569,10 @@ impl Board {
             self.past.remember(&self.sheet);
         }
         self.editing = row.filter(|k| *k < self.sheet.script.len());
+        // At the end, which is where you carry on from. Putting it at the
+        // start would mean every row you touched had to be walked to the end
+        // of before you could add to it.
+        self.caret = self.editing.and_then(|k| self.sheet.script.rows.get(k)).map_or(0, |r| r.text.chars().count());
     }
 
     /// Add a row and start typing in it.
@@ -560,17 +580,20 @@ impl Board {
         self.past.remember(&self.sheet);
         self.sheet.script.add("");
         self.editing = Some(self.sheet.script.len() - 1);
+        self.caret = 0;
     }
 
-    /// Put characters into the row being typed.
+    /// Put characters in at the caret.
     pub fn type_into(&mut self, text: &str) -> bool {
         let Some(k) = self.editing else { return false };
         let Some(r) = self.sheet.script.rows.get_mut(k) else { return false };
-        r.text.push_str(text);
+        let at = byte_of(&r.text, self.caret);
+        r.text.insert_str(at, text);
+        self.caret += text.chars().count();
         true
     }
 
-    /// Take the last character back.
+    /// Take the character before the caret back.
     ///
     /// An empty row that is rubbed out again **goes away**, because that is
     /// what pressing backspace on nothing means, and the alternative is a
@@ -578,11 +601,39 @@ impl Board {
     pub fn rub_out(&mut self) -> bool {
         let Some(k) = self.editing else { return false };
         let Some(r) = self.sheet.script.rows.get_mut(k) else { return false };
-        if r.text.pop().is_some() {
+        if self.caret > 0 {
+            let from = byte_of(&r.text, self.caret - 1);
+            let to = byte_of(&r.text, self.caret);
+            r.text.replace_range(from..to, "");
+            self.caret -= 1;
             return true;
+        }
+        if !r.text.is_empty() {
+            // At the start of a row with something in it, there is nothing
+            // behind the caret to delete -- and taking the row away would
+            // throw the text out with it.
+            return false;
         }
         self.sheet.script.rows.remove(k);
         self.editing = if k == 0 { None } else { Some(k - 1) };
+        self.caret = self.editing.and_then(|j| self.sheet.script.rows.get(j)).map_or(0, |r| r.text.chars().count());
+        true
+    }
+
+    /// Move the caret about the row: `-1` left, `1` right.
+    pub fn nudge_caret(&mut self, by: i32) -> bool {
+        let Some(k) = self.editing else { return false };
+        let Some(r) = self.sheet.script.rows.get(k) else { return false };
+        let n = r.text.chars().count();
+        self.caret = (self.caret as i64 + i64::from(by)).clamp(0, n as i64) as usize;
+        true
+    }
+
+    /// To the start of the row, or to the end of it.
+    pub fn caret_to_end(&mut self, end: bool) -> bool {
+        let Some(k) = self.editing else { return false };
+        let Some(r) = self.sheet.script.rows.get(k) else { return false };
+        self.caret = if end { r.text.chars().count() } else { 0 };
         true
     }
 
@@ -761,6 +812,28 @@ impl Board {
     /// Choose one mark, and nothing else.
     pub fn choose_only(&mut self, k: usize) {
         self.selected = if k < self.sheet.len() { vec![k] } else { Vec::new() };
+    }
+
+    /// Put a plain shape on the page, without drawing it.
+    ///
+    /// A circle, in the pen's colour, in the middle of what is already there —
+    /// or at the origin on an empty page. Something to move, colour and
+    /// animate, for when the point is the animation rather than the drawing.
+    ///
+    /// It is **chosen** afterwards, because a new thing you then have to hunt
+    /// for is a new thing you did not want.
+    pub fn add_shape(&mut self) -> usize {
+        self.past.remember(&self.sheet);
+        let at = self.sheet.bounds().map_or(Cx::ZERO, |(lo, hi)| (lo + hi).scale(0.5));
+        let r = 0.8;
+        let pts: Vec<Cx> =
+            (0..48).map(|k| at + Cx::polar(r, k as f64 / 48.0 * std::f64::consts::TAU)).collect();
+        let mut m = Mark::new(pts, self.nib, self.colour);
+        m.closed = true;
+        self.sheet.add(m);
+        let k = self.sheet.len() - 1;
+        self.selected = vec![k];
+        k
     }
 
     /// Make an empty figure to drag things into.
@@ -1835,6 +1908,109 @@ mod tests {
         assert!(b.folded.contains(&3));
         b.fold(3);
         assert!(!b.folded.contains(&3));
+    }
+
+    /// ★ The caret moves, so a row can be edited rather than only retyped.
+    /// Typing goes in at the caret, not always at the end.
+    #[test]
+    fn a_row_can_be_edited_in_the_middle() {
+        let mut b = Board::new();
+        b.sheet.script.add("circle(0, 2)");
+        b.edit(Some(0));
+        assert_eq!(b.caret, 12, "editing starts at the end, where you carry on from");
+
+        // Back over the bracket, so the caret sits just after the 2.
+        b.nudge_caret(-1);
+        b.rub_out();
+        b.type_into("55");
+        assert_eq!(b.sheet.script.rows[0].text, "circle(0, 55)");
+    }
+
+    /// ★ Counted in CHARACTERS, not bytes. A byte index into text somebody
+    /// typed will one day land in the middle of a character and panic, and it
+    /// will be the day they type an accent rather than the day it was written.
+    #[test]
+    fn the_caret_counts_characters_and_not_bytes() {
+        let mut b = Board::new();
+        b.sheet.script.add("");
+        b.edit(Some(0));
+        b.type_into("a\u{e9}\u{3c0}");
+        assert_eq!(b.caret, 3);
+
+        b.nudge_caret(-1);
+        b.type_into("!");
+        assert_eq!(b.sheet.script.rows[0].text, "a\u{e9}!\u{3c0}");
+
+        // Backspace only takes what is BEHIND the caret, so clearing the row
+        // means going to the end of it first -- which is the rule behaving
+        // properly, not a limitation.
+        b.caret_to_end(true);
+        while b.rub_out() {}
+        assert_eq!(b.sheet.script.rows.len(), 0);
+    }
+
+    /// The caret cannot walk off either end.
+    #[test]
+    fn the_caret_stays_in_the_row() {
+        let mut b = Board::new();
+        b.sheet.script.add("abc");
+        b.edit(Some(0));
+        for _ in 0..20 {
+            b.nudge_caret(1);
+        }
+        assert_eq!(b.caret, 3);
+        for _ in 0..20 {
+            b.nudge_caret(-1);
+        }
+        assert_eq!(b.caret, 0);
+
+        b.caret_to_end(true);
+        assert_eq!(b.caret, 3);
+        b.caret_to_end(false);
+        assert_eq!(b.caret, 0);
+    }
+
+    /// ★ Backspace at the start of a row with text in it does nothing --
+    /// taking the row away would throw the text out with it. Only an empty row
+    /// goes.
+    #[test]
+    fn backspace_at_the_start_does_not_throw_the_row_away() {
+        let mut b = Board::new();
+        b.sheet.script.add("keep me");
+        b.edit(Some(0));
+        b.caret_to_end(false);
+        assert!(!b.rub_out());
+        assert_eq!(b.sheet.script.len(), 1);
+
+        b.sheet.script.rows[0].text.clear();
+        b.caret = 0;
+        assert!(b.rub_out(), "but an empty one goes");
+        assert_eq!(b.sheet.script.len(), 0);
+    }
+
+    /// ★ Adding a shape puts one on the page and CHOOSES it. A new thing you
+    /// then have to hunt for is a new thing you did not want.
+    #[test]
+    fn a_shape_can_be_added_without_drawing_it() {
+        let mut b = Board::new();
+        let k = b.add_shape();
+        assert_eq!(b.sheet.len(), 1);
+        assert_eq!(b.selected, vec![k]);
+        assert!(b.sheet.marks[k].closed, "and it is a closed shape, so it can be tapped inside");
+        assert!(b.undo(), "and it is one step back");
+        assert!(b.sheet.is_empty());
+    }
+
+    /// It lands in the middle of what is already there, not on top of the
+    /// first thing drawn or off at the origin where nobody is looking.
+    #[test]
+    fn a_new_shape_lands_where_you_are_working() {
+        let mut b = Board::new();
+        draw(&mut b, &ring(0.5, Cx::new(20.0, 20.0), 40));
+        let k = b.add_shape();
+        let (lo, hi) = b.sheet.marks[k].bounds().expect("bounds");
+        let middle = (lo + hi).scale(0.5);
+        assert!((middle - Cx::new(20.0, 20.0)).abs() < 1.5, "it landed at {middle:?}");
     }
 
     /// A tap leaves nothing — no invisible speck that can still be clicked on.
