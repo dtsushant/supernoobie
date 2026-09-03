@@ -127,12 +127,16 @@ function paint() {
   const r = size();
   ctx.clearRect(0, 0, r.width, r.height);
 
+  // Points arrive as whole numbers of hundredths of a world unit -- see
+  // `wire::GRAIN`. Formatting thirty thousand floats as decimal text was
+  // taking 84ms a scene, which is what made every tap feel slow.
+  const G = 0.01;
   for (const piece of scene.pieces) {
     const p = piece.p;
     if (p.length < 4) continue;
     ctx.beginPath();
-    ctx.moveTo(...toScreen([p[0], p[1]]));
-    for (let k = 2; k < p.length; k += 2) ctx.lineTo(...toScreen([p[k], p[k + 1]]));
+    ctx.moveTo(...toScreen([p[0] * G, p[1] * G]));
+    for (let k = 2; k < p.length; k += 2) ctx.lineTo(...toScreen([p[k] * G, p[k + 1] * G]));
     if (piece.fill) {
       ctx.closePath();
       ctx.fillStyle = piece.c;

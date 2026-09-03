@@ -105,7 +105,7 @@ row on # --- what you can see ------------------------------------------
 row on # The die itself is a MARK, further down, so it can be tapped -- this
 row on # is only its face, which has to be redrawn every frame because it
 row on # changes, and a mark's points do not.
-row on dice(die, diex(seed, rolls, age, span), diey(seed, rolls, age, span), 0.78, dieturn(seed, rolls, age, span), diesquash(seed, rolls, age, span))
+row on dice(die, diex(seed, rolls, age, span), diey(seed, rolls, age, span), 0.78, dieturn(seed, rolls, age, span), diesquash(seed, rolls, age, span),          dienext(seed, rolls, age, span))
 row on 
 row on # whose turn it is, in that seat's own colour, in the middle of the
 row on # board where the four home paths meet.

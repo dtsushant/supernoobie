@@ -104,9 +104,15 @@ pub struct Roll {
     pub turn: f64,
     /// The face it is showing, 1 to 6.
     pub face: u8,
-    /// How wide the face looks, 1 flat on and 0 edge-on — the foreshortening
-    /// that makes a flip read as a flip.
+    /// How wide the near face looks, 1 flat on and 0 edge-on.
     pub squash: f64,
+    /// The face rolling into view beside it.
+    ///
+    /// A cube going over its edge shows **two** faces, and their widths are the
+    /// cosine and sine of one angle. Drawing only the near one, foreshortened,
+    /// gives a plank: full height, narrowing width, nothing anywhere saying the
+    /// thing is solid.
+    pub next: u8,
     /// Whether it has stopped.
     pub done: bool,
 }
@@ -206,13 +212,19 @@ pub fn thrown(seed: f64, roll: f64, age: f64, span: f64) -> Roll {
     // face changing by one each flip is a tidy little sequence, and the eye
     // picks that out of a tumbling die at once.
     let left = all - gone_over;
-    let face = if done || left < 1.0 {
+    let shown = |k: f64| 1 + (6.0 * spread(seed, roll + 1000.0 * k, 8.0)).floor().clamp(0.0, 5.0) as u8;
+    let face = if done || left < 1.0 { rest } else { shown(gone_over) };
+    // The one coming round behind it -- and if this is the last flip, the face
+    // it is going to land on, so the roll ends on the number it means.
+    let next = if done {
+        rest
+    } else if left < 2.0 {
         rest
     } else {
-        1 + (6.0 * spread(seed, roll + 1000.0 * gone_over, 8.0)).floor().clamp(0.0, 5.0) as u8
+        shown(gone_over + 1.0)
     };
 
-    Roll { at, turn, face, squash: if done { 1.0 } else { squash.max(0.06) }, done }
+    Roll { at, turn, face, next, squash: if done { 1.0 } else { squash }, done }
 }
 
 // ===========================================================================

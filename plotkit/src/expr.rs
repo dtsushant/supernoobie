@@ -185,7 +185,7 @@ pub enum Expr {
 }
 
 /// Names that parse as function calls rather than implicit multiplication.
-pub const FUNCS: [&str; 31] = [
+pub const FUNCS: [&str; 32] = [
     "exp", "ln", "sin", "cos", "tan", "sqrt", "abs", "arg", "conj", "re", "im", "polar", "pow",
     // Whole numbers. A language with no way to say "the integer part" cannot
     // say "a number between 1 and 9", which is most of what a counting game
@@ -200,7 +200,7 @@ pub const FUNCS: [&str; 31] = [
     // things -- the game’s seed, which throw this is, how long ago it left the
     // hand, and the half-width of the board it is thrown across -- so a whole
     // die is five rows that differ only in the name at the front.
-    "diex", "diey", "dieturn", "dieface", "diedone", "diesquash",
+    "diex", "diey", "dieturn", "dieface", "diedone", "diesquash", "dienext",
 ];
 
 /// Names that draw something.
@@ -328,7 +328,7 @@ impl Expr {
                     // A die in mid-throw. Five functions rather than one giving
                     // a die, for the same reason `ludox` and `ludoy` are two:
                     // a row holds one number, and numbers are what save.
-                    "diex" | "diey" | "dieturn" | "dieface" | "diedone" | "diesquash" => {
+                    "diex" | "diey" | "dieturn" | "dieface" | "diedone" | "diesquash" | "dienext" => {
                         if a.len() != 4 {
                             return Err(format!("'{f}' takes a seed, a throw, an age and a span"));
                         }
@@ -340,6 +340,7 @@ impl Expr {
                                 "dieturn" => r.turn,
                                 "dieface" => r.face as f64,
                                 "diesquash" => r.squash,
+                                "dienext" => r.next as f64,
                                 _ => r.done as u8 as f64,
                             },
                             0.0,
@@ -780,6 +781,53 @@ pub fn eval_with(e: &Expr, name: &str, v: Cx, base: &HashMap<String, Cx>) -> Res
     let mut env = base.clone();
     env.insert(name.to_string(), v);
     e.eval(&env)
+}
+
+/// Every name this expression mentions.
+///
+/// **For handing a sampled curve a small environment.** `param(…)` evaluates
+/// its expression once per sample, and each evaluation used to copy the whole
+/// script’s bindings — sixty names for a game of Ludo, sixty allocations, three
+/// hundred and twenty times a row, thirty rows a frame. That was 47 ms of a
+/// 73 ms scene, and it is why the studio could not answer a tap quickly.
+///
+/// A curve mentions three or four names. Cutting the environment down to those
+/// once, before any sampling, makes the copy nearly free.
+///
+/// An `at[k]` is recorded as the bare `at`, which cannot be resolved without
+/// knowing `k` — so anything indexed asks for the whole environment, which is
+/// the safe answer and rare enough not to matter.
+pub fn names(e: &Expr, out: &mut Vec<String>, indexed: &mut bool) {
+    match e {
+        Expr::Num(_) => {}
+        Expr::Var(n) => out.push(n.clone()),
+        Expr::Index(_, k) => {
+            *indexed = true;
+            names(k, out, indexed);
+        }
+        Expr::Neg(a) => names(a, out, indexed),
+        Expr::Cmp(_, a, b) | Expr::Bin(_, a, b) => {
+            names(a, out, indexed);
+            names(b, out, indexed);
+        }
+        Expr::Call(_, args) => {
+            for a in args {
+                names(a, out, indexed);
+            }
+        }
+    }
+}
+
+/// The bindings this expression could possibly need, and nothing else.
+pub fn env_for(e: &Expr, base: &HashMap<String, Cx>) -> HashMap<String, Cx> {
+    let (mut wanted, mut indexed) = (Vec::new(), false);
+    names(e, &mut wanted, &mut indexed);
+    if indexed {
+        return base.clone();
+    }
+    // The constants every script has -- `pi`, `tau`, `i` and the rest -- are
+    // named like anything else, so they come along by the same rule.
+    wanted.iter().filter_map(|n| base.get_key_value(n).map(|(k, v)| (k.clone(), *v))).collect()
 }
 
 /// The environment a script ends with, so a renderer can re-evaluate deferred

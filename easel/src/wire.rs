@@ -176,18 +176,59 @@ fn tree(out: &mut String, board: &Board) {
     out.push(']');
 }
 
+/// Coordinates go over the wire as **whole numbers of hundredths**, and the
+/// page multiplies by [`GRAIN`] again.
+///
+/// This is not a micro-optimisation, it was the difference between a studio
+/// that answered and one that did not. A scene of this board is about thirty
+/// thousand numbers, and `write!("{:.4}")` costs the best part of three
+/// microseconds each — nearly all of it the formatting machinery rather than
+/// the arithmetic. That put a single scene at **84 ms**, so the clock could not
+/// tick faster than twelve times a second and every tap queued behind one.
+///
+/// Whole numbers can be written a digit at a time, which is perhaps twenty
+/// times quicker and smaller besides. And a hundredth of a world unit is a
+/// fortieth of a pixel at the zoom anybody draws at, so nothing is lost.
+pub const GRAIN: f64 = 0.01;
+
 fn points(out: &mut String, run: &[Cx]) {
     out.push('[');
     for (k, z) in run.iter().enumerate() {
         if k > 0 {
             out.push(',');
         }
-        // Four places is a hair at any zoom anybody draws at, and it roughly
-        // halves what goes over the wire against printing every digit of a
-        // float — of which most are noise from the arithmetic, not the shape.
-        let _ = write!(out, "{:.4},{:.4}", z.re, z.im);
+        whole(out, z.re);
+        out.push(',');
+        whole(out, z.im);
     }
     out.push(']');
+}
+
+/// One coordinate, in hundredths, written a digit at a time.
+fn whole(out: &mut String, v: f64) {
+    // A coordinate that is not a number at all would make the page stop dead
+    // on a parse error rather than draw the rest, so it becomes a nought.
+    let n = if v.is_finite() { (v / GRAIN).round() } else { 0.0 };
+    let mut n = n.clamp(-2e9, 2e9) as i64;
+    if n < 0 {
+        out.push('-');
+        n = -n;
+    }
+    if n == 0 {
+        out.push('0');
+        return;
+    }
+    let mut digits = [0u8; 20];
+    let mut k = 0;
+    while n > 0 {
+        digits[k] = b'0' + (n % 10) as u8;
+        n /= 10;
+        k += 1;
+    }
+    while k > 0 {
+        k -= 1;
+        out.push(digits[k] as char);
+    }
 }
 
 /// A string, with the six things JSON insists on escaping.

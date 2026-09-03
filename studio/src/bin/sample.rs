@@ -497,7 +497,7 @@ fn ludogame() -> Board {
     add!("# changes, and a mark\'s points do not.");
     add!("dice(die, diex(seed, rolls, age, span), diey(seed, rolls, age, span), \
          0.78, dieturn(seed, rolls, age, span), \
-         diesquash(seed, rolls, age, span))");
+         diesquash(seed, rolls, age, span),          dienext(seed, rolls, age, span))");
     add!("");
     add!("# whose turn it is, in that seat\'s own colour, in the middle of the");
     add!("# board where the four home paths meet.");

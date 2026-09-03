@@ -317,16 +317,30 @@ impl Script {
                     // Flat on unless told otherwise, so a die that is not
                     // being thrown needs five arguments and not six.
                     let squash = number(1.0);
+                    let next = number(face as f64).round().clamp(1.0, 6.0) as u8;
                     if size > 0.01 {
-                        let mut parts = shapes::dice::die(face, Cx::new(x, y), size, turn, squash);
+                        let (far, _) = shapes::dice::parts(face, next, squash);
+                        let mut parts = shapes::dice::die(face, next, Cx::new(x, y), size, turn, squash);
                         // Ivory body, dark pips -- fixed, like `digits`, because
                         // a die whose pips were the same colour as its face is
-                        // not a die at all. Nothing else here has two colours
-                        // it cannot do without.
-                        let body = parts.remove(0);
-                        solid.push((body, 0xEDE6D6));
-                        for pip in parts {
-                            solid.push((pip, 0x24282E));
+                        // not a die at all.
+                        //
+                        // The face rolling in behind is drawn darker, which is
+                        // the only shading anywhere here and is what makes the
+                        // pair read as one solid thing turning rather than two
+                        // cards side by side.
+                        for (k, part) in parts.drain(..).enumerate() {
+                            let behind = k < far;
+                            let body = k == 0 || k == far;
+                            solid.push((
+                                part,
+                                match (body, behind) {
+                                    (true, true) => 0xB3A991,
+                                    (true, false) => 0xEDE6D6,
+                                    (false, true) => 0x1B1E23,
+                                    (false, false) => 0x24282E,
+                                },
+                            ));
                         }
                     }
                 }
@@ -495,17 +509,23 @@ fn shape_of(cmd: &Cmd, env: &HashMap<String, Cx>) -> Option<Shape> {
         Cmd::Circle(centre, r) => Shape::circle(*centre, *r),
         Cmd::Ngon(centre, r, n) => Shape::polygon(plot::ngon(*centre, *r, *n, 0.0)),
         Cmd::Plot(e) => {
-            let (e, env) = (e.clone(), env.clone());
+            let (e, env) = (e.clone(), plotkit::expr::env_for(e, env));
             // A sample that will not evaluate becomes a gap rather than a
             // panic: `1/x` at zero is a real thing to write.
             Shape::graph(move |x| bind(&e, "x", Cx::new(x, 0.0), &env).map_or(f64::NAN, |z| z.re))
         }
         Cmd::Param(e, t0, t1) => {
-            let (e, env) = (e.clone(), env.clone());
+            // Only the names it mentions, worked out once -- see
+            // `expr::env_for`. Sampling copied the whole script's bindings
+            // three hundred and twenty times a curve before this.
+            let (e, env) = (e.clone(), plotkit::expr::env_for(e, env));
             Shape::param(move |t| bind(&e, "t", Cx::new(t, 0.0), &env).unwrap_or(Cx::ZERO), *t0, *t1, SAMPLES)
         }
         Cmd::Implicit(e, level) => {
-            let (e, env) = (e.clone(), env.clone());
+            // The dearest of the three: 140 x 140 is nearly twenty thousand
+            // samples a row, so a whole-environment copy each time is twenty
+            // thousand of them.
+            let (e, env) = (e.clone(), plotkit::expr::env_for(e, env));
             Shape::implicit(
                 move |x, y| {
                     let mut here = env.clone();
