@@ -50,10 +50,32 @@ function look() {
 
 // ---- talking to the drawing ---------------------------------------------
 
-async function ask(body) {
+// A command must never be lost. Pressing play is not a redraw: if it is
+// dropped the clock never starts, and everything downstream of the clock --
+// a thrown die settling, a walk cycle, a note dying away -- silently does
+// nothing at all. That is a hard thing to see, because the tap that was NOT
+// dropped still works, so the game looks alive and merely stuck.
+//
+// So commands queue behind one another, and only the clock is allowed to skip
+// -- with the skipped time carried, below, so it is delayed and not lost.
+let chain = Promise.resolve();
+function ask(body) {
+  chain = chain.then(() => send(body)).catch(() => {});
+  return chain;
+}
+
+// A move of the pen while it is down is like a tick: only the latest one
+// matters, and queueing them means the ink arrives seconds after the hand has
+// stopped. So these are dropped when the line is busy -- the NEXT move carries
+// the position, and the lift is sent through `ask` so it can never be lost.
+function nudge(body) {
+  if (waiting) return;
+  ask(body);
+}
+
+async function send(body) {
   // One in flight at a time. Without this a fast hand queues a hundred
   // requests and the drawing arrives seconds after the pen has stopped.
-  if (waiting) return;
   waiting = true;
   try {
     const r = await fetch(`/do?${look()}`, {
@@ -269,7 +291,7 @@ paper.onpointermove = (e) => {
     return;
   }
   const [x, y] = toWorld(px, py);
-  ask({ do: 'Pointer', x, y, down: true });
+  nudge({ do: 'Pointer', x, y, down: true });
 };
 
 paper.onpointerup = (e) => {
@@ -352,10 +374,19 @@ document.getElementById('full').onclick = () =>
 // Stepped from here, because this is what knows when it last drew. A server
 // ticking on its own would run at a rate nobody was watching at.
 let last = performance.now();
+let owed = 0;
 function frame(now) {
-  const dt = (now - last) / 1000;
+  owed += (now - last) / 1000;
   last = now;
-  if (scene.playing) ask({ do: 'Tick', seconds: dt });
+  // The clock is the one thing allowed to skip a turn, because a tick is not
+  // an instruction -- it is an amount. A skipped one is CARRIED rather than
+  // dropped, so a slow answer makes the animation stutter and never makes it
+  // run slow, which would look like the physics being wrong.
+  if (scene.playing && !waiting && owed > 0) {
+    const dt = owed;
+    owed = 0;
+    ask({ do: 'Tick', seconds: dt });
+  }
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
