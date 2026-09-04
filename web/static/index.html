@@ -81,11 +81,16 @@
         <button data-do="Clear">clear</button>
       </span>
       <span class="set">
-        <button id="mic" title="talk to the others">&#x1F3A4;</button>
         <button id="full" title="just the drawing">&#x2922;</button>
         <a class="asbutton" href="/" title="all the drawings">home</a>
       </span>
     </div>
+
+    <!-- OUTSIDE the toolbar, deliberately. The game view hides `#bar`, and a
+         child of a `display: none` parent cannot be brought back by any rule on
+         the child -- so a microphone button living in the toolbar simply did
+         not exist in the one view where people are playing together. -->
+    <button id="mic" title="talk to the others">&#x1F3A4; talk</button>
 
     <!-- Who is in the room, with a level bar each. So two tabs on one machine
          can be tested without headphones: you can SEE the other one hearing

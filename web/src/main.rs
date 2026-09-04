@@ -146,7 +146,22 @@ async fn main() {
         .with_state(shared);
 
     let at = SocketAddr::from((if open { [0, 0, 0, 0] } else { [127, 0, 0, 1] }, 8088));
-    let listener = tokio::net::TcpListener::bind(at).await.expect("could not take the port");
+    // A plain `expect` here says "could not take the port" and nothing else,
+    // which is the least useful thing it could say: the reason is almost always
+    // a server from an earlier run still holding it, and the symptom is a
+    // browser quietly showing you a page built before your last change.
+    let listener = match tokio::net::TcpListener::bind(at).await {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("could not take port 8088: {e}");
+            eprintln!();
+            eprintln!("  Almost certainly an older copy of this server is still running, and");
+            eprintln!("  your browser has been talking to IT -- showing a page built before");
+            eprintln!("  whatever you just changed. Stop it and try again:");
+            eprintln!("    lsof -ti:8088 | xargs kill        (or: pkill -f target/.*/web)");
+            std::process::exit(1);
+        }
+    };
     println!("http://127.0.0.1:8088");
     if open {
         println!("open to the network on port 8088 -- find this machine's address with `ip addr` or `ipconfig`");

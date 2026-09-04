@@ -275,16 +275,35 @@ a.asbutton:hover { background: var(--lit); color: var(--ink); }
    from across the room -- which is where the other three people are. */
 #mic.on {
   background: #6fcf97;
+  border-color: #6fcf97;
   color: #08121a;
 }
-/* Kept in the full-screen game view: the whole point is talking WHILE
-   playing, so the one control that must survive is this one. */
-#app.full #mic, .to-play #mic {
-  display: inline-block;
+/* No microphone to be had -- plain http over a network. Says why on hover
+   rather than looking broken. */
+#mic.cannot {
+  opacity: 0.55;
+  cursor: help;
+}
+/* Always there, in every view -- it lives outside the toolbar for exactly
+   this reason. The whole point is talking WHILE playing, and the game view
+   hides the toolbar. */
+#mic {
   position: absolute;
   top: 0.7rem;
   right: 0.7rem;
   z-index: 30;
+  padding: 0.4rem 0.7rem;
+  border: 1px solid #22303c;
+  border-radius: 0.4rem;
+  background: #121821;
+  color: #b9c4d0;
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+#mic:hover {
+  border-color: #46525e;
+  color: #e3e9ef;
 }
 
 /* ---- who is talking ------------------------------------------------------ */

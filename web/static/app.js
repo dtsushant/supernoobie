@@ -761,7 +761,8 @@ async function talk(on) {
     for (const who of [...links.keys()]) drop(who);
     if (mine) for (const t of mine.getTracks()) t.stop();
     mine = null;
-    document.getElementById('mic').classList.remove('on');
+    micButton.classList.remove('on');
+    micButton.textContent = '\u{1F3A4} talk';
     return;
   }
   if (!canTalk()) {
@@ -781,7 +782,8 @@ async function talk(on) {
     return;
   }
   talking = true;
-  document.getElementById('mic').classList.add('on');
+  micButton.classList.add('on');
+  micButton.textContent = '\u{1F3A4} talking';
   // My own level too, so the meter shows something before anybody else joins
   // -- otherwise a working microphone and a broken one look the same until a
   // second person turns up.
@@ -794,7 +796,19 @@ async function talk(on) {
 // thirty scenes a second.
 setInterval(callIn, 500);
 
-document.getElementById('mic').onclick = () => talk(!talking);
+// If anything above this line throws at load, nothing below it runs -- and a
+// button with no handler is a button that does nothing at all, silently. So
+// this is wired up defensively and says so when it cannot be.
+const micButton = document.getElementById('mic');
+if (micButton) {
+  micButton.onclick = () => talk(!talking);
+  if (!canTalk()) {
+    micButton.title = whyNot();
+    micButton.classList.add('cannot');
+  }
+} else {
+  console.error('no microphone button in the page');
+}
 
 // ---- the setup screen ----------------------------------------------------
 
