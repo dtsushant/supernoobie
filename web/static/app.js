@@ -51,7 +51,7 @@ function look() {
   const r = paper.getBoundingClientRect();
   const [lox, hiy] = toWorld(0, 0);
   const [hix, loy] = toWorld(r.width, r.height);
-  return `lox=${lox}&loy=${loy}&hix=${hix}&hiy=${hiy}&px=${Math.round(r.width)}&have=${held}&me=${me}`;
+  return `lox=${lox}&loy=${loy}&hix=${hix}&hiy=${hiy}&px=${Math.round(r.width)}&have=${held}&me=${me}&room=${encodeURIComponent(room)}`;
 }
 
 // ---- talking to the drawing ---------------------------------------------
@@ -528,6 +528,10 @@ function noises() {
 // A name for this browser, for as long as the tab is open. Kept in
 // sessionStorage so a reload is the same peer rather than a new one appearing
 // beside the ghost of the old.
+// Which game. From the address, so a link IS the invitation -- there is no
+// create step and nothing to join.
+const room = new URLSearchParams(location.search).get('room') || '';
+
 let me = sessionStorage.getItem('peer');
 if (!me) {
   me = Math.random().toString(36).slice(2, 10);
@@ -681,7 +685,7 @@ async function sit(seat) {
       await fetch('/talk', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ me, post: [], sit: seat }),
+        body: JSON.stringify({ me, post: [], sit: seat, room }),
       })
     ).json();
     seatWord = '';
@@ -706,7 +710,7 @@ async function callSeats() {
       await fetch('/talk', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ me, post: [] }),
+        body: JSON.stringify({ me, post: [], room }),
       })
     ).json();
     showSeats(answer);
@@ -715,6 +719,26 @@ async function callSeats() {
   }
 }
 callSeats();
+
+// The room's name, and a way to hand it to somebody. Shown only when there is
+// a room -- a person drawing alone is never made to think about rooms.
+(function showRoom() {
+  const box = document.getElementById('room');
+  if (!box) return;
+  box.hidden = !room;
+  if (!room) return;
+  document.getElementById('room-code').textContent = room;
+  document.getElementById('room-copy').onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(location.href);
+      say('link copied -- send it to the others');
+    } catch (e) {
+      // Clipboard needs a secure context too, and over plain http it is
+      // simply absent. Show the thing to copy rather than failing quietly.
+      say(location.href);
+    }
+  };
+})();
 
 // Who is in the room. Rebuilt only when the list changes, so a bar being
 // animated is not thrown away sixty times a second.
@@ -821,7 +845,7 @@ async function callIn() {
       await fetch('/talk', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ me, post }),
+        body: JSON.stringify({ me, post, room }),
       })
     ).json();
   } catch (e) {

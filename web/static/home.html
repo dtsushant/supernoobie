@@ -39,8 +39,13 @@
 
 <script>
 // What each sample is, so the list is not four identical rectangles.
+// Which of these can be played by four people at once. A drawing says so
+// itself with a `seats(...)` row; this list is only which cards offer the
+// button, and the server is what actually knows.
+const SHARED = ['samples/ludogame.easel'];
+
 const ABOUT = {
-  'samples/ludogame.easel': ['LUDO, four players', 'press play, then tap the die — four tokens a seat, hot seat'],
+  'samples/ludogame.easel': ['LUDO, four players', 'one screen, or one each — press play, or start a room and send the link'],
   'samples/ludo.easel': ['the ludo board', 'the drawing only — nothing to tap; the game is ludogame'],
   'samples/adding.easel': ['an adding game', 'tap the box with the right answer'],
   'samples/dials.easel': ['sliders', 'move r or n and everything follows'],
@@ -70,6 +75,24 @@ fetch('/list').then(r => r.json()).then(files => {
     play.href = `/studio?file=${encodeURIComponent(f)}&play=1`;
     play.textContent = 'play';
     go.append(edit, play);
+
+    // A game with seats in it can be played by four people at once, each on
+    // their own screen -- so it gets a room. A sketch does not need one, and
+    // offering one would be offering a thing with nothing on the other end.
+    if (SHARED.includes(f)) {
+      const together = document.createElement('a');
+      together.textContent = 'with friends';
+      together.className = 'together';
+      together.href = '#';
+      together.onclick = async (e) => {
+        e.preventDefault();
+        // The server names the room. It has to: it is the one that knows
+        // which names are already taken.
+        const r = await (await fetch('/room', { method: 'POST' })).json();
+        location.href = `/studio?file=${encodeURIComponent(f)}&play=1&room=${r.room}`;
+      };
+      go.append(together);
+    }
     card.append(go);
     list.append(card);
   }

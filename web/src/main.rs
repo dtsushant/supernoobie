@@ -7,6 +7,22 @@
 //!     then open http://127.0.0.1:8088
 //! ```
 //!
+//! ## Rooms
+//!
+//! One server holds many games. A room is a name in the address —
+//! `?room=PEAR` — and the board, the seats and the post office all hang off
+//! it. **A link is the invitation:** the first person to use a name makes the
+//! room, so there is no create step, no list, and nothing to tidy if nobody
+//! turns up.
+//!
+//! Somebody who asks for no room gets one anyway, so a person opening the
+//! studio to draw is never made to think about rooms, and every link that
+//! worked before this existed still works.
+//!
+//! See [`rooms`] for the alphabet — codes get read down a telephone, so it has
+//! no letter that sounds like another — and for why a room ends by being
+//! forgotten rather than by being left.
+//!
 //! ## Letting another machine in
 //!
 //! `--open` binds every interface instead of loopback. Off by default because
@@ -96,9 +112,48 @@ use serde::Deserialize;
 
 use std::fmt::Write as _;
 
+mod rooms;
 mod talk;
 
-type Shared = Arc<Mutex<Studio>>;
+/// Every room on this server, and what it takes to make another.
+///
+/// One lock over all of them rather than one each: a lock per room would be
+/// the right shape if rooms were busy, and they are not — a room is four
+/// people, and the work behind the lock is a scene, which is milliseconds.
+/// Splitting it would buy nothing and cost the ability to reason about it.
+struct House {
+    rooms: rooms::Rooms<Studio>,
+    /// What a new room starts from.
+    file: String,
+    began: std::time::Instant,
+}
+
+impl House {
+    fn now(&self) -> f64 {
+        self.began.elapsed().as_secs_f64()
+    }
+
+    /// The room by that name, opening the starting file if it is new.
+    fn room(&mut self, name: &str) -> &mut Studio {
+        let now = self.now();
+        let file = self.file.clone();
+        self.rooms.get(name, now, || {
+            let mut board = Board::new();
+            let say = if std::path::Path::new(&file).exists() {
+                match board.load(&file) {
+                    Ok(0) => String::new(),
+                    Ok(bad) => format!("opened {file} -- {bad} lines lost"),
+                    Err(e) => format!("could not open {file}: {e}"),
+                }
+            } else {
+                String::new()
+            };
+            Studio { board, file: file.clone(), say, room: talk::Room::new(), began: std::time::Instant::now() }
+        })
+    }
+}
+
+type Shared = Arc<Mutex<House>>;
 
 /// The drawing, and the one thing about it the browser cannot hold.
 struct Studio {
@@ -135,7 +190,19 @@ async fn main() {
         println!("{say}");
     }
 
-    let shared: Shared = Arc::new(Mutex::new(Studio { board, file, say, room: talk::Room::new(), began: std::time::Instant::now() }));
+        // The room somebody alone in the studio is in, opened with whatever file
+    // was named on the command line. Every other room starts from the same
+    // file, which is what makes a link an invitation to *this* game.
+    let mut house = House { rooms: rooms::Rooms::new(), file: file.clone(), began: std::time::Instant::now() };
+    let now = house.now();
+    house.rooms.get(rooms::ALONE, now, || Studio {
+        board,
+        file,
+        say,
+        room: talk::Room::new(),
+        began: std::time::Instant::now(),
+    });
+    let shared: Shared = Arc::new(Mutex::new(house));
     let app = Router::new()
         .route("/", get(home))
         .route("/studio", get(page))
@@ -145,6 +212,7 @@ async fn main() {
         .route("/scene", get(scene))
         .route("/do", post(act))
         .route("/talk", post(chat))
+        .route("/room", post(new_room))
         .with_state(shared);
 
     let at = SocketAddr::from((if open { [0, 0, 0, 0] } else { [127, 0, 0, 1] }, 8088));
@@ -268,6 +336,9 @@ struct Where {
     /// drawing that is not a game with seats in it.
     #[serde(default)]
     me: String,
+    /// Which game. Absent means the one somebody alone in the studio is in.
+    #[serde(default)]
+    room: String,
 }
 
 impl From<&Where> for Look {
@@ -277,7 +348,8 @@ impl From<&Where> for Look {
 }
 
 async fn scene(State(s): State<Shared>, Query(w): Query<Where>) -> impl IntoResponse {
-    let studio = s.lock().expect("the drawing");
+    let mut house = s.lock().expect("the drawing");
+    let studio = house.room(&w.room);
     (
         [(header::CONTENT_TYPE, "application/json")],
         easel::wire::since(&studio.board, (&w).into(), "", w.have),
@@ -325,13 +397,33 @@ enum Ask {
 }
 
 async fn act(State(s): State<Shared>, Query(w): Query<Where>, Json(ask): Json<Ask>) -> impl IntoResponse {
-    let mut studio = s.lock().expect("the drawing");
-    match refuse(&studio, &w.me, &ask) {
+    let mut house = s.lock().expect("the drawing");
+    let studio = house.room(&w.room);
+    match refuse(studio, &w.me, &ask) {
         Some(why) => studio.say = why,
-        None => apply(&mut studio, ask),
+        None => apply(studio, ask),
     }
     let word = std::mem::take(&mut studio.say);
     ([(header::CONTENT_TYPE, "application/json")], easel::wire::since(&studio.board, (&w).into(), &word, w.have))
+}
+
+/// Make a room nobody is using, and say what it is called.
+///
+/// The **server** names it, because the server is the one that knows which
+/// names are taken. A page that made up its own would sooner or later drop two
+/// sets of friends into one game.
+async fn new_room(State(s): State<Shared>) -> impl IntoResponse {
+    let mut house = s.lock().expect("the drawing");
+    let now = house.now();
+    let name = house.rooms.make(now);
+    // Made here and now, so the name is genuinely taken by the time the page
+    // is told it -- otherwise two people pressing together could be handed the
+    // same one.
+    house.room(&name);
+    (
+        [(header::CONTENT_TYPE, "application/json")],
+        format!("{{\"room\":{}}}", serde_json::to_string(&name).unwrap_or_default()),
+    )
 }
 
 /// Why this person may not do this, if they may not.
@@ -384,6 +476,8 @@ struct Chat {
     /// A seat to take, if this call is claiming one. `-1` gives one up.
     #[serde(default)]
     sit: Option<i64>,
+    #[serde(default)]
+    room: String,
 }
 
 #[derive(serde::Deserialize)]
@@ -395,7 +489,8 @@ struct Outbound {
 
 /// **Signalling only.** No voice passes through this server -- see [`talk`].
 async fn chat(State(s): State<Shared>, Json(chat): Json<Chat>) -> impl IntoResponse {
-    let mut studio = s.lock().expect("the drawing");
+    let mut house = s.lock().expect("the drawing");
+    let studio = house.room(&chat.room);
     let now = studio.began.elapsed().as_secs_f64();
     for out in chat.post {
         let note = talk::Note { from: chat.me.clone(), kind: out.kind, body: out.body };

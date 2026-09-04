@@ -379,3 +379,40 @@ a.asbutton:hover { background: var(--lit); color: var(--ink); }
 #seats button.turn {
   box-shadow: 0 0 0 2px #e3e9ef;
 }
+
+/* ---- which game this is -------------------------------------------------- */
+#room {
+  position: absolute;
+  bottom: 0.7rem;
+  right: 0.7rem;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid #22303c;
+  border-radius: 0.4rem;
+  background: rgba(11, 16, 23, 0.86);
+  font-size: 0.78rem;
+  color: #94a1ae;
+}
+#room-code {
+  font-family: ui-monospace, monospace;
+  font-size: 1rem;
+  letter-spacing: 0.12em;
+  color: #e3e9ef;
+}
+#room-copy {
+  padding: 0.2rem 0.45rem;
+  border: 1px solid #22303c;
+  border-radius: 0.3rem;
+  background: #121821;
+  color: #b9c4d0;
+  font: inherit;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+#room-copy:hover { color: #e3e9ef; }
+
+/* The one link on the front page that starts a room. */
+.go .together { color: #6fcf97; }
