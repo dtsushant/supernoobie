@@ -11,3 +11,6 @@ description = "A drawing that can be edited and saved — the whole editor excep
 physics = { path = "../physics" }
 plotkit = { path = "../plotkit" }
 shapes = { path = "../shapes" }
+# The noises a drawing can ask for, so the page is told the recipe rather than
+# carrying its own copy of it in JavaScript.
+sound = { path = "../sound" }

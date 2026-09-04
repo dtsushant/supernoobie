@@ -166,7 +166,22 @@ pub fn since(board: &Board, look: Look, word: &str, have: u64) -> String {
         }
         out.push_str("{\"name\":");
         text(&mut out, &name);
-        let _ = write!(out, ",\"at\":{at}}}");
+        let _ = write!(out, ",\"at\":{at},\"grains\":[");
+        // The recipe, not just the name. A noise is a list of numbers -- see
+        // `sound::noise` -- so the page builds the same thing the tests
+        // measure, rather than a hand-written guess at it that nothing can
+        // check and nobody can hear without a browser.
+        for (m, g) in recipe(&name).into_iter().enumerate() {
+            if m > 0 {
+                out.push(',');
+            }
+            let _ = write!(
+                out,
+                "{{\"at\":{:.4},\"freq\":{:.2},\"tau\":{:.4},\"gain\":{:.3},\"cut\":{:.1}}}",
+                g.at, g.freq, g.tau, g.gain, g.cut
+            );
+        }
+        out.push_str("]}");
     }
     out.push(']');
     out.push_str(",\"rules\":[");
@@ -262,6 +277,26 @@ fn tree(out: &mut String, board: &Board) {
 /// times quicker and smaller besides. And a hundredth of a world unit is a
 /// fortieth of a pixel at the zoom anybody draws at, so nothing is lost.
 pub const GRAIN: f64 = 0.01;
+
+/// The noise a name stands for.
+///
+/// The one place the studio knows what a sound *is*, and it is a lookup rather
+/// than a synthesiser: the noises live in [`sound::kit`], where they can be
+/// measured and written to a file. A name with no noise sends no grains and the
+/// page stays quiet, which is what lets a drawing ask for `creak` before
+/// anybody has written one.
+fn recipe(name: &str) -> Vec<sound::noise::Grain> {
+    match name {
+        // Eleven contacts is the middle of what a throw actually turns
+        // through, and the timing comes from the same decay the die is drawn
+        // with.
+        "roll" => sound::kit::roll(11),
+        "step" => sound::kit::step(),
+        "cut" => sound::kit::cut(),
+        "home" => sound::kit::home(),
+        _ => Vec::new(),
+    }
+}
 
 /// One shape, as however many runs of points it draws in.
 fn piece(

@@ -276,3 +276,67 @@ mod tests {
         }
     }
 }
+
+// ===========================================================================
+// The game noises. Written as [`crate::noise::Grain`]s rather than as voices,
+// because a grain is numbers and numbers are what a test can measure, a file
+// can hold, and a browser can be told.
+
+use crate::noise::Grain;
+
+/// **A die thrown.** Not one hit — a die tumbling is a *series* of them, one
+/// each time it goes over an edge, and the gaps between them grow as it slows.
+///
+/// The times are the same curve the die is drawn with. `plotkit::dice` turns
+/// through `flips(t) = n·ease(t)` where `ease` is the scaled `1 − e^{−t/τ}`, so
+/// the k-th contact is where `flips(t) = k`:
+///
+/// ```text
+///     t_k = −τ · ln(1 − (k/n)·(1 − e^{−OVER/τ}))
+/// ```
+///
+/// That is the same equation read backwards, and it is why the sound and the
+/// picture cannot drift apart: they are one function, inverted.
+///
+/// Each contact is a **knock** and not a note. A tone with a decay is a pitched
+/// thing being struck — a bell, a bar, a spoon on a saucepan — and it rings. A
+/// die on card is broadband and the board swallows it, so `cut` is low and
+/// there is no pitch at all. Getting that wrong is what made it sound metallic.
+pub fn roll(flips: usize) -> Vec<Grain> {
+    let n = flips.clamp(3, 24) as f64;
+    let tau = plotkit::dice::REST;
+    let span = 1.0 - (-plotkit::dice::OVER / tau).exp();
+    (1..=flips.clamp(3, 24))
+        .map(|k| {
+            let part = k as f64 / n;
+            let at = -tau * (1.0 - part * span).max(1e-6).ln();
+            // Quieter as it settles, and duller: the last few are the die
+            // rocking to a stop rather than bouncing.
+            let left = 1.0 - part;
+            Grain::knock(at, 620.0 + 900.0 * left, 0.012 + 0.010 * left, 0.10 + 0.24 * left)
+        })
+        .collect()
+}
+
+/// **A token on a square.** Short, soft, and quiet enough to hear ten of in a
+/// row without it becoming a drum roll.
+pub fn step() -> Vec<Grain> {
+    // Measured rather than guessed: at a gain of 0.16 this came out at 0.39
+    // peak, which is louder than a capture. A step has to sit UNDER everything
+    // else in the game -- four of them go past in a second.
+    vec![Grain::knock(0.0, 2400.0, 0.008, 0.08)]
+}
+
+/// **A capture.** Low and with a bite on it: a knock for the contact and a
+/// short low note under it, because something has been hit hard enough to make
+/// the board itself sound.
+pub fn cut() -> Vec<Grain> {
+    vec![Grain::knock(0.0, 700.0, 0.03, 0.34), Grain::note(0.004, 98.0, 0.09, 0.20)]
+}
+
+/// **A token home.** Two notes going up a fifth — the one place a *note* is
+/// right, because this is meant to sound like an announcement rather than like
+/// something being hit.
+pub fn home() -> Vec<Grain> {
+    vec![Grain::note(0.0, 523.25, 0.10, 0.20), Grain::note(0.09, 783.99, 0.16, 0.20)]
+}

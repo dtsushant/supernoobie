@@ -59,6 +59,7 @@
 
 pub mod kit;
 pub mod mixer;
+pub mod noise;
 pub mod pitch;
 pub mod speaker;
 pub mod tone;

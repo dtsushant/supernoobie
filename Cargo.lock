@@ -138,6 +138,7 @@ dependencies = [
  "physics",
  "plotkit",
  "shapes",
+ "sound",
 ]
 
 [[package]]

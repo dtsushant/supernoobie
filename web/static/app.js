@@ -450,81 +450,61 @@ function listen() {
   return ear;
 }
 
-// One decaying tone. `tau` is how long it takes to fall to a thirty-seventh of
-// where it started, and four of those is the whole of it.
-function tone(freq, tau, at, gain = 0.2, kind = 'sine', bend = 1) {
+// One grain: a knock if it has no pitch, a note if it has.
+//
+// The numbers come from the server -- `sound::kit`, where they are measured and
+// can be written to a wav and listened to. Nothing here decides what anything
+// sounds like; this only plays what it is handed.
+function grain(g, when) {
   const c = listen();
   if (!c) return;
-  const t = c.currentTime + at;
-  const o = c.createOscillator();
-  const g = c.createGain();
-  o.type = kind;
-  o.frequency.setValueAtTime(freq, t);
-  if (bend !== 1) o.frequency.exponentialRampToValueAtTime(freq * bend, t + 4 * tau);
-  // setTargetAtTime IS the exponential decay -- the same one, done in the
-  // audio thread rather than approximated with line segments.
-  g.gain.setValueAtTime(gain, t);
-  g.gain.setTargetAtTime(0.0001, t, tau);
-  o.connect(g).connect(c.destination);
-  o.start(t);
-  o.stop(t + 4 * tau + 0.05);
-}
+  const t = when + g.at;
+  const gain = c.createGain();
+  gain.gain.setValueAtTime(g.gain, t);
+  // setTargetAtTime IS e^(-t/tau) -- the same decay that settles the die, done
+  // in the audio thread rather than approximated with line segments.
+  gain.gain.setTargetAtTime(0.0001, t, Math.max(g.tau, 0.001));
+  gain.connect(c.destination);
+  const over = t + 4 * g.tau + 0.02;
 
-// A burst of noise, shaped the same way. What a die clattering is: no pitch,
-// just a lot of edges dying away.
-function rattle(tau, at, gain = 0.3, cut = 2200) {
-  const c = listen();
-  if (!c) return;
-  const t = c.currentTime + at;
-  const n = Math.floor(c.sampleRate * (4 * tau + 0.05));
-  const buf = c.createBuffer(1, Math.max(n, 1), c.sampleRate);
+  if (g.freq > 0) {
+    const o = c.createOscillator();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(g.freq, t);
+    o.connect(gain);
+    o.start(t);
+    o.stop(over);
+    return;
+  }
+
+  // A knock: noise through a low-pass. `cut` is the whole of the difference
+  // between a die on card and a spoon on a saucepan.
+  const n = Math.max(1, Math.ceil(c.sampleRate * (4 * g.tau + 0.02)));
+  const buf = c.createBuffer(1, n, c.sampleRate);
   const d = buf.getChannelData(0);
-  // Worked out, not drawn from anywhere -- the same sin-of-a-large-multiple
-  // trick the die itself uses, so a throw sounds the same on every replay.
-  for (let k = 0; k < n; k++) d[k] = Math.sin(k * 12.9898) * 43758.5453 % 1;
+  // Worked out, not drawn from anywhere, so a replay sounds the same.
+  for (let k = 0; k < n; k++) d[k] = ((Math.sin(k * 12.9898) * 43758.5453) % 2) - 1;
   const src = c.createBufferSource();
   src.buffer = buf;
   const f = c.createBiquadFilter();
   f.type = 'lowpass';
-  f.frequency.setValueAtTime(cut, t);
-  const g = c.createGain();
-  g.gain.setValueAtTime(gain, t);
-  g.gain.setTargetAtTime(0.0001, t, tau);
-  src.connect(f).connect(g).connect(c.destination);
+  f.frequency.setValueAtTime(Math.max(g.cut, 20), t);
+  src.connect(f).connect(gain);
   src.start(t);
-  src.stop(t + 4 * tau + 0.05);
+  src.stop(over);
 }
 
-const NOISES = {
-  // A die thrown: a clatter, then two knocks as it lands and settles.
-  roll: () => {
-    rattle(0.09, 0, 0.32, 3000);
-    rattle(0.05, 0.16, 0.22, 1800);
-    tone(190, 0.05, 0.3, 0.1, 'triangle', 0.8);
-  },
-  // A token on a square: short, soft, and quiet enough to hear ten of.
-  step: () => tone(660, 0.028, 0, 0.07, 'sine', 0.85),
-  // A capture: low, with a bite on it.
-  cut: () => {
-    tone(150, 0.1, 0, 0.22, 'square', 0.5);
-    rattle(0.06, 0, 0.14, 900);
-  },
-  // A token home: two notes going up, a fifth apart.
-  home: () => {
-    tone(523, 0.12, 0, 0.16, 'triangle');
-    tone(784, 0.18, 0.1, 0.16, 'triangle');
-  },
-};
-
 function noises() {
+  const c = ear;
   for (const s of scene.sounds || []) {
     const was = heard.get(s.name);
     heard.set(s.name, s.at);
     // Only ever on the way UP, and never on the first sighting -- otherwise
     // opening a game part way through plays every sound it has ever made.
     if (was === undefined || s.at <= was) continue;
-    const play = NOISES[s.name];
-    if (play) play();
+    if (!c) continue;
+    const now = c.currentTime;
+    for (const g of s.grains || []) grain(g, now);
   }
 }
 

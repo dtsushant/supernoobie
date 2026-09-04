@@ -79,6 +79,20 @@ pub const VOICES: usize = 16;
 pub enum Source {
     /// A pitched note with an envelope, from [`Tone`]. Ends by itself.
     Note(Tone),
+    /// A knock: filtered noise that **dies away**. One thing striking another.
+    ///
+    /// [`Rustle`](Source::Rustle) is noise that goes on until stopped, which is
+    /// wind. A knock is the same noise with an envelope on it, and the two are
+    /// not the same primitive: a die landing on a board is not a very short
+    /// gust.
+    ///
+    /// It is not a *note* either, and that was the mistake worth recording. A
+    /// tone with a decay is a pitched thing being struck — a bell, a bar, a
+    /// spoon on metal, all of which ring. A die on card does not ring: the
+    /// contact is broadband and the board absorbs it, so what is left is a dull
+    /// edge with no pitch to speak of. `cut` is the whole of the difference
+    /// between plastic on card and something metallic.
+    Knock { cut: f64, decay: f64 },
     /// Filtered noise: wind, rustling, rushing. Goes on until stopped.
     ///
     /// `cut` is the low-pass corner in Hz. Low is a distant rumble, high is a
@@ -109,6 +123,17 @@ impl Voice {
         Voice { source: Source::Note(tone), gain: 1.0, t: 0.0, grit: 0x2545_F491, memory: 0.0 }
     }
 
+    /// One thing striking another: filtered noise that dies away.
+    pub fn knock(cut: f64, decay: f64) -> Voice {
+        Voice {
+            source: Source::Knock { cut, decay },
+            gain: 1.0,
+            t: 0.0,
+            grit: 0x1D8E_3B4F,
+            memory: 0.0,
+        }
+    }
+
     /// Noise through a low-pass: wind, rushing, rustling.
     pub fn rustle(cut: f64) -> Voice {
         Voice { source: Source::Rustle { cut }, gain: 1.0, t: 0.0, grit: 0x9E37_79B9, memory: 0.0 }
@@ -135,6 +160,7 @@ impl Voice {
             // voice held open for an envelope that will never quite reach zero
             // is a slot that something else needed.
             Source::Note(tone) => self.t > 0.0 && tone.envelope(self.t) * self.gain < 1e-3,
+            Source::Knock { decay, .. } => self.t > 4.0 * decay.max(1e-4),
             Source::Rustle { .. } => false,
         }
     }
@@ -145,34 +171,44 @@ impl Voice {
     pub fn loudness(&self) -> f64 {
         match &self.source {
             Source::Note(tone) => tone.envelope(self.t) * self.gain,
+            Source::Knock { decay, .. } => (-self.t / decay.max(1e-4)).exp() * self.gain,
             Source::Rustle { .. } => self.gain,
         }
     }
 
+    /// White noise through a one-pole low-pass — shared by a knock and a
+    /// rustle, because they differ by an envelope and nothing else.
+    ///
+    /// The noise is a shuffle of bits, not a random number: **deterministic**,
+    /// so a recorded run replays exactly. The filter is
+    /// `memory += (x − memory)·a`, which moves part of the way towards each
+    /// new value — the same equation as everything else here that approaches a
+    /// target, with τ = 1/2πcut.
+    fn hiss(&mut self, cut: f64, dt: f64) -> f64 {
+        self.grit ^= self.grit << 13;
+        self.grit ^= self.grit >> 17;
+        self.grit ^= self.grit << 5;
+        let white = f64::from(self.grit) / f64::from(u32::MAX) * 2.0 - 1.0;
+        let a = (1.0 - (-std::f64::consts::TAU * cut * dt).exp()).clamp(0.0, 1.0);
+        self.memory += (white - self.memory) * a;
+        // Filtering takes energy out, so put some back -- otherwise a low cut
+        // is not a rumble, it is silence.
+        self.memory * (1.0 + 2.0 / a.max(1e-6).sqrt()).min(6.0)
+    }
+
     /// The next sample, and move on by `dt` seconds.
     pub fn next(&mut self, dt: f64) -> f64 {
-        let out = match &self.source {
-            Source::Note(tone) => tone.at(self.t),
-            Source::Rustle { cut } => {
-                // White noise: a shuffle of bits mapped to −1..1. Not random —
-                // *deterministic*, which is what a replayable recording needs.
-                self.grit ^= self.grit << 13;
-                self.grit ^= self.grit >> 17;
-                self.grit ^= self.grit << 5;
-                let white = f64::from(self.grit) / f64::from(u32::MAX) * 2.0 - 1.0;
-
-                // A one-pole low-pass, which is the whole of `memory += (x −
-                // memory) · a`: it moves part of the way towards each new
-                // value, so sudden changes are smoothed and slow ones are
-                // followed. `a` is set from the corner frequency, and it is the
-                // same equation as everything else in this repository that
-                // approaches a target — e^{−t/τ} again, with τ = 1/2πcut.
-                let a = (1.0 - (-std::f64::consts::TAU * cut * dt).exp()).clamp(0.0, 1.0);
-                self.memory += (white - self.memory) * a;
-                // Filtering takes energy out, so put some back — otherwise a
-                // low cut is not a rumble, it is silence.
-                self.memory * (1.0 + 2.0 / a.max(1e-6).sqrt()).min(6.0)
+        // Copied out before the noise generator is touched, since making a
+        // sample changes the shuffle and the filter's memory.
+        let out = match self.source {
+            Source::Note(ref tone) => tone.at(self.t),
+            Source::Knock { cut, decay } => {
+                let raw = self.hiss(cut, dt);
+                // The same e^{-t/tau} as everything else here. A knock is a
+                // gust that lasts fifteen milliseconds.
+                raw * (-self.t / decay.max(1e-4)).exp()
             }
+            Source::Rustle { cut } => self.hiss(cut, dt),
         };
         self.t += dt;
         out * self.gain

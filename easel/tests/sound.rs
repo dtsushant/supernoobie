@@ -146,3 +146,36 @@ fn only_the_seats_that_are_shut_are_marked() {
     assert_eq!(v("shut1"), Some(0.0), "seat 1 has cut somebody");
     assert_eq!(v("shut2"), Some(1.0));
 }
+
+/// ★ **The page is sent the recipe, not the name.** A noise is a list of
+/// numbers — see `sound::noise` — so the browser builds the same thing the
+/// tests measure, rather than a hand-written guess at it that nothing can check
+/// and nobody can hear without opening a browser.
+#[test]
+fn the_wire_carries_the_recipe() {
+    let b = game();
+    let look = easel::wire::Look::new(plotkit::Cx::new(-12.0, -9.0), plotkit::Cx::new(12.0, 9.0), 900);
+    let out = easel::wire::scene(&b, look);
+    let sounds = out.split("\"sounds\":[").nth(1).expect("sounds").split("],\"rules\"").next().unwrap();
+    assert!(sounds.contains("\"name\":\"roll\""));
+    assert!(sounds.contains("\"grains\":["), "with the numbers to play it");
+    assert!(sounds.contains("\"tau\":"), "including the decay");
+    // A die throw is many contacts, so it carries many grains.
+    let roll = sounds.split("\"name\":\"roll\"").nth(1).expect("the roll");
+    let n = roll.split("],\"").next().unwrap().matches("\"at\":").count();
+    assert!(n >= 6, "a tumble is a series of contacts: {n}");
+}
+
+/// A name nothing has a noise for is sent with no grains, so the page stays
+/// quiet — which is what lets a drawing ask for `creak` before anybody has
+/// written one.
+#[test]
+fn a_sound_nobody_has_written_is_silent() {
+    let mut b = Board::new();
+    b.sheet.script.add("n = 1");
+    b.sheet.script.add("sound(creak, n)");
+    let look = easel::wire::Look::new(plotkit::Cx::new(-9.0, -9.0), plotkit::Cx::new(9.0, 9.0), 600);
+    let out = easel::wire::scene(&b, look);
+    assert!(out.contains("\"name\":\"creak\""), "still declared");
+    assert!(out.contains("\"grains\":[]"), "and carries nothing to play");
+}

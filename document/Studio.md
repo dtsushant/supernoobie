@@ -292,10 +292,29 @@ it knows nothing about what any of them mean. A name it has no noise for is
 simply ignored, which is what lets a drawing ask for `creak` before anybody has
 written one.
 
-The noises themselves are made in the browser, and every one is the same shape:
-a tone, and an envelope decaying as `e^{-t/τ}`. The same decay that settles the
-die. A browser will not make a sound until somebody has clicked something, so
-nothing is heard before the first tap.
+The noises themselves live in `sound::kit` as lists of **grains** — when, what
+pitch, how long to die away — and the page is sent the numbers rather than the
+name. So one description is played by the tests, written to a `.wav` by
+`cargo run -p sound --bin kit`, and built out of oscillators by the browser. A
+noise written as code in one of those places is a noise the other two cannot
+have.
+
+A name nothing has a noise for carries no grains and the page stays quiet, which
+is what lets a drawing ask for `creak` before anybody has written one. A browser
+will not make a sound until somebody has clicked something, so nothing is heard
+before the first tap.
+
+**Measuring a sound.** Not by comparing samples — that pins the arithmetic, not
+the sound. `sound::noise` measures what a listener would notice: `peak` (audible,
+and not clipping), `fades` (dies away rather than stopping dead), `brightness`
+(dull like card or bright like metal), `tonality` (does it ring, or is it just a
+knock), and `knocks` (how many separate hits).
+
+`tonality` is the one that earned its place. A die that sounded "like a spoon
+hitting metal" was a *note* where it should have been a knock — and brightness
+could not see it, because filtered noise changes faster between samples than a
+pure tone does. By that measure the wrong sound scored better and the test
+around it passed.
 
 ### A sign that says no
 
