@@ -457,7 +457,7 @@ impl Script {
                 // it does not recognise, so an unhandled command becomes a
                 // ghost the size of its first argument -- which is how this
                 // one turned into a nine-unit ghost across the whole board.
-                "bounds" | "sound" => {}
+                "bounds" | "sound" | "seats" => {}
                 // A no-entry sign: a ring with a bar across it. Drawn at no
                 // size when the way is open, which is how anything is hidden
                 // here.
@@ -576,6 +576,39 @@ impl Script {
                 (ok && v.is_finite()).then_some((name, v))
             })
             .collect()
+    }
+
+    /// How many seats this game has, and which name says whose turn it is.
+    ///
+    /// ```text
+    ///     seats(turn, 4)
+    /// ```
+    ///
+    /// **Nothing in the studio knows what Ludo is**, so it cannot know that
+    /// `turn` means anything, or that there are four of anybody. This is the
+    /// row that says so — and with it, a server can refuse a tap from the wrong
+    /// person without knowing what the tap would have done.
+    ///
+    /// Without it a drawing is single-seat: everybody who opens it is playing
+    /// the same hand, which is right for a sketch and for hot-seat round one
+    /// screen, and is what every drawing here did before.
+    ///
+    /// Returns the name and the count. `None` when the row is absent or says
+    /// something that is not a seat count.
+    pub fn seats(&self, at: f64) -> Option<(String, usize)> {
+        let env = self.env(at, &Tally::new());
+        let row = self
+            .rows
+            .iter()
+            .filter(|r| r.on)
+            .find_map(|r| r.text.trim().strip_prefix("seats(")?.strip_suffix(')'))?;
+        let mut arg = split_args(row).into_iter();
+        let name = arg.next()?.trim().to_string();
+        let ok = !name.is_empty()
+            && name.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+            && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+        let how_many = plotkit::expr::parse(arg.next()?.trim()).ok()?.eval(&env).ok()?.re;
+        (ok && (2.0..=16.0).contains(&how_many)).then(|| (name, how_many.round() as usize))
     }
 
     /// The house rules a drawing declares, in the order they are written.
@@ -728,7 +761,8 @@ pub const FACES: [&str; 2] = ["smiley", "ghost"];
 /// `bounds` is here although it draws nothing: it still has to be a row this
 /// crate owns, or `plotkit` reports it as an unknown command and the drawing
 /// arrives with an error on it.
-pub const OURS: [&str; 7] = ["ludo", "token", "dice", "star", "bounds", "sound", "noway"];
+pub const OURS: [&str; 8] =
+    ["ludo", "token", "dice", "star", "bounds", "sound", "noway", "seats"];
 
 /// Is this row one this crate handles rather than `plotkit::expr`?
 fn mine(text: &str) -> bool {

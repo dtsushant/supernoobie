@@ -1088,6 +1088,17 @@ impl Board {
         (still, moving)
     }
 
+    /// Whose turn it is, if this drawing has seats at all.
+    ///
+    /// Read from the game rather than kept beside it: the drawing already
+    /// works out whose turn it is, and a second copy on the server is a second
+    /// thing to keep in step.
+    pub fn whose_turn(&self) -> Option<usize> {
+        let (name, how_many) = self.sheet.script.seats(self.clock)?;
+        let now = self.written().vars.iter().find(|(n, _)| *n == name).map(|(_, v)| v.re)?;
+        now.is_finite().then(|| (now.round().rem_euclid(how_many as f64)) as usize)
+    }
+
     /// Set off whatever rules a tap on this figure has.
     ///
     /// Returns whether any fired, so the studio can say nothing happened

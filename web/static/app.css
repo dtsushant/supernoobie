@@ -351,3 +351,31 @@ a.asbutton:hover { background: var(--lit); color: var(--ink); }
 #voices .none {
   color: #6b7987;
 }
+
+/* ---- who is playing which colour ---------------------------------------- */
+#seats {
+  position: absolute;
+  top: 0.7rem;
+  left: 0.7rem;
+  z-index: 30;
+  display: flex;
+  gap: 0.3rem;
+}
+#seats button {
+  padding: 0.35rem 0.6rem;
+  border: 1px solid #22303c;
+  border-radius: 0.35rem;
+  background: #121821;
+  color: #b9c4d0;
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+#seats button.taken {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+/* Whose turn it is, so nobody has to work it out from the board. */
+#seats button.turn {
+  box-shadow: 0 0 0 2px #e3e9ef;
+}

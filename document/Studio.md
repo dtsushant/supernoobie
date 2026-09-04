@@ -328,6 +328,29 @@ Ludo home column when the table plays *no way home until you have cut somebody*
 — a legal-looking move that is refused with no explanation is the worst thing a
 rule can do.
 
+### Seats, and four people at one board
+
+```text
+seats(turn, 4)
+```
+
+Four seats, and `turn` is the name that says whose it is. **Nothing in the
+studio knows what Ludo is**, so without this row it cannot know that `turn`
+means anything — and with it, a server can refuse a tap from the wrong person
+*without ever learning what the tap would have done*. It asks the drawing whose
+turn it is, and compares.
+
+Leave it out and the drawing is single-seat: everybody who opens it plays the
+same hand, which is right for a sketch and right for hot-seat round one screen.
+
+Seats are first come, first served, one each. Changing your mind gives the old
+one up rather than holding both. A seat is freed when its player goes quiet —
+a chair held by a closed laptop is three people waiting for a fourth who is not
+coming.
+
+Until *somebody* has sat down, nothing is refused: a game opened by one person
+to look at has to be touchable.
+
 ### House rules a drawing declares
 
 A row ending `# rule: <words>` is a **house rule** — a number the players settle

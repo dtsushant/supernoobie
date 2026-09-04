@@ -51,7 +51,7 @@ function look() {
   const r = paper.getBoundingClientRect();
   const [lox, hiy] = toWorld(0, 0);
   const [hix, loy] = toWorld(r.width, r.height);
-  return `lox=${lox}&loy=${loy}&hix=${hix}&hiy=${hiy}&px=${Math.round(r.width)}&have=${held}`;
+  return `lox=${lox}&loy=${loy}&hix=${hix}&hiy=${hiy}&px=${Math.round(r.width)}&have=${held}&me=${me}`;
 }
 
 // ---- talking to the drawing ---------------------------------------------
@@ -631,6 +631,91 @@ function meterFrame() {
 }
 requestAnimationFrame(meterFrame);
 
+// ---- taking a seat --------------------------------------------------------
+//
+// Four people at one board need to know who is who, and the server needs it
+// too or anybody can move anybody's token. A seat is claimed on the same call
+// that carries everything else, because a peer claiming a seat is by that fact
+// still here.
+//
+// The rule the SERVER enforces is: a tap only counts from the seat whose turn
+// it is. It never learns what the tap would have done -- it asks the drawing
+// whose turn it is and compares. See `refuse` in web/src/main.rs.
+let mySeat = null;
+let seatWord = '';
+const SEATNAMES = ['red', 'green', 'blue', 'yellow'];
+const SEATINK = ['#E0704A', '#6FCF97', '#4FBCD4', '#E0A44A'];
+
+function showSeats(answer) {
+  const box = document.getElementById('seats');
+  if (!box) return;
+  const howMany = answer.howmany || 0;
+  box.hidden = howMany === 0;
+  if (!howMany) return;
+  mySeat = answer.mine;
+  const taken = new Map((answer.seats || []).map((s) => [s.seat, s.who]));
+  const key = `${howMany}|${[...taken].join(',')}|${answer.mine}|${answer.turn}`;
+  if (key === seatWord) return;
+  seatWord = key;
+  box.innerHTML = '';
+  for (let k = 0; k < howMany; k++) {
+    const b = document.createElement('button');
+    const who = taken.get(k);
+    const mine = who && who === me;
+    b.textContent = SEATNAMES[k] || `seat ${k + 1}`;
+    b.style.borderColor = SEATINK[k % 4];
+    if (mine) b.style.background = SEATINK[k % 4];
+    if (mine) b.style.color = '#08121a';
+    b.classList.toggle('taken', !!who && !mine);
+    b.classList.toggle('turn', answer.turn === k);
+    b.disabled = !!who && !mine;
+    b.title = mine ? 'stand up' : who ? 'taken' : 'sit here';
+    b.onclick = () => sit(mine ? -1 : k);
+    box.append(b);
+  }
+}
+
+async function sit(seat) {
+  try {
+    const answer = await (
+      await fetch('/talk', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ me, post: [], sit: seat }),
+      })
+    ).json();
+    seatWord = '';
+    showSeats(answer);
+    say(answer.mine === null || answer.mine === undefined ? 'standing' : `you are ${SEATNAMES[answer.mine] || answer.mine + 1}`);
+  } catch (e) {
+    say('could not take that seat');
+  }
+}
+
+// The seat rides with every request that changes the drawing, so the server
+// knows whose tap it is.
+setInterval(() => {
+  if (!talking) callSeats();
+}, 1500);
+
+// Even without the microphone on, a player needs to see the seats -- talking
+// and playing are separate things and somebody may want only one of them.
+async function callSeats() {
+  try {
+    const answer = await (
+      await fetch('/talk', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ me, post: [] }),
+      })
+    ).json();
+    showSeats(answer);
+  } catch (e) {
+    /* next time */
+  }
+}
+callSeats();
+
 // Who is in the room. Rebuilt only when the list changes, so a bar being
 // animated is not thrown away sixty times a second.
 let shownHere = '';
@@ -750,6 +835,7 @@ async function callIn() {
   for (const who of [...links.keys()]) if (!here.includes(who)) drop(who);
 
   showHere(here);
+  showSeats(answer);
   say(here.length ? `talking to ${here.length}` : 'nobody else is here yet');
 }
 

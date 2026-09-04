@@ -10,6 +10,15 @@ row on #
 row on # Wide enough for the counters down the left and the turn marker on
 row on # the right, and symmetric so the board itself sits in the middle.
 row on bounds(-9.5, -7.7, 9.5, 7.7)
+row on 
+row on # Four seats, and `turn` is the one that says whose it is. Nothing in
+row on # the studio knows what Ludo is, so without this row it cannot know
+row on # that `turn` means anything -- and with it, a server can refuse a tap
+row on # from the wrong person without knowing what the tap would have done.
+row on #
+row on # Leave it out and the drawing is single-seat: everybody who opens it
+row on # plays the same hand, which is right for hot-seat round one screen.
+row on seats(turn, 4)
 row on ludo()
 row on 
 row on # --- HOUSE RULES ------------------------------------------------

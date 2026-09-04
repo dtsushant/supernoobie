@@ -440,6 +440,15 @@ fn ludogame() -> Board {
     add!("# Wide enough for the counters down the left and the turn marker on");
     add!("# the right, and symmetric so the board itself sits in the middle.");
     add!("bounds(-9.5, -7.7, 9.5, 7.7)");
+    add!("");
+    add!("# Four seats, and `turn` is the one that says whose it is. Nothing in");
+    add!("# the studio knows what Ludo is, so without this row it cannot know");
+    add!("# that `turn` means anything -- and with it, a server can refuse a tap");
+    add!("# from the wrong person without knowing what the tap would have done.");
+    add!("#");
+    add!("# Leave it out and the drawing is single-seat: everybody who opens it");
+    add!("# plays the same hand, which is right for hot-seat round one screen.");
+    add!("seats(turn, 4)");
     add!("ludo()");
     add!("");
     add!("# --- HOUSE RULES ------------------------------------------------");

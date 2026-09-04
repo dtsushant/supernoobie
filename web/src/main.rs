@@ -94,6 +94,8 @@ use easel::{Action, Board, Tool};
 use plotkit::Cx;
 use serde::Deserialize;
 
+use std::fmt::Write as _;
+
 mod talk;
 
 type Shared = Arc<Mutex<Studio>>;
@@ -262,6 +264,10 @@ struct Where {
     /// Which still half the page already holds. Nought means none.
     #[serde(default)]
     have: u64,
+    /// Who is asking. Empty when nobody has taken a seat, which is every
+    /// drawing that is not a game with seats in it.
+    #[serde(default)]
+    me: String,
 }
 
 impl From<&Where> for Look {
@@ -320,9 +326,46 @@ enum Ask {
 
 async fn act(State(s): State<Shared>, Query(w): Query<Where>, Json(ask): Json<Ask>) -> impl IntoResponse {
     let mut studio = s.lock().expect("the drawing");
-    apply(&mut studio, ask);
+    match refuse(&studio, &w.me, &ask) {
+        Some(why) => studio.say = why,
+        None => apply(&mut studio, ask),
+    }
     let word = std::mem::take(&mut studio.say);
     ([(header::CONTENT_TYPE, "application/json")], easel::wire::since(&studio.board, (&w).into(), &word, w.have))
+}
+
+/// Why this person may not do this, if they may not.
+///
+/// **The server never learns what a tap would have done.** It asks the drawing
+/// whose turn it is — the drawing already works that out, and a second copy
+/// here would be a second thing to keep in step — and compares that with the
+/// seat this person is sitting in. Everything else goes through untouched.
+///
+/// A drawing with no `seats(…)` row has no seats, so nothing is ever refused:
+/// that is a sketch, or a game round one screen, and both are right.
+///
+/// Only *taps* are refused. Panning, zooming and looking are nobody's turn.
+fn refuse(studio: &Studio, me: &str, ask: &Ask) -> Option<String> {
+    // A lift is a tap; a press is not, and neither is anything else.
+    if !matches!(ask, Ask::Pointer { down: false, .. }) {
+        return None;
+    }
+    let (_, how_many) = studio.board.sheet.script.seats(studio.board.clock)?;
+    let seated = studio.room.seated();
+    // Until somebody has actually sat down, everybody plays -- otherwise a game
+    // opened by one person to look at it cannot be touched at all.
+    if seated.is_empty() {
+        return None;
+    }
+    let turn = studio.board.whose_turn()?;
+    match studio.room.seat_of(me) {
+        Some(mine) if mine == turn => None,
+        Some(mine) => Some(format!("seat {} to play, and you are seat {}", turn + 1, mine + 1)),
+        None => Some(format!(
+            "take one of the {how_many} seats before playing -- seat {} is to move",
+            turn + 1
+        )),
+    }
 }
 
 /// What a page sends to the post office, and gets back.
@@ -338,6 +381,9 @@ struct Chat {
     /// Notes to leave for other people, if any.
     #[serde(default)]
     post: Vec<Outbound>,
+    /// A seat to take, if this call is claiming one. `-1` gives one up.
+    #[serde(default)]
+    sit: Option<i64>,
 }
 
 #[derive(serde::Deserialize)]
@@ -355,8 +401,23 @@ async fn chat(State(s): State<Shared>, Json(chat): Json<Chat>) -> impl IntoRespo
         let note = talk::Note { from: chat.me.clone(), kind: out.kind, body: out.body };
         studio.room.send(&out.to, note);
     }
+    // Sitting down rides on the same call as everything else, because a peer
+    // that is claiming a seat is by that fact still here.
+    match chat.sit {
+        Some(n) if n < 0 => studio.room.stand(&chat.me),
+        Some(n) => {
+            let how_many =
+                studio.board.sheet.script.seats(studio.board.clock).map_or(0, |(_, n)| n);
+            studio.room.sit(&chat.me, n as usize, how_many);
+        }
+        None => {}
+    }
     let mine = studio.room.call(&chat.me, now);
     let here = studio.room.here();
+    let seated = studio.room.seated();
+    let my_seat = studio.room.seat_of(&chat.me);
+    let seats = studio.board.sheet.script.seats(studio.board.clock).map_or(0, |(_, n)| n);
+    let turn = studio.board.whose_turn();
 
     // Who this peer should ring. Worked out HERE, with the tested rule, rather
     // than in the page: both sides deciding independently is how a rule ends up
@@ -378,7 +439,24 @@ async fn chat(State(s): State<Shared>, Json(chat): Json<Chat>) -> impl IntoRespo
         }
         body.push_str(&serde_json::to_string(who).unwrap_or_else(|_| "\"\"".into()));
     }
-    body.push_str("],\"post\":[");
+    body.push_str("],\"seats\":[");
+    for (k, (seat, who)) in seated.iter().enumerate() {
+        if k > 0 {
+            body.push(',');
+        }
+        let _ = write!(
+            body,
+            "{{\"seat\":{seat},\"who\":{}}}",
+            serde_json::to_string(who).unwrap_or_default()
+        );
+    }
+    let _ = write!(
+        body,
+        "],\"howmany\":{seats},\"mine\":{},\"turn\":{}",
+        my_seat.map_or("null".into(), |n| n.to_string()),
+        turn.map_or("null".into(), |n| n.to_string())
+    );
+    body.push_str(",\"post\":[");
     for (k, n) in mine.iter().enumerate() {
         if k > 0 {
             body.push(',');
@@ -759,6 +837,72 @@ mod tests {
             }
         }
         assert_eq!(rings, 6, "four people, six connections, nobody ringing twice");
+    }
+
+    /// ★ **A tap from the wrong seat is refused**, and the server never learns
+    /// what the tap would have done — it asks the drawing whose turn it is and
+    /// compares.
+    #[test]
+    fn a_tap_from_the_wrong_seat_is_refused() {
+        let mut st = ludo();
+        apply(&mut st, Ask::Play { on: true });
+        st.room.call("ann", 0.0);
+        st.room.call("bob", 0.0);
+        st.room.sit("ann", 0, 4);
+        st.room.sit("bob", 1, 4);
+        assert_eq!(st.board.whose_turn(), Some(0), "seat 0 begins");
+
+        let lift = Ask::Pointer { x: 0.0, y: 0.0, down: false };
+        assert!(refuse(&st, "ann", &lift).is_none(), "seat 0 may play");
+        assert!(refuse(&st, "bob", &lift).is_some(), "seat 1 may not");
+        assert!(refuse(&st, "nobody", &lift).is_some(), "and a bystander may not");
+    }
+
+    /// Only taps. Looking, panning and pressing are nobody's turn.
+    #[test]
+    fn only_a_tap_is_refused() {
+        let mut st = ludo();
+        apply(&mut st, Ask::Play { on: true });
+        st.room.call("bob", 0.0);
+        st.room.sit("bob", 1, 4);
+        assert!(refuse(&st, "bob", &Ask::Pointer { x: 0.0, y: 0.0, down: true }).is_none());
+        assert!(refuse(&st, "bob", &Ask::Tick { seconds: 0.1 }).is_none());
+        assert!(refuse(&st, "bob", &Ask::Play { on: true }).is_none());
+    }
+
+    /// ★ Until somebody sits down, everybody plays. A game opened by one
+    /// person to look at must still be touchable, and a drawing with no seats
+    /// at all is a sketch.
+    #[test]
+    fn nothing_is_refused_before_anybody_sits() {
+        let mut st = ludo();
+        apply(&mut st, Ask::Play { on: true });
+        let lift = Ask::Pointer { x: 0.0, y: 0.0, down: false };
+        assert!(refuse(&st, "ann", &lift).is_none(), "nobody has sat down yet");
+
+        let mut plain = a_game();
+        apply(&mut plain, Ask::Play { on: true });
+        plain.room.call("ann", 0.0);
+        assert!(refuse(&plain, "zed", &lift).is_none(), "the adding game has no seats");
+    }
+
+    /// ★ And the refusal follows the game: when the turn passes, so does who
+    /// may move. Read from the drawing, not kept beside it.
+    #[test]
+    fn the_refusal_follows_whose_turn_it_is() {
+        let mut st = ludo();
+        apply(&mut st, Ask::Play { on: true });
+        st.room.call("ann", 0.0);
+        st.room.sit("ann", 0, 4);
+        st.room.call("bob", 0.0);
+        st.room.sit("bob", 1, 4);
+        let lift = Ask::Pointer { x: 0.0, y: 0.0, down: false };
+        assert!(refuse(&st, "ann", &lift).is_none());
+
+        st.board.tally.values.insert("turn".into(), 1.0);
+        assert_eq!(st.board.whose_turn(), Some(1));
+        assert!(refuse(&st, "ann", &lift).is_some(), "not any more");
+        assert!(refuse(&st, "bob", &lift).is_none(), "bob's turn now");
     }
 
     /// ★ A server that opens whatever path it is handed will one day be

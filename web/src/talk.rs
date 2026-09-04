@@ -90,6 +90,12 @@ pub struct Room {
     seen: HashMap<String, f64>,
     /// Peer id to the notes waiting for it.
     post: HashMap<String, Vec<Note>>,
+    /// Seat number to the peer sitting in it.
+    ///
+    /// Kept this way round because the question asked is nearly always "is
+    /// this seat free", and because it makes two people in one seat
+    /// impossible to represent rather than merely unlikely.
+    chairs: HashMap<usize, String>,
 }
 
 impl Room {
@@ -137,11 +143,56 @@ impl Room {
         who
     }
 
-    /// Drop anybody who has gone quiet, and their post with them.
+    /// Take a seat, if it is free.
+    ///
+    /// **First come, first served, and one seat each.** Taking a second seat
+    /// gives up the first rather than holding both, because somebody who
+    /// changes their mind about which colour they are should not thereby
+    /// remove a chair from the table.
+    ///
+    /// Returns whether the seat is now theirs — including when it already was,
+    /// since a client that repeats itself should not be told no.
+    pub fn sit(&mut self, me: &str, seat: usize, how_many: usize) -> bool {
+        if me.is_empty() || seat >= how_many {
+            return false;
+        }
+        match self.chairs.get(&seat) {
+            Some(who) if who != me => return false,
+            _ => {}
+        }
+        self.chairs.retain(|_, who| who != me);
+        self.chairs.insert(seat, me.to_string());
+        true
+    }
+
+    /// Which seat somebody is in, if any.
+    pub fn seat_of(&self, me: &str) -> Option<usize> {
+        self.chairs.iter().find(|(_, who)| *who == me).map(|(seat, _)| *seat)
+    }
+
+    /// Who is in which seat, lowest first.
+    pub fn seated(&self) -> Vec<(usize, String)> {
+        let mut all: Vec<(usize, String)> =
+            self.chairs.iter().map(|(k, v)| (*k, v.clone())).collect();
+        all.sort();
+        all
+    }
+
+    /// Stand up, so somebody else may sit down.
+    pub fn stand(&mut self, me: &str) {
+        self.chairs.retain(|_, who| who != me);
+    }
+
+    /// Drop anybody who has gone quiet, and their post — and their seat — with
+    /// them.
+    ///
+    /// A seat held by somebody who has closed their laptop is a game of three
+    /// people waiting for a fourth who is not coming.
     fn forget(&mut self, now: f64) {
         self.seen.retain(|_, at| now - *at < PATIENCE);
         let here: Vec<String> = self.seen.keys().cloned().collect();
         self.post.retain(|who, _| here.contains(who));
+        self.chairs.retain(|_, who| here.contains(who));
     }
 
     /// **Who calls whom.** Both peers must not offer at once, or each answers
@@ -308,6 +359,78 @@ mod tests {
         r.send("", note("ann", "offer"));
         r.send("bob", note("", "offer"));
         assert!(r.call("bob", 0.1).is_empty());
+    }
+
+    /// ★ **One seat each, first come first served.** Two people in one colour
+    /// is not a thing this should be able to represent, let alone allow.
+    #[test]
+    fn a_seat_is_taken_once() {
+        let mut r = Room::new();
+        r.call("ann", 0.0);
+        r.call("bob", 0.0);
+        assert!(r.sit("ann", 0, 4));
+        assert!(!r.sit("bob", 0, 4), "bob cannot have ann's chair");
+        assert!(r.sit("bob", 1, 4));
+        assert_eq!(r.seat_of("ann"), Some(0));
+        assert_eq!(r.seat_of("bob"), Some(1));
+    }
+
+    /// ★ Changing your mind gives the old seat up rather than holding both —
+    /// otherwise somebody trying the colours removes chairs from the table.
+    #[test]
+    fn moving_seats_frees_the_old_one() {
+        let mut r = Room::new();
+        r.call("ann", 0.0);
+        assert!(r.sit("ann", 0, 4));
+        assert!(r.sit("ann", 2, 4));
+        assert_eq!(r.seat_of("ann"), Some(2));
+        assert_eq!(r.seated(), vec![(2, "ann".to_string())], "and only the new one");
+        let mut b = Room::new();
+        b.call("bob", 0.0);
+        assert!(r.sit("bob", 0, 4), "seat 0 is free again");
+    }
+
+    /// Sitting where you already sit is not an error. A client that repeats
+    /// itself should not be told no.
+    #[test]
+    fn sitting_twice_is_fine() {
+        let mut r = Room::new();
+        r.call("ann", 0.0);
+        assert!(r.sit("ann", 1, 4));
+        assert!(r.sit("ann", 1, 4));
+    }
+
+    /// A seat that is not at the table cannot be taken.
+    #[test]
+    fn there_are_only_so_many_chairs() {
+        let mut r = Room::new();
+        r.call("ann", 0.0);
+        assert!(!r.sit("ann", 4, 4), "seats are 0..3");
+        assert!(!r.sit("ann", 99, 4));
+        assert!(!r.sit("", 0, 4), "and nobody cannot sit");
+    }
+
+    /// ★ **A closed laptop gives up its seat.** Otherwise a game of three is
+    /// three people waiting for a fourth who is not coming.
+    #[test]
+    fn going_quiet_frees_a_seat() {
+        let mut r = Room::new();
+        r.call("ann", 0.0);
+        r.call("bob", 0.0);
+        r.sit("bob", 1, 4);
+        r.call("ann", PATIENCE + 1.0);
+        assert_eq!(r.seat_of("bob"), None, "bob has gone, and his chair with him");
+        assert!(r.seated().is_empty());
+    }
+
+    /// And standing up is standing up.
+    #[test]
+    fn standing_up_frees_a_seat() {
+        let mut r = Room::new();
+        r.call("ann", 0.0);
+        r.sit("ann", 3, 4);
+        r.stand("ann");
+        assert_eq!(r.seat_of("ann"), None);
     }
 
     /// ★ The advice a browser will not give you. On plain `http` over a
