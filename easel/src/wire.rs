@@ -73,28 +73,60 @@ pub fn scene(board: &Board, look: Look) -> String {
 
 /// The same, with something for the page to say.
 pub fn with_word(board: &Board, look: Look, word: &str) -> String {
-    let frame = board.frame();
-    let mut out = String::from("{\"pieces\":[");
-    let mut first = true;
-    for (shape, style) in frame.parts() {
-        for run in shape.polylines(look.lo, look.hi, look.px) {
-            if run.len() < 2 && !style.filled {
-                continue;
-            }
-            if !first {
-                out.push(',');
-            }
-            first = false;
-            let _ = write!(
-                out,
-                "{{\"c\":\"#{:06X}\",\"w\":{},\"fill\":{},\"p\":",
-                style.colour & 0xFF_FFFF,
-                style.width.max(1),
-                style.filled
-            );
-            points(&mut out, &run);
-            out.push('}');
+    since(board, look, word, 0)
+}
+
+/// A number naming the still half of this drawing, at this zoom.
+///
+/// It changes when the drawing changes or when the view does — the still shapes
+/// are sampled to fit the window, so panning is a new set of points even though
+/// it is the same board. When the page already holds this number, the still
+/// half is left out of the answer entirely.
+///
+/// Any hash would do; this is FNV over the rows, the marks and the view, which
+/// is a few thousand bytes and costs nothing beside the frame it saves.
+pub fn still_mark(board: &Board, look: Look) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut eat = |bytes: &[u8]| {
+        for b in bytes {
+            h ^= *b as u64;
+            h = h.wrapping_mul(0x100_0000_01b3);
         }
+    };
+    for r in &board.sheet.script.rows {
+        eat(r.text.as_bytes());
+        eat(&[r.on as u8]);
+    }
+    for m in &board.sheet.marks {
+        eat(&m.colour.to_le_bytes());
+        eat(&(m.pts.len() as u64).to_le_bytes());
+        eat(&[m.filled as u8, m.closed as u8, m.moves() as u8]);
+    }
+    for v in [look.lo.re, look.lo.im, look.hi.re, look.hi.im, look.px as f64] {
+        eat(&v.to_bits().to_le_bytes());
+    }
+    h
+}
+
+/// The scene, leaving out the still half if the page says it already has
+/// `have`.
+pub fn since(board: &Board, look: Look, word: &str, have: u64) -> String {
+    let (still, moving) = board.frames();
+    let mark = still_mark(board, look);
+    let mut out = String::new();
+    let _ = write!(out, "{{\"stillv\":{mark}");
+    if have != mark {
+        out.push_str(",\"still\":[");
+        let mut first = true;
+        for (shape, style) in still.parts() {
+            piece(&mut out, shape, style, look, &mut first);
+        }
+        out.push(']');
+    }
+    out.push_str(",\"pieces\":[");
+    let mut first = true;
+    for (shape, style) in moving.parts() {
+        piece(&mut out, shape, style, look, &mut first);
     }
     out.push_str("],\"rings\":[");
     for (k, ring) in board.selection().into_iter().enumerate() {
@@ -190,6 +222,51 @@ fn tree(out: &mut String, board: &Board) {
 /// times quicker and smaller besides. And a hundredth of a world unit is a
 /// fortieth of a pixel at the zoom anybody draws at, so nothing is lost.
 pub const GRAIN: f64 = 0.01;
+
+/// One shape, as however many runs of points it draws in.
+fn piece(
+    out: &mut String,
+    shape: &plotkit::Shape,
+    style: &plotkit::frame::Style,
+    look: Look,
+    first: &mut bool,
+) {
+    // How many pixels a world unit is worth, for throwing away what cannot be
+    // seen.
+    let scale = look.px as f64 / (look.hi.re - look.lo.re).abs().max(1e-9);
+    for run in shape.polylines(look.lo, look.hi, look.px) {
+        if run.len() < 2 && !style.filled {
+            continue;
+        }
+        // **A shape smaller than a pixel is not sent.** This is how things are
+        // hidden here -- `param(if(can, 0.52, 0)*exp(i*t) + ...)` draws a ring
+        // at no size when you may not move that token -- and a ring at no size
+        // was still three hundred and twenty-one identical points on the wire,
+        // every frame, for every token. Sixteen of those is most of a scene
+        // spent drawing nothing.
+        let (mut lo, mut hi) = (run[0], run[0]);
+        for p in &run {
+            lo = Cx::new(lo.re.min(p.re), lo.im.min(p.im));
+            hi = Cx::new(hi.re.max(p.re), hi.im.max(p.im));
+        }
+        if (hi.re - lo.re).max(hi.im - lo.im) * scale < 1.0 {
+            continue;
+        }
+        if !*first {
+            out.push(',');
+        }
+        *first = false;
+        let _ = write!(
+            out,
+            "{{\"c\":\"#{:06X}\",\"w\":{},\"fill\":{},\"p\":",
+            style.colour & 0xFF_FFFF,
+            style.width.max(1),
+            style.filled
+        );
+        points(out, &run);
+        out.push('}');
+    }
+}
 
 fn points(out: &mut String, run: &[Cx]) {
     out.push('[');

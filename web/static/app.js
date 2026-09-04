@@ -15,6 +15,12 @@ const ctx = paper.getContext('2d');
 // paper runs at whatever rate the hand moves.
 let view = { x: 0, y: 0, scale: 70 };
 let scene = { pieces: [], rings: [], tree: [], clock: 0, playing: false };
+// The half of the drawing that never changes -- a Ludo board is a hundred
+// squares that never move. It is asked for once and kept, and `held` is the
+// number naming the copy we have. The answer leaves it out when it matches,
+// which is most frames.
+let still = [];
+let held = 0;
 let waiting = false;
 
 // ---- the view ------------------------------------------------------------
@@ -45,7 +51,7 @@ function look() {
   const r = paper.getBoundingClientRect();
   const [lox, hiy] = toWorld(0, 0);
   const [hix, loy] = toWorld(r.width, r.height);
-  return `lox=${lox}&loy=${loy}&hix=${hix}&hiy=${hiy}&px=${Math.round(r.width)}`;
+  return `lox=${lox}&loy=${loy}&hix=${hix}&hiy=${hiy}&px=${Math.round(r.width)}&have=${held}`;
 }
 
 // ---- talking to the drawing ---------------------------------------------
@@ -96,6 +102,7 @@ async function send(body) {
       body: JSON.stringify(body),
     });
     scene = await r.json();
+    keep();
     show();
   } catch (e) {
     say(`the drawing is not answering: ${e}`);
@@ -109,6 +116,7 @@ async function refresh() {
   waiting = true;
   try {
     scene = await (await fetch(`/scene?${look()}`)).json();
+    keep();
     show();
   } catch (e) {
     /* it will be there next frame */
@@ -123,6 +131,18 @@ function say(what) {
 
 // ---- drawing -------------------------------------------------------------
 
+// Hold on to the still half when a new one arrives, and note which one it is.
+function keep() {
+  if (scene.still) {
+    still = scene.still;
+    held = scene.stillv;
+  } else if (scene.stillv !== undefined && scene.stillv !== held) {
+    // It changed and we were not sent one: ask again rather than draw a board
+    // that is no longer the board.
+    held = 0;
+  }
+}
+
 function paint() {
   const r = size();
   ctx.clearRect(0, 0, r.width, r.height);
@@ -131,7 +151,7 @@ function paint() {
   // `wire::GRAIN`. Formatting thirty thousand floats as decimal text was
   // taking 84ms a scene, which is what made every tap feel slow.
   const G = 0.01;
-  for (const piece of scene.pieces) {
+  for (const piece of still.concat(scene.pieces)) {
     const p = piece.p;
     if (p.length < 4) continue;
     ctx.beginPath();

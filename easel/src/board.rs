@@ -1035,32 +1035,57 @@ impl Board {
     /// exactly as it was made. There is no separate "editing" path to keep in
     /// step with the "playing" one, which is the kind of pair that drifts.
     pub fn frame(&self) -> Frame {
-        let mut f = Frame::new();
+        let (still, moving) = self.frames();
+        let mut f = still;
+        for (shape, style) in moving.parts() {
+            let item = f.add(shape.clone()).color(style.colour).width(style.width);
+            if style.filled {
+                item.fill();
+            }
+        }
+        f
+    }
+
+    /// The drawing in two halves: what never changes, and what does.
+    ///
+    /// **A Ludo board is a hundred squares that never move.** Re-sampling and
+    /// re-sending them beside the one die that does was most of what a frame
+    /// cost, and the client had to parse them again every time. Split, the
+    /// still half goes over the wire once.
+    ///
+    /// The order is kept: still outlines, then moving outlines, then marks,
+    /// then solids on top. A drawing that changed its stacking depending on
+    /// what happened to be moving would be a horrible thing to debug.
+    pub fn frames(&self) -> (Frame, Frame) {
+        let mut still = Frame::new();
+        let mut moving = Frame::new();
         // The written half first, so hand-drawn marks sit on top of the
         // scaffolding they were drawn over.
         let made = self.written();
-        for (shape, colour) in made.shapes {
-            f.add(shape).color(colour).width(2);
+        for (k, (shape, colour)) in made.shapes.into_iter().enumerate() {
+            let fixed = made.still.get(k).copied().unwrap_or(false);
+            let to = if fixed { &mut still } else { &mut moving };
+            to.add(shape).color(colour).width(2);
         }
         let env = self.sheet.script.env(self.clock, &self.tally);
         for m in &self.sheet.marks {
-            let item = f.add(m.at_in(self.clock, &env)).color(m.colour);
+            // A mark that follows a number, has keys, or has been given a verb
+            // is moving; one that just sits where it was drawn is not.
+            let to = if m.moves() { &mut moving } else { &mut still };
+            let item = to.add(m.at_in(self.clock, &env)).color(m.colour);
             if m.filled {
                 item.fill();
             }
         }
-        // Solids last. A filled shape is opaque, so drawing it after everything
-        // else is what "lying on top of the board" means -- and it is what
-        // stops the die's own tappable mark showing through from underneath,
-        // which read as a second box drifting out of the first one every time
-        // the die went edge-on.
-        for (shape, colour) in made.solid {
-            f.add(shape).color(colour).fill();
+        for (k, (shape, colour)) in made.solid.into_iter().enumerate() {
+            let fixed = made.still_solid.get(k).copied().unwrap_or(false);
+            let to = if fixed { &mut still } else { &mut moving };
+            to.add(shape).color(colour).fill();
         }
         if let Some(wet) = self.drawing() {
-            f.add(wet.shape()).color(wet.colour).fill();
+            moving.add(wet.shape()).color(wet.colour).fill();
         }
-        f
+        (still, moving)
     }
 
     /// Set off whatever rules a tap on this figure has.

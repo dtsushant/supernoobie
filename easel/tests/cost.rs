@@ -35,7 +35,15 @@ fn what_a_scene_costs() {
     for _ in 0..20 {
         n = easel::wire::scene(&b, look()).len();
     }
-    println!("scene: {n} bytes, {:?} each", t.elapsed() / 20);
+    println!("first scene: {n} bytes, {:?} each", t.elapsed() / 20);
+    // What every frame after the first costs, which is the number that matters.
+    let mark = easel::wire::still_mark(&b, look());
+    let t = std::time::Instant::now();
+    let mut n = 0;
+    for _ in 0..20 {
+        n = easel::wire::since(&b, look(), "", mark).len();
+    }
+    println!("every frame after: {n} bytes, {:?} each", t.elapsed() / 20);
     let t = std::time::Instant::now();
     for _ in 0..20 {
         let _ = b.frame();

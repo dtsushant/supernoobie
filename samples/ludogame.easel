@@ -66,6 +66,71 @@ row on cuts1 = 0
 row on cuts2 = 0
 row on cuts3 = 0
 row on 
+row on # --- walking, rather than teleporting ---------------------------
+row on # A token that goes from square 10 to square 14 has TELEPORTED. What
+row on # it should do is walk, and walking needs two more numbers: where it
+row on # set off from, and when.
+row on #
+row on # Then where it is drawn is a function of the clock, like everything
+row on # else here -- no stepping, no frame counter, and a move that can be
+row on # scrubbed backwards and looks the same.
+row on pace = 7
+row on from0 = at0
+row on moved0 = -99
+row on from1 = at1
+row on moved1 = -99
+row on from2 = at2
+row on moved2 = -99
+row on from3 = at3
+row on moved3 = -99
+row on from4 = at4
+row on moved4 = -99
+row on from5 = at5
+row on moved5 = -99
+row on from6 = at6
+row on moved6 = -99
+row on from7 = at7
+row on moved7 = -99
+row on from8 = at8
+row on moved8 = -99
+row on from9 = at9
+row on moved9 = -99
+row on from10 = at10
+row on moved10 = -99
+row on from11 = at11
+row on moved11 = -99
+row on from12 = at12
+row on moved12 = -99
+row on from13 = at13
+row on moved13 = -99
+row on from14 = at14
+row on moved14 = -99
+row on from15 = at15
+row on moved15 = -99
+row on 
+row on # how far along it has got. `min` is what stops it: it walks at `pace`
+row on # squares a second and simply stops when it arrives, so no rule has to
+row on # notice that it has.
+row on #
+row on # A token sent home does not walk -- `at` goes negative and the min
+row on # takes it at once, which is right: it was carried, not walked.
+row on walk0 = min(at0, from0 + pace*max(0, time - moved0))
+row on walk1 = min(at1, from1 + pace*max(0, time - moved1))
+row on walk2 = min(at2, from2 + pace*max(0, time - moved2))
+row on walk3 = min(at3, from3 + pace*max(0, time - moved3))
+row on walk4 = min(at4, from4 + pace*max(0, time - moved4))
+row on walk5 = min(at5, from5 + pace*max(0, time - moved5))
+row on walk6 = min(at6, from6 + pace*max(0, time - moved6))
+row on walk7 = min(at7, from7 + pace*max(0, time - moved7))
+row on walk8 = min(at8, from8 + pace*max(0, time - moved8))
+row on walk9 = min(at9, from9 + pace*max(0, time - moved9))
+row on walk10 = min(at10, from10 + pace*max(0, time - moved10))
+row on walk11 = min(at11, from11 + pace*max(0, time - moved11))
+row on walk12 = min(at12, from12 + pace*max(0, time - moved12))
+row on walk13 = min(at13, from13 + pace*max(0, time - moved13))
+row on walk14 = min(at14, from14 + pace*max(0, time - moved14))
+row on walk15 = min(at15, from15 + pace*max(0, time - moved15))
+row on 
 row on # where each token counts as standing. the yard and the home column
 row on # get numbers no other token can hold, so nobody can be caught there.
 row on sq0 = if(at0 < 0, -100 - 0, if(at0 > 50, 200 + 10*seat0 + at0, mod(13*seat0 + at0, 52)))
@@ -182,22 +247,22 @@ row on
 row on # a ring round each token you may move. drawn at no size when you may
 row on # not, which is how a thing is hidden here.
 row on color(0xE3E9EF)
-row on param(if(can0, 0.52, 0)*exp(i*t) + ludox(seat0, at0) + i*ludoy(seat0, at0), 0, tau)
-row on param(if(can1, 0.52, 0)*exp(i*t) + ludox(seat1, at1) + i*ludoy(seat1, at1), 0, tau)
-row on param(if(can2, 0.52, 0)*exp(i*t) + ludox(seat2, at2) + i*ludoy(seat2, at2), 0, tau)
-row on param(if(can3, 0.52, 0)*exp(i*t) + ludox(seat3, at3) + i*ludoy(seat3, at3), 0, tau)
-row on param(if(can4, 0.52, 0)*exp(i*t) + ludox(seat4, at4) + i*ludoy(seat4, at4), 0, tau)
-row on param(if(can5, 0.52, 0)*exp(i*t) + ludox(seat5, at5) + i*ludoy(seat5, at5), 0, tau)
-row on param(if(can6, 0.52, 0)*exp(i*t) + ludox(seat6, at6) + i*ludoy(seat6, at6), 0, tau)
-row on param(if(can7, 0.52, 0)*exp(i*t) + ludox(seat7, at7) + i*ludoy(seat7, at7), 0, tau)
-row on param(if(can8, 0.52, 0)*exp(i*t) + ludox(seat8, at8) + i*ludoy(seat8, at8), 0, tau)
-row on param(if(can9, 0.52, 0)*exp(i*t) + ludox(seat9, at9) + i*ludoy(seat9, at9), 0, tau)
-row on param(if(can10, 0.52, 0)*exp(i*t) + ludox(seat10, at10) + i*ludoy(seat10, at10), 0, tau)
-row on param(if(can11, 0.52, 0)*exp(i*t) + ludox(seat11, at11) + i*ludoy(seat11, at11), 0, tau)
-row on param(if(can12, 0.52, 0)*exp(i*t) + ludox(seat12, at12) + i*ludoy(seat12, at12), 0, tau)
-row on param(if(can13, 0.52, 0)*exp(i*t) + ludox(seat13, at13) + i*ludoy(seat13, at13), 0, tau)
-row on param(if(can14, 0.52, 0)*exp(i*t) + ludox(seat14, at14) + i*ludoy(seat14, at14), 0, tau)
-row on param(if(can15, 0.52, 0)*exp(i*t) + ludox(seat15, at15) + i*ludoy(seat15, at15), 0, tau)
+row on param(if(can0, 0.52, 0)*exp(i*t) + ludox(seat0, walk0) + i*ludoy(seat0, walk0), 0, tau)
+row on param(if(can1, 0.52, 0)*exp(i*t) + ludox(seat1, walk1) + i*ludoy(seat1, walk1), 0, tau)
+row on param(if(can2, 0.52, 0)*exp(i*t) + ludox(seat2, walk2) + i*ludoy(seat2, walk2), 0, tau)
+row on param(if(can3, 0.52, 0)*exp(i*t) + ludox(seat3, walk3) + i*ludoy(seat3, walk3), 0, tau)
+row on param(if(can4, 0.52, 0)*exp(i*t) + ludox(seat4, walk4) + i*ludoy(seat4, walk4), 0, tau)
+row on param(if(can5, 0.52, 0)*exp(i*t) + ludox(seat5, walk5) + i*ludoy(seat5, walk5), 0, tau)
+row on param(if(can6, 0.52, 0)*exp(i*t) + ludox(seat6, walk6) + i*ludoy(seat6, walk6), 0, tau)
+row on param(if(can7, 0.52, 0)*exp(i*t) + ludox(seat7, walk7) + i*ludoy(seat7, walk7), 0, tau)
+row on param(if(can8, 0.52, 0)*exp(i*t) + ludox(seat8, walk8) + i*ludoy(seat8, walk8), 0, tau)
+row on param(if(can9, 0.52, 0)*exp(i*t) + ludox(seat9, walk9) + i*ludoy(seat9, walk9), 0, tau)
+row on param(if(can10, 0.52, 0)*exp(i*t) + ludox(seat10, walk10) + i*ludoy(seat10, walk10), 0, tau)
+row on param(if(can11, 0.52, 0)*exp(i*t) + ludox(seat11, walk11) + i*ludoy(seat11, walk11), 0, tau)
+row on param(if(can12, 0.52, 0)*exp(i*t) + ludox(seat12, walk12) + i*ludoy(seat12, walk12), 0, tau)
+row on param(if(can13, 0.52, 0)*exp(i*t) + ludox(seat13, walk13) + i*ludoy(seat13, walk13), 0, tau)
+row on param(if(can14, 0.52, 0)*exp(i*t) + ludox(seat14, walk14) + i*ludoy(seat14, walk14), 0, tau)
+row on param(if(can15, 0.52, 0)*exp(i*t) + ludox(seat15, walk15) + i*ludoy(seat15, walk15), 0, tau)
 row on 
 row on # --- a turn nobody can play -------------------------------------
 row on # Roll a three with both tokens in the yard and nothing is legal. The
@@ -213,35 +278,46 @@ row on when and(rolled == 1, settled): sixes = if(die == 6, sixes + 1, 0)
 row on when sixes > 2: turn = mod(turn + 1, 4), rolled = 0, sixes = 0
 row on 
 row on # --- moving a token ---------------------------------------------
-row on when tap 1: ok = can0, was = at0, each j in 0..16 (was[j] = at[j]), at[0] = if(ok, if(at0 < 0, 0, at0 + die), at0), here = if(ok, if(was < 0, mod(13*seat0, 52), if(at[0] > 50, 200 + 10*seat0 + at[0], mod(13*seat0 + at[0], 52))), -999), each j in 0..16 (at[j] = if(and(and(and(seat[j] != seat0, sq[j] == here), and(here >= 0, here < 52)), not(or(mod(here, 13) == 0, mod(here, 13) == 8))), 0 - 1 - mod(j, 4), at[j])), cut = 0, each j in 0..16 (cut = cut + if(and(at[j] < 0, was[j] >= 0), 1, 0)), cut = if(ok, cut > 0, 0), cuts[seat0] = cuts[seat0] + cut, turn = if(ok, if(or(or(and(again6 == 1, die == 6), and(againcut == 1, cut)), and(againhome == 1, at[0] == 57)), turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
-row on when tap 2: ok = can1, was = at1, each j in 0..16 (was[j] = at[j]), at[1] = if(ok, if(at1 < 0, 0, at1 + die), at1), here = if(ok, if(was < 0, mod(13*seat1, 52), if(at[1] > 50, 200 + 10*seat1 + at[1], mod(13*seat1 + at[1], 52))), -999), each j in 0..16 (at[j] = if(and(and(and(seat[j] != seat1, sq[j] == here), and(here >= 0, here < 52)), not(or(mod(here, 13) == 0, mod(here, 13) == 8))), 0 - 1 - mod(j, 4), at[j])), cut = 0, each j in 0..16 (cut = cut + if(and(at[j] < 0, was[j] >= 0), 1, 0)), cut = if(ok, cut > 0, 0), cuts[seat1] = cuts[seat1] + cut, turn = if(ok, if(or(or(and(again6 == 1, die == 6), and(againcut == 1, cut)), and(againhome == 1, at[1] == 57)), turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
-row on when tap 3: ok = can2, was = at2, each j in 0..16 (was[j] = at[j]), at[2] = if(ok, if(at2 < 0, 0, at2 + die), at2), here = if(ok, if(was < 0, mod(13*seat2, 52), if(at[2] > 50, 200 + 10*seat2 + at[2], mod(13*seat2 + at[2], 52))), -999), each j in 0..16 (at[j] = if(and(and(and(seat[j] != seat2, sq[j] == here), and(here >= 0, here < 52)), not(or(mod(here, 13) == 0, mod(here, 13) == 8))), 0 - 1 - mod(j, 4), at[j])), cut = 0, each j in 0..16 (cut = cut + if(and(at[j] < 0, was[j] >= 0), 1, 0)), cut = if(ok, cut > 0, 0), cuts[seat2] = cuts[seat2] + cut, turn = if(ok, if(or(or(and(again6 == 1, die == 6), and(againcut == 1, cut)), and(againhome == 1, at[2] == 57)), turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
-row on when tap 4: ok = can3, was = at3, each j in 0..16 (was[j] = at[j]), at[3] = if(ok, if(at3 < 0, 0, at3 + die), at3), here = if(ok, if(was < 0, mod(13*seat3, 52), if(at[3] > 50, 200 + 10*seat3 + at[3], mod(13*seat3 + at[3], 52))), -999), each j in 0..16 (at[j] = if(and(and(and(seat[j] != seat3, sq[j] == here), and(here >= 0, here < 52)), not(or(mod(here, 13) == 0, mod(here, 13) == 8))), 0 - 1 - mod(j, 4), at[j])), cut = 0, each j in 0..16 (cut = cut + if(and(at[j] < 0, was[j] >= 0), 1, 0)), cut = if(ok, cut > 0, 0), cuts[seat3] = cuts[seat3] + cut, turn = if(ok, if(or(or(and(again6 == 1, die == 6), and(againcut == 1, cut)), and(againhome == 1, at[3] == 57)), turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
-row on when tap 5: ok = can4, was = at4, each j in 0..16 (was[j] = at[j]), at[4] = if(ok, if(at4 < 0, 0, at4 + die), at4), here = if(ok, if(was < 0, mod(13*seat4, 52), if(at[4] > 50, 200 + 10*seat4 + at[4], mod(13*seat4 + at[4], 52))), -999), each j in 0..16 (at[j] = if(and(and(and(seat[j] != seat4, sq[j] == here), and(here >= 0, here < 52)), not(or(mod(here, 13) == 0, mod(here, 13) == 8))), 0 - 1 - mod(j, 4), at[j])), cut = 0, each j in 0..16 (cut = cut + if(and(at[j] < 0, was[j] >= 0), 1, 0)), cut = if(ok, cut > 0, 0), cuts[seat4] = cuts[seat4] + cut, turn = if(ok, if(or(or(and(again6 == 1, die == 6), and(againcut == 1, cut)), and(againhome == 1, at[4] == 57)), turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
-row on when tap 6: ok = can5, was = at5, each j in 0..16 (was[j] = at[j]), at[5] = if(ok, if(at5 < 0, 0, at5 + die), at5), here = if(ok, if(was < 0, mod(13*seat5, 52), if(at[5] > 50, 200 + 10*seat5 + at[5], mod(13*seat5 + at[5], 52))), -999), each j in 0..16 (at[j] = if(and(and(and(seat[j] != seat5, sq[j] == here), and(here >= 0, here < 52)), not(or(mod(here, 13) == 0, mod(here, 13) == 8))), 0 - 1 - mod(j, 4), at[j])), cut = 0, each j in 0..16 (cut = cut + if(and(at[j] < 0, was[j] >= 0), 1, 0)), cut = if(ok, cut > 0, 0), cuts[seat5] = cuts[seat5] + cut, turn = if(ok, if(or(or(and(again6 == 1, die == 6), and(againcut == 1, cut)), and(againhome == 1, at[5] == 57)), turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
-row on when tap 7: ok = can6, was = at6, each j in 0..16 (was[j] = at[j]), at[6] = if(ok, if(at6 < 0, 0, at6 + die), at6), here = if(ok, if(was < 0, mod(13*seat6, 52), if(at[6] > 50, 200 + 10*seat6 + at[6], mod(13*seat6 + at[6], 52))), -999), each j in 0..16 (at[j] = if(and(and(and(seat[j] != seat6, sq[j] == here), and(here >= 0, here < 52)), not(or(mod(here, 13) == 0, mod(here, 13) == 8))), 0 - 1 - mod(j, 4), at[j])), cut = 0, each j in 0..16 (cut = cut + if(and(at[j] < 0, was[j] >= 0), 1, 0)), cut = if(ok, cut > 0, 0), cuts[seat6] = cuts[seat6] + cut, turn = if(ok, if(or(or(and(again6 == 1, die == 6), and(againcut == 1, cut)), and(againhome == 1, at[6] == 57)), turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
-row on when tap 8: ok = can7, was = at7, each j in 0..16 (was[j] = at[j]), at[7] = if(ok, if(at7 < 0, 0, at7 + die), at7), here = if(ok, if(was < 0, mod(13*seat7, 52), if(at[7] > 50, 200 + 10*seat7 + at[7], mod(13*seat7 + at[7], 52))), -999), each j in 0..16 (at[j] = if(and(and(and(seat[j] != seat7, sq[j] == here), and(here >= 0, here < 52)), not(or(mod(here, 13) == 0, mod(here, 13) == 8))), 0 - 1 - mod(j, 4), at[j])), cut = 0, each j in 0..16 (cut = cut + if(and(at[j] < 0, was[j] >= 0), 1, 0)), cut = if(ok, cut > 0, 0), cuts[seat7] = cuts[seat7] + cut, turn = if(ok, if(or(or(and(again6 == 1, die == 6), and(againcut == 1, cut)), and(againhome == 1, at[7] == 57)), turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
-row on when tap 9: ok = can8, was = at8, each j in 0..16 (was[j] = at[j]), at[8] = if(ok, if(at8 < 0, 0, at8 + die), at8), here = if(ok, if(was < 0, mod(13*seat8, 52), if(at[8] > 50, 200 + 10*seat8 + at[8], mod(13*seat8 + at[8], 52))), -999), each j in 0..16 (at[j] = if(and(and(and(seat[j] != seat8, sq[j] == here), and(here >= 0, here < 52)), not(or(mod(here, 13) == 0, mod(here, 13) == 8))), 0 - 1 - mod(j, 4), at[j])), cut = 0, each j in 0..16 (cut = cut + if(and(at[j] < 0, was[j] >= 0), 1, 0)), cut = if(ok, cut > 0, 0), cuts[seat8] = cuts[seat8] + cut, turn = if(ok, if(or(or(and(again6 == 1, die == 6), and(againcut == 1, cut)), and(againhome == 1, at[8] == 57)), turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
-row on when tap 10: ok = can9, was = at9, each j in 0..16 (was[j] = at[j]), at[9] = if(ok, if(at9 < 0, 0, at9 + die), at9), here = if(ok, if(was < 0, mod(13*seat9, 52), if(at[9] > 50, 200 + 10*seat9 + at[9], mod(13*seat9 + at[9], 52))), -999), each j in 0..16 (at[j] = if(and(and(and(seat[j] != seat9, sq[j] == here), and(here >= 0, here < 52)), not(or(mod(here, 13) == 0, mod(here, 13) == 8))), 0 - 1 - mod(j, 4), at[j])), cut = 0, each j in 0..16 (cut = cut + if(and(at[j] < 0, was[j] >= 0), 1, 0)), cut = if(ok, cut > 0, 0), cuts[seat9] = cuts[seat9] + cut, turn = if(ok, if(or(or(and(again6 == 1, die == 6), and(againcut == 1, cut)), and(againhome == 1, at[9] == 57)), turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
-row on when tap 11: ok = can10, was = at10, each j in 0..16 (was[j] = at[j]), at[10] = if(ok, if(at10 < 0, 0, at10 + die), at10), here = if(ok, if(was < 0, mod(13*seat10, 52), if(at[10] > 50, 200 + 10*seat10 + at[10], mod(13*seat10 + at[10], 52))), -999), each j in 0..16 (at[j] = if(and(and(and(seat[j] != seat10, sq[j] == here), and(here >= 0, here < 52)), not(or(mod(here, 13) == 0, mod(here, 13) == 8))), 0 - 1 - mod(j, 4), at[j])), cut = 0, each j in 0..16 (cut = cut + if(and(at[j] < 0, was[j] >= 0), 1, 0)), cut = if(ok, cut > 0, 0), cuts[seat10] = cuts[seat10] + cut, turn = if(ok, if(or(or(and(again6 == 1, die == 6), and(againcut == 1, cut)), and(againhome == 1, at[10] == 57)), turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
-row on when tap 12: ok = can11, was = at11, each j in 0..16 (was[j] = at[j]), at[11] = if(ok, if(at11 < 0, 0, at11 + die), at11), here = if(ok, if(was < 0, mod(13*seat11, 52), if(at[11] > 50, 200 + 10*seat11 + at[11], mod(13*seat11 + at[11], 52))), -999), each j in 0..16 (at[j] = if(and(and(and(seat[j] != seat11, sq[j] == here), and(here >= 0, here < 52)), not(or(mod(here, 13) == 0, mod(here, 13) == 8))), 0 - 1 - mod(j, 4), at[j])), cut = 0, each j in 0..16 (cut = cut + if(and(at[j] < 0, was[j] >= 0), 1, 0)), cut = if(ok, cut > 0, 0), cuts[seat11] = cuts[seat11] + cut, turn = if(ok, if(or(or(and(again6 == 1, die == 6), and(againcut == 1, cut)), and(againhome == 1, at[11] == 57)), turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
-row on when tap 13: ok = can12, was = at12, each j in 0..16 (was[j] = at[j]), at[12] = if(ok, if(at12 < 0, 0, at12 + die), at12), here = if(ok, if(was < 0, mod(13*seat12, 52), if(at[12] > 50, 200 + 10*seat12 + at[12], mod(13*seat12 + at[12], 52))), -999), each j in 0..16 (at[j] = if(and(and(and(seat[j] != seat12, sq[j] == here), and(here >= 0, here < 52)), not(or(mod(here, 13) == 0, mod(here, 13) == 8))), 0 - 1 - mod(j, 4), at[j])), cut = 0, each j in 0..16 (cut = cut + if(and(at[j] < 0, was[j] >= 0), 1, 0)), cut = if(ok, cut > 0, 0), cuts[seat12] = cuts[seat12] + cut, turn = if(ok, if(or(or(and(again6 == 1, die == 6), and(againcut == 1, cut)), and(againhome == 1, at[12] == 57)), turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
-row on when tap 14: ok = can13, was = at13, each j in 0..16 (was[j] = at[j]), at[13] = if(ok, if(at13 < 0, 0, at13 + die), at13), here = if(ok, if(was < 0, mod(13*seat13, 52), if(at[13] > 50, 200 + 10*seat13 + at[13], mod(13*seat13 + at[13], 52))), -999), each j in 0..16 (at[j] = if(and(and(and(seat[j] != seat13, sq[j] == here), and(here >= 0, here < 52)), not(or(mod(here, 13) == 0, mod(here, 13) == 8))), 0 - 1 - mod(j, 4), at[j])), cut = 0, each j in 0..16 (cut = cut + if(and(at[j] < 0, was[j] >= 0), 1, 0)), cut = if(ok, cut > 0, 0), cuts[seat13] = cuts[seat13] + cut, turn = if(ok, if(or(or(and(again6 == 1, die == 6), and(againcut == 1, cut)), and(againhome == 1, at[13] == 57)), turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
-row on when tap 15: ok = can14, was = at14, each j in 0..16 (was[j] = at[j]), at[14] = if(ok, if(at14 < 0, 0, at14 + die), at14), here = if(ok, if(was < 0, mod(13*seat14, 52), if(at[14] > 50, 200 + 10*seat14 + at[14], mod(13*seat14 + at[14], 52))), -999), each j in 0..16 (at[j] = if(and(and(and(seat[j] != seat14, sq[j] == here), and(here >= 0, here < 52)), not(or(mod(here, 13) == 0, mod(here, 13) == 8))), 0 - 1 - mod(j, 4), at[j])), cut = 0, each j in 0..16 (cut = cut + if(and(at[j] < 0, was[j] >= 0), 1, 0)), cut = if(ok, cut > 0, 0), cuts[seat14] = cuts[seat14] + cut, turn = if(ok, if(or(or(and(again6 == 1, die == 6), and(againcut == 1, cut)), and(againhome == 1, at[14] == 57)), turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
-row on when tap 16: ok = can15, was = at15, each j in 0..16 (was[j] = at[j]), at[15] = if(ok, if(at15 < 0, 0, at15 + die), at15), here = if(ok, if(was < 0, mod(13*seat15, 52), if(at[15] > 50, 200 + 10*seat15 + at[15], mod(13*seat15 + at[15], 52))), -999), each j in 0..16 (at[j] = if(and(and(and(seat[j] != seat15, sq[j] == here), and(here >= 0, here < 52)), not(or(mod(here, 13) == 0, mod(here, 13) == 8))), 0 - 1 - mod(j, 4), at[j])), cut = 0, each j in 0..16 (cut = cut + if(and(at[j] < 0, was[j] >= 0), 1, 0)), cut = if(ok, cut > 0, 0), cuts[seat15] = cuts[seat15] + cut, turn = if(ok, if(or(or(and(again6 == 1, die == 6), and(againcut == 1, cut)), and(againhome == 1, at[15] == 57)), turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
+row on when tap 1: ok = can0, was = at0, each j in 0..16 (was[j] = at[j]), from[0] = if(ok, if(at0 < 0, 0, at0), from0), moved[0] = if(ok, time, moved0), at[0] = if(ok, if(at0 < 0, 0, at0 + die), at0), here = if(ok, if(was < 0, mod(13*seat0, 52), if(at[0] > 50, 200 + 10*seat0 + at[0], mod(13*seat0 + at[0], 52))), -999), each j in 0..16 (at[j] = if(and(and(and(seat[j] != seat0, sq[j] == here), and(here >= 0, here < 52)), not(or(mod(here, 13) == 0, mod(here, 13) == 8))), 0 - 1 - mod(j, 4), at[j])), cut = 0, each j in 0..16 (cut = cut + if(and(at[j] < 0, was[j] >= 0), 1, 0)), cut = if(ok, cut > 0, 0), cuts[seat0] = cuts[seat0] + cut, turn = if(ok, if(or(or(and(again6 == 1, die == 6), and(againcut == 1, cut)), and(againhome == 1, at[0] == 57)), turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
+row on when tap 2: ok = can1, was = at1, each j in 0..16 (was[j] = at[j]), from[1] = if(ok, if(at1 < 0, 0, at1), from1), moved[1] = if(ok, time, moved1), at[1] = if(ok, if(at1 < 0, 0, at1 + die), at1), here = if(ok, if(was < 0, mod(13*seat1, 52), if(at[1] > 50, 200 + 10*seat1 + at[1], mod(13*seat1 + at[1], 52))), -999), each j in 0..16 (at[j] = if(and(and(and(seat[j] != seat1, sq[j] == here), and(here >= 0, here < 52)), not(or(mod(here, 13) == 0, mod(here, 13) == 8))), 0 - 1 - mod(j, 4), at[j])), cut = 0, each j in 0..16 (cut = cut + if(and(at[j] < 0, was[j] >= 0), 1, 0)), cut = if(ok, cut > 0, 0), cuts[seat1] = cuts[seat1] + cut, turn = if(ok, if(or(or(and(again6 == 1, die == 6), and(againcut == 1, cut)), and(againhome == 1, at[1] == 57)), turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
+row on when tap 3: ok = can2, was = at2, each j in 0..16 (was[j] = at[j]), from[2] = if(ok, if(at2 < 0, 0, at2), from2), moved[2] = if(ok, time, moved2), at[2] = if(ok, if(at2 < 0, 0, at2 + die), at2), here = if(ok, if(was < 0, mod(13*seat2, 52), if(at[2] > 50, 200 + 10*seat2 + at[2], mod(13*seat2 + at[2], 52))), -999), each j in 0..16 (at[j] = if(and(and(and(seat[j] != seat2, sq[j] == here), and(here >= 0, here < 52)), not(or(mod(here, 13) == 0, mod(here, 13) == 8))), 0 - 1 - mod(j, 4), at[j])), cut = 0, each j in 0..16 (cut = cut + if(and(at[j] < 0, was[j] >= 0), 1, 0)), cut = if(ok, cut > 0, 0), cuts[seat2] = cuts[seat2] + cut, turn = if(ok, if(or(or(and(again6 == 1, die == 6), and(againcut == 1, cut)), and(againhome == 1, at[2] == 57)), turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
+row on when tap 4: ok = can3, was = at3, each j in 0..16 (was[j] = at[j]), from[3] = if(ok, if(at3 < 0, 0, at3), from3), moved[3] = if(ok, time, moved3), at[3] = if(ok, if(at3 < 0, 0, at3 + die), at3), here = if(ok, if(was < 0, mod(13*seat3, 52), if(at[3] > 50, 200 + 10*seat3 + at[3], mod(13*seat3 + at[3], 52))), -999), each j in 0..16 (at[j] = if(and(and(and(seat[j] != seat3, sq[j] == here), and(here >= 0, here < 52)), not(or(mod(here, 13) == 0, mod(here, 13) == 8))), 0 - 1 - mod(j, 4), at[j])), cut = 0, each j in 0..16 (cut = cut + if(and(at[j] < 0, was[j] >= 0), 1, 0)), cut = if(ok, cut > 0, 0), cuts[seat3] = cuts[seat3] + cut, turn = if(ok, if(or(or(and(again6 == 1, die == 6), and(againcut == 1, cut)), and(againhome == 1, at[3] == 57)), turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
+row on when tap 5: ok = can4, was = at4, each j in 0..16 (was[j] = at[j]), from[4] = if(ok, if(at4 < 0, 0, at4), from4), moved[4] = if(ok, time, moved4), at[4] = if(ok, if(at4 < 0, 0, at4 + die), at4), here = if(ok, if(was < 0, mod(13*seat4, 52), if(at[4] > 50, 200 + 10*seat4 + at[4], mod(13*seat4 + at[4], 52))), -999), each j in 0..16 (at[j] = if(and(and(and(seat[j] != seat4, sq[j] == here), and(here >= 0, here < 52)), not(or(mod(here, 13) == 0, mod(here, 13) == 8))), 0 - 1 - mod(j, 4), at[j])), cut = 0, each j in 0..16 (cut = cut + if(and(at[j] < 0, was[j] >= 0), 1, 0)), cut = if(ok, cut > 0, 0), cuts[seat4] = cuts[seat4] + cut, turn = if(ok, if(or(or(and(again6 == 1, die == 6), and(againcut == 1, cut)), and(againhome == 1, at[4] == 57)), turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
+row on when tap 6: ok = can5, was = at5, each j in 0..16 (was[j] = at[j]), from[5] = if(ok, if(at5 < 0, 0, at5), from5), moved[5] = if(ok, time, moved5), at[5] = if(ok, if(at5 < 0, 0, at5 + die), at5), here = if(ok, if(was < 0, mod(13*seat5, 52), if(at[5] > 50, 200 + 10*seat5 + at[5], mod(13*seat5 + at[5], 52))), -999), each j in 0..16 (at[j] = if(and(and(and(seat[j] != seat5, sq[j] == here), and(here >= 0, here < 52)), not(or(mod(here, 13) == 0, mod(here, 13) == 8))), 0 - 1 - mod(j, 4), at[j])), cut = 0, each j in 0..16 (cut = cut + if(and(at[j] < 0, was[j] >= 0), 1, 0)), cut = if(ok, cut > 0, 0), cuts[seat5] = cuts[seat5] + cut, turn = if(ok, if(or(or(and(again6 == 1, die == 6), and(againcut == 1, cut)), and(againhome == 1, at[5] == 57)), turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
+row on when tap 7: ok = can6, was = at6, each j in 0..16 (was[j] = at[j]), from[6] = if(ok, if(at6 < 0, 0, at6), from6), moved[6] = if(ok, time, moved6), at[6] = if(ok, if(at6 < 0, 0, at6 + die), at6), here = if(ok, if(was < 0, mod(13*seat6, 52), if(at[6] > 50, 200 + 10*seat6 + at[6], mod(13*seat6 + at[6], 52))), -999), each j in 0..16 (at[j] = if(and(and(and(seat[j] != seat6, sq[j] == here), and(here >= 0, here < 52)), not(or(mod(here, 13) == 0, mod(here, 13) == 8))), 0 - 1 - mod(j, 4), at[j])), cut = 0, each j in 0..16 (cut = cut + if(and(at[j] < 0, was[j] >= 0), 1, 0)), cut = if(ok, cut > 0, 0), cuts[seat6] = cuts[seat6] + cut, turn = if(ok, if(or(or(and(again6 == 1, die == 6), and(againcut == 1, cut)), and(againhome == 1, at[6] == 57)), turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
+row on when tap 8: ok = can7, was = at7, each j in 0..16 (was[j] = at[j]), from[7] = if(ok, if(at7 < 0, 0, at7), from7), moved[7] = if(ok, time, moved7), at[7] = if(ok, if(at7 < 0, 0, at7 + die), at7), here = if(ok, if(was < 0, mod(13*seat7, 52), if(at[7] > 50, 200 + 10*seat7 + at[7], mod(13*seat7 + at[7], 52))), -999), each j in 0..16 (at[j] = if(and(and(and(seat[j] != seat7, sq[j] == here), and(here >= 0, here < 52)), not(or(mod(here, 13) == 0, mod(here, 13) == 8))), 0 - 1 - mod(j, 4), at[j])), cut = 0, each j in 0..16 (cut = cut + if(and(at[j] < 0, was[j] >= 0), 1, 0)), cut = if(ok, cut > 0, 0), cuts[seat7] = cuts[seat7] + cut, turn = if(ok, if(or(or(and(again6 == 1, die == 6), and(againcut == 1, cut)), and(againhome == 1, at[7] == 57)), turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
+row on when tap 9: ok = can8, was = at8, each j in 0..16 (was[j] = at[j]), from[8] = if(ok, if(at8 < 0, 0, at8), from8), moved[8] = if(ok, time, moved8), at[8] = if(ok, if(at8 < 0, 0, at8 + die), at8), here = if(ok, if(was < 0, mod(13*seat8, 52), if(at[8] > 50, 200 + 10*seat8 + at[8], mod(13*seat8 + at[8], 52))), -999), each j in 0..16 (at[j] = if(and(and(and(seat[j] != seat8, sq[j] == here), and(here >= 0, here < 52)), not(or(mod(here, 13) == 0, mod(here, 13) == 8))), 0 - 1 - mod(j, 4), at[j])), cut = 0, each j in 0..16 (cut = cut + if(and(at[j] < 0, was[j] >= 0), 1, 0)), cut = if(ok, cut > 0, 0), cuts[seat8] = cuts[seat8] + cut, turn = if(ok, if(or(or(and(again6 == 1, die == 6), and(againcut == 1, cut)), and(againhome == 1, at[8] == 57)), turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
+row on when tap 10: ok = can9, was = at9, each j in 0..16 (was[j] = at[j]), from[9] = if(ok, if(at9 < 0, 0, at9), from9), moved[9] = if(ok, time, moved9), at[9] = if(ok, if(at9 < 0, 0, at9 + die), at9), here = if(ok, if(was < 0, mod(13*seat9, 52), if(at[9] > 50, 200 + 10*seat9 + at[9], mod(13*seat9 + at[9], 52))), -999), each j in 0..16 (at[j] = if(and(and(and(seat[j] != seat9, sq[j] == here), and(here >= 0, here < 52)), not(or(mod(here, 13) == 0, mod(here, 13) == 8))), 0 - 1 - mod(j, 4), at[j])), cut = 0, each j in 0..16 (cut = cut + if(and(at[j] < 0, was[j] >= 0), 1, 0)), cut = if(ok, cut > 0, 0), cuts[seat9] = cuts[seat9] + cut, turn = if(ok, if(or(or(and(again6 == 1, die == 6), and(againcut == 1, cut)), and(againhome == 1, at[9] == 57)), turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
+row on when tap 11: ok = can10, was = at10, each j in 0..16 (was[j] = at[j]), from[10] = if(ok, if(at10 < 0, 0, at10), from10), moved[10] = if(ok, time, moved10), at[10] = if(ok, if(at10 < 0, 0, at10 + die), at10), here = if(ok, if(was < 0, mod(13*seat10, 52), if(at[10] > 50, 200 + 10*seat10 + at[10], mod(13*seat10 + at[10], 52))), -999), each j in 0..16 (at[j] = if(and(and(and(seat[j] != seat10, sq[j] == here), and(here >= 0, here < 52)), not(or(mod(here, 13) == 0, mod(here, 13) == 8))), 0 - 1 - mod(j, 4), at[j])), cut = 0, each j in 0..16 (cut = cut + if(and(at[j] < 0, was[j] >= 0), 1, 0)), cut = if(ok, cut > 0, 0), cuts[seat10] = cuts[seat10] + cut, turn = if(ok, if(or(or(and(again6 == 1, die == 6), and(againcut == 1, cut)), and(againhome == 1, at[10] == 57)), turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
+row on when tap 12: ok = can11, was = at11, each j in 0..16 (was[j] = at[j]), from[11] = if(ok, if(at11 < 0, 0, at11), from11), moved[11] = if(ok, time, moved11), at[11] = if(ok, if(at11 < 0, 0, at11 + die), at11), here = if(ok, if(was < 0, mod(13*seat11, 52), if(at[11] > 50, 200 + 10*seat11 + at[11], mod(13*seat11 + at[11], 52))), -999), each j in 0..16 (at[j] = if(and(and(and(seat[j] != seat11, sq[j] == here), and(here >= 0, here < 52)), not(or(mod(here, 13) == 0, mod(here, 13) == 8))), 0 - 1 - mod(j, 4), at[j])), cut = 0, each j in 0..16 (cut = cut + if(and(at[j] < 0, was[j] >= 0), 1, 0)), cut = if(ok, cut > 0, 0), cuts[seat11] = cuts[seat11] + cut, turn = if(ok, if(or(or(and(again6 == 1, die == 6), and(againcut == 1, cut)), and(againhome == 1, at[11] == 57)), turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
+row on when tap 13: ok = can12, was = at12, each j in 0..16 (was[j] = at[j]), from[12] = if(ok, if(at12 < 0, 0, at12), from12), moved[12] = if(ok, time, moved12), at[12] = if(ok, if(at12 < 0, 0, at12 + die), at12), here = if(ok, if(was < 0, mod(13*seat12, 52), if(at[12] > 50, 200 + 10*seat12 + at[12], mod(13*seat12 + at[12], 52))), -999), each j in 0..16 (at[j] = if(and(and(and(seat[j] != seat12, sq[j] == here), and(here >= 0, here < 52)), not(or(mod(here, 13) == 0, mod(here, 13) == 8))), 0 - 1 - mod(j, 4), at[j])), cut = 0, each j in 0..16 (cut = cut + if(and(at[j] < 0, was[j] >= 0), 1, 0)), cut = if(ok, cut > 0, 0), cuts[seat12] = cuts[seat12] + cut, turn = if(ok, if(or(or(and(again6 == 1, die == 6), and(againcut == 1, cut)), and(againhome == 1, at[12] == 57)), turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
+row on when tap 14: ok = can13, was = at13, each j in 0..16 (was[j] = at[j]), from[13] = if(ok, if(at13 < 0, 0, at13), from13), moved[13] = if(ok, time, moved13), at[13] = if(ok, if(at13 < 0, 0, at13 + die), at13), here = if(ok, if(was < 0, mod(13*seat13, 52), if(at[13] > 50, 200 + 10*seat13 + at[13], mod(13*seat13 + at[13], 52))), -999), each j in 0..16 (at[j] = if(and(and(and(seat[j] != seat13, sq[j] == here), and(here >= 0, here < 52)), not(or(mod(here, 13) == 0, mod(here, 13) == 8))), 0 - 1 - mod(j, 4), at[j])), cut = 0, each j in 0..16 (cut = cut + if(and(at[j] < 0, was[j] >= 0), 1, 0)), cut = if(ok, cut > 0, 0), cuts[seat13] = cuts[seat13] + cut, turn = if(ok, if(or(or(and(again6 == 1, die == 6), and(againcut == 1, cut)), and(againhome == 1, at[13] == 57)), turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
+row on when tap 15: ok = can14, was = at14, each j in 0..16 (was[j] = at[j]), from[14] = if(ok, if(at14 < 0, 0, at14), from14), moved[14] = if(ok, time, moved14), at[14] = if(ok, if(at14 < 0, 0, at14 + die), at14), here = if(ok, if(was < 0, mod(13*seat14, 52), if(at[14] > 50, 200 + 10*seat14 + at[14], mod(13*seat14 + at[14], 52))), -999), each j in 0..16 (at[j] = if(and(and(and(seat[j] != seat14, sq[j] == here), and(here >= 0, here < 52)), not(or(mod(here, 13) == 0, mod(here, 13) == 8))), 0 - 1 - mod(j, 4), at[j])), cut = 0, each j in 0..16 (cut = cut + if(and(at[j] < 0, was[j] >= 0), 1, 0)), cut = if(ok, cut > 0, 0), cuts[seat14] = cuts[seat14] + cut, turn = if(ok, if(or(or(and(again6 == 1, die == 6), and(againcut == 1, cut)), and(againhome == 1, at[14] == 57)), turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
+row on when tap 16: ok = can15, was = at15, each j in 0..16 (was[j] = at[j]), from[15] = if(ok, if(at15 < 0, 0, at15), from15), moved[15] = if(ok, time, moved15), at[15] = if(ok, if(at15 < 0, 0, at15 + die), at15), here = if(ok, if(was < 0, mod(13*seat15, 52), if(at[15] > 50, 200 + 10*seat15 + at[15], mod(13*seat15 + at[15], 52))), -999), each j in 0..16 (at[j] = if(and(and(and(seat[j] != seat15, sq[j] == here), and(here >= 0, here < 52)), not(or(mod(here, 13) == 0, mod(here, 13) == 8))), 0 - 1 - mod(j, 4), at[j])), cut = 0, each j in 0..16 (cut = cut + if(and(at[j] < 0, was[j] >= 0), 1, 0)), cut = if(ok, cut > 0, 0), cuts[seat15] = cuts[seat15] + cut, turn = if(ok, if(or(or(and(again6 == 1, die == 6), and(againcut == 1, cut)), and(againhome == 1, at[15] == 57)), turn, mod(turn + 1, 4)), turn), rolled = if(ok, 0, rolled)
 row on 
 row on # --- the safe stars ---------------------------------------------
 row on # Drawn at no size when the house does not use them, which is how a
 row on # thing is hidden here.
-row on color(0x6B7987)
-row on param(if(stars == 1, 0.3, 0)*exp(i*t) + ludox(0, 0) + i*ludoy(0, 0), 0, tau)
-row on param(if(stars == 1, 0.3, 0)*exp(i*t) + ludox(0, 8) + i*ludoy(0, 8), 0, tau)
-row on param(if(stars == 1, 0.3, 0)*exp(i*t) + ludox(0, 13) + i*ludoy(0, 13), 0, tau)
-row on param(if(stars == 1, 0.3, 0)*exp(i*t) + ludox(0, 21) + i*ludoy(0, 21), 0, tau)
-row on param(if(stars == 1, 0.3, 0)*exp(i*t) + ludox(0, 26) + i*ludoy(0, 26), 0, tau)
-row on param(if(stars == 1, 0.3, 0)*exp(i*t) + ludox(0, 34) + i*ludoy(0, 34), 0, tau)
-row on param(if(stars == 1, 0.3, 0)*exp(i*t) + ludox(0, 39) + i*ludoy(0, 39), 0, tau)
-row on param(if(stars == 1, 0.3, 0)*exp(i*t) + ludox(0, 47) + i*ludoy(0, 47), 0, tau)
+row on # A star, because that is what a safe square is called. The four
+row on # starts are in each seat's own colour -- they are that seat's square,
+row on # and drawing them all in grey was why they looked misplaced rather
+row on # than looking like starts.
+row on color(0xE0704A)
+row on star(ludox(0, 0), ludoy(0, 0), if(stars == 1, 0.34, 0), 5)
+row on color(0x8A97A5)
+row on star(ludox(0, 8), ludoy(0, 8), if(stars == 1, 0.3, 0), 5)
+row on color(0x6FCF97)
+row on star(ludox(1, 0), ludoy(1, 0), if(stars == 1, 0.34, 0), 5)
+row on color(0x8A97A5)
+row on star(ludox(1, 8), ludoy(1, 8), if(stars == 1, 0.3, 0), 5)
+row on color(0x4FBCD4)
+row on star(ludox(2, 0), ludoy(2, 0), if(stars == 1, 0.34, 0), 5)
+row on color(0x8A97A5)
+row on star(ludox(2, 8), ludoy(2, 8), if(stars == 1, 0.3, 0), 5)
+row on color(0xE0A44A)
+row on star(ludox(3, 0), ludoy(3, 0), if(stars == 1, 0.34, 0), 5)
+row on color(0x8A97A5)
+row on star(ludox(3, 8), ludoy(3, 8), if(stars == 1, 0.3, 0), 5)
 row on 
 row on # --- how many are in --------------------------------------------
 row on home0 = (at0 == 57) + (at1 == 57) + (at2 == 57) + (at3 == 57)
@@ -267,8 +343,8 @@ row on color(0x6FCF97)
 row on digits(won, 8.6, -1.2, 0.5)
 mark round 0.1000 taper 0.1200 colour E0704A fill closed
 group 1
-placex ludox(seat0, at0)
-placey ludoy(seat0, at0)
+placex ludox(seat0, walk0)
+placey ludoy(seat0, walk0)
 p -4.6400 3.0000 -4.6432 3.0280 -4.6545 3.0729 -4.6769 3.1259 -4.7114 3.1804 -4.7578 3.2308 -4.8145 3.2728 -4.8794 3.3033
 p -4.9497 3.3200 -5.0220 3.3215 -5.0928 3.3075 -5.1589 3.2784 -5.2168 3.2357 -5.2637 3.1812 -5.2974 3.1178 -5.3162 3.0485
 p -5.3190 2.9769 -5.3059 2.9064 -5.2774 2.8407 -5.2350 2.7829 -5.1808 2.7360 -5.1175 2.7024 -5.0483 2.6837 -4.9767 2.6809
@@ -276,8 +352,8 @@ p -4.9063 2.6941 -4.8406 2.7226 -4.7829 2.7650 -4.7360 2.8192 -4.7024 2.8825 -4.
 p -4.6511 2.9790 -4.6472 2.9864 -4.6447 2.9911
 mark round 0.1000 taper 0.1200 colour E0704A fill closed
 group 2
-placex ludox(seat1, at1)
-placey ludoy(seat1, at1)
+placex ludox(seat1, walk1)
+placey ludoy(seat1, walk1)
 p -2.6400 3.0000 -2.6432 3.0280 -2.6545 3.0729 -2.6769 3.1259 -2.7114 3.1804 -2.7578 3.2308 -2.8145 3.2728 -2.8794 3.3033
 p -2.9497 3.3200 -3.0220 3.3215 -3.0928 3.3075 -3.1589 3.2784 -3.2168 3.2357 -3.2637 3.1812 -3.2974 3.1178 -3.3162 3.0485
 p -3.3190 2.9769 -3.3059 2.9064 -3.2774 2.8407 -3.2350 2.7829 -3.1808 2.7360 -3.1175 2.7024 -3.0483 2.6837 -2.9767 2.6809
@@ -285,8 +361,8 @@ p -2.9063 2.6941 -2.8406 2.7226 -2.7829 2.7650 -2.7360 2.8192 -2.7024 2.8825 -2.
 p -2.6511 2.9790 -2.6472 2.9864 -2.6447 2.9911
 mark round 0.1000 taper 0.1200 colour E0704A fill closed
 group 3
-placex ludox(seat2, at2)
-placey ludoy(seat2, at2)
+placex ludox(seat2, walk2)
+placey ludoy(seat2, walk2)
 p -4.6400 5.0000 -4.6432 5.0280 -4.6545 5.0729 -4.6769 5.1259 -4.7114 5.1804 -4.7578 5.2308 -4.8145 5.2728 -4.8794 5.3033
 p -4.9497 5.3200 -5.0220 5.3215 -5.0928 5.3075 -5.1589 5.2784 -5.2168 5.2357 -5.2637 5.1812 -5.2974 5.1178 -5.3162 5.0485
 p -5.3190 4.9769 -5.3059 4.9064 -5.2774 4.8407 -5.2350 4.7829 -5.1808 4.7360 -5.1175 4.7024 -5.0483 4.6837 -4.9767 4.6809
@@ -294,8 +370,8 @@ p -4.9063 4.6941 -4.8406 4.7226 -4.7829 4.7650 -4.7360 4.8192 -4.7024 4.8825 -4.
 p -4.6511 4.9790 -4.6472 4.9864 -4.6447 4.9911
 mark round 0.1000 taper 0.1200 colour E0704A fill closed
 group 4
-placex ludox(seat3, at3)
-placey ludoy(seat3, at3)
+placex ludox(seat3, walk3)
+placey ludoy(seat3, walk3)
 p -2.6400 5.0000 -2.6432 5.0280 -2.6545 5.0729 -2.6769 5.1259 -2.7114 5.1804 -2.7578 5.2308 -2.8145 5.2728 -2.8794 5.3033
 p -2.9497 5.3200 -3.0220 5.3215 -3.0928 5.3075 -3.1589 5.2784 -3.2168 5.2357 -3.2637 5.1812 -3.2974 5.1178 -3.3162 5.0485
 p -3.3190 4.9769 -3.3059 4.9064 -3.2774 4.8407 -3.2350 4.7829 -3.1808 4.7360 -3.1175 4.7024 -3.0483 4.6837 -2.9767 4.6809
@@ -303,8 +379,8 @@ p -2.9063 4.6941 -2.8406 4.7226 -2.7829 4.7650 -2.7360 4.8192 -2.7024 4.8825 -2.
 p -2.6511 4.9790 -2.6472 4.9864 -2.6447 4.9911
 mark round 0.1000 taper 0.1200 colour 6FCF97 fill closed
 group 5
-placex ludox(seat4, at4)
-placey ludoy(seat4, at4)
+placex ludox(seat4, walk4)
+placey ludoy(seat4, walk4)
 p 3.3600 5.0000 3.3568 5.0280 3.3455 5.0729 3.3231 5.1259 3.2886 5.1804 3.2422 5.2308 3.1855 5.2728 3.1206 5.3033
 p 3.0503 5.3200 2.9780 5.3215 2.9072 5.3075 2.8411 5.2784 2.7832 5.2357 2.7363 5.1812 2.7026 5.1178 2.6838 5.0485
 p 2.6810 4.9769 2.6941 4.9064 2.7226 4.8407 2.7650 4.7829 2.8192 4.7360 2.8825 4.7024 2.9517 4.6837 3.0233 4.6809
@@ -312,8 +388,8 @@ p 3.0937 4.6941 3.1594 4.7226 3.2171 4.7650 3.2640 4.8192 3.2976 4.8825 3.3194 4
 p 3.3489 4.9790 3.3528 4.9864 3.3553 4.9911
 mark round 0.1000 taper 0.1200 colour 6FCF97 fill closed
 group 6
-placex ludox(seat5, at5)
-placey ludoy(seat5, at5)
+placex ludox(seat5, walk5)
+placey ludoy(seat5, walk5)
 p 3.3600 3.0000 3.3568 3.0280 3.3455 3.0729 3.3231 3.1259 3.2886 3.1804 3.2422 3.2308 3.1855 3.2728 3.1206 3.3033
 p 3.0503 3.3200 2.9780 3.3215 2.9072 3.3075 2.8411 3.2784 2.7832 3.2357 2.7363 3.1812 2.7026 3.1178 2.6838 3.0485
 p 2.6810 2.9769 2.6941 2.9064 2.7226 2.8407 2.7650 2.7829 2.8192 2.7360 2.8825 2.7024 2.9517 2.6837 3.0233 2.6809
@@ -321,8 +397,8 @@ p 3.0937 2.6941 3.1594 2.7226 3.2171 2.7650 3.2640 2.8192 3.2976 2.8825 3.3194 2
 p 3.3489 2.9790 3.3528 2.9864 3.3553 2.9911
 mark round 0.1000 taper 0.1200 colour 6FCF97 fill closed
 group 7
-placex ludox(seat6, at6)
-placey ludoy(seat6, at6)
+placex ludox(seat6, walk6)
+placey ludoy(seat6, walk6)
 p 5.3600 5.0000 5.3568 5.0280 5.3455 5.0729 5.3231 5.1259 5.2886 5.1804 5.2422 5.2308 5.1855 5.2728 5.1206 5.3033
 p 5.0503 5.3200 4.9780 5.3215 4.9072 5.3075 4.8411 5.2784 4.7832 5.2357 4.7363 5.1812 4.7026 5.1178 4.6838 5.0485
 p 4.6810 4.9769 4.6941 4.9064 4.7226 4.8407 4.7650 4.7829 4.8192 4.7360 4.8825 4.7024 4.9517 4.6837 5.0233 4.6809
@@ -330,8 +406,8 @@ p 5.0937 4.6941 5.1594 4.7226 5.2171 4.7650 5.2640 4.8192 5.2976 4.8825 5.3194 4
 p 5.3489 4.9790 5.3528 4.9864 5.3553 4.9911
 mark round 0.1000 taper 0.1200 colour 6FCF97 fill closed
 group 8
-placex ludox(seat7, at7)
-placey ludoy(seat7, at7)
+placex ludox(seat7, walk7)
+placey ludoy(seat7, walk7)
 p 5.3600 3.0000 5.3568 3.0280 5.3455 3.0729 5.3231 3.1259 5.2886 3.1804 5.2422 3.2308 5.1855 3.2728 5.1206 3.3033
 p 5.0503 3.3200 4.9780 3.3215 4.9072 3.3075 4.8411 3.2784 4.7832 3.2357 4.7363 3.1812 4.7026 3.1178 4.6838 3.0485
 p 4.6810 2.9769 4.6941 2.9064 4.7226 2.8407 4.7650 2.7829 4.8192 2.7360 4.8825 2.7024 4.9517 2.6837 5.0233 2.6809
@@ -339,8 +415,8 @@ p 5.0937 2.6941 5.1594 2.7226 5.2171 2.7650 5.2640 2.8192 5.2976 2.8825 5.3194 2
 p 5.3489 2.9790 5.3528 2.9864 5.3553 2.9911
 mark round 0.1000 taper 0.1200 colour 4FBCD4 fill closed
 group 9
-placex ludox(seat8, at8)
-placey ludoy(seat8, at8)
+placex ludox(seat8, walk8)
+placey ludoy(seat8, walk8)
 p 5.3600 -3.0000 5.3568 -2.9720 5.3455 -2.9271 5.3231 -2.8741 5.2886 -2.8196 5.2422 -2.7692 5.1855 -2.7272 5.1206 -2.6967
 p 5.0503 -2.6800 4.9780 -2.6785 4.9072 -2.6925 4.8411 -2.7216 4.7832 -2.7643 4.7363 -2.8188 4.7026 -2.8822 4.6838 -2.9515
 p 4.6810 -3.0231 4.6941 -3.0936 4.7226 -3.1593 4.7650 -3.2171 4.8192 -3.2640 4.8825 -3.2976 4.9517 -3.3163 5.0233 -3.3191
@@ -348,8 +424,8 @@ p 5.0937 -3.3059 5.1594 -3.2774 5.2171 -3.2350 5.2640 -3.1808 5.2976 -3.1175 5.3
 p 5.3489 -3.0210 5.3528 -3.0136 5.3553 -3.0089
 mark round 0.1000 taper 0.1200 colour 4FBCD4 fill closed
 group 10
-placex ludox(seat9, at9)
-placey ludoy(seat9, at9)
+placex ludox(seat9, walk9)
+placey ludoy(seat9, walk9)
 p 3.3600 -3.0000 3.3568 -2.9720 3.3455 -2.9271 3.3231 -2.8741 3.2886 -2.8196 3.2422 -2.7692 3.1855 -2.7272 3.1206 -2.6967
 p 3.0503 -2.6800 2.9780 -2.6785 2.9072 -2.6925 2.8411 -2.7216 2.7832 -2.7643 2.7363 -2.8188 2.7026 -2.8822 2.6838 -2.9515
 p 2.6810 -3.0231 2.6941 -3.0936 2.7226 -3.1593 2.7650 -3.2171 2.8192 -3.2640 2.8825 -3.2976 2.9517 -3.3163 3.0233 -3.3191
@@ -357,8 +433,8 @@ p 3.0937 -3.3059 3.1594 -3.2774 3.2171 -3.2350 3.2640 -3.1808 3.2976 -3.1175 3.3
 p 3.3489 -3.0210 3.3528 -3.0136 3.3553 -3.0089
 mark round 0.1000 taper 0.1200 colour 4FBCD4 fill closed
 group 11
-placex ludox(seat10, at10)
-placey ludoy(seat10, at10)
+placex ludox(seat10, walk10)
+placey ludoy(seat10, walk10)
 p 5.3600 -5.0000 5.3568 -4.9720 5.3455 -4.9271 5.3231 -4.8741 5.2886 -4.8196 5.2422 -4.7692 5.1855 -4.7272 5.1206 -4.6967
 p 5.0503 -4.6800 4.9780 -4.6785 4.9072 -4.6925 4.8411 -4.7216 4.7832 -4.7643 4.7363 -4.8188 4.7026 -4.8822 4.6838 -4.9515
 p 4.6810 -5.0231 4.6941 -5.0936 4.7226 -5.1593 4.7650 -5.2171 4.8192 -5.2640 4.8825 -5.2976 4.9517 -5.3163 5.0233 -5.3191
@@ -366,8 +442,8 @@ p 5.0937 -5.3059 5.1594 -5.2774 5.2171 -5.2350 5.2640 -5.1808 5.2976 -5.1175 5.3
 p 5.3489 -5.0210 5.3528 -5.0136 5.3553 -5.0089
 mark round 0.1000 taper 0.1200 colour 4FBCD4 fill closed
 group 12
-placex ludox(seat11, at11)
-placey ludoy(seat11, at11)
+placex ludox(seat11, walk11)
+placey ludoy(seat11, walk11)
 p 3.3600 -5.0000 3.3568 -4.9720 3.3455 -4.9271 3.3231 -4.8741 3.2886 -4.8196 3.2422 -4.7692 3.1855 -4.7272 3.1206 -4.6967
 p 3.0503 -4.6800 2.9780 -4.6785 2.9072 -4.6925 2.8411 -4.7216 2.7832 -4.7643 2.7363 -4.8188 2.7026 -4.8822 2.6838 -4.9515
 p 2.6810 -5.0231 2.6941 -5.0936 2.7226 -5.1593 2.7650 -5.2171 2.8192 -5.2640 2.8825 -5.2976 2.9517 -5.3163 3.0233 -5.3191
@@ -375,8 +451,8 @@ p 3.0937 -5.3059 3.1594 -5.2774 3.2171 -5.2350 3.2640 -5.1808 3.2976 -5.1175 3.3
 p 3.3489 -5.0210 3.3528 -5.0136 3.3553 -5.0089
 mark round 0.1000 taper 0.1200 colour E0A44A fill closed
 group 13
-placex ludox(seat12, at12)
-placey ludoy(seat12, at12)
+placex ludox(seat12, walk12)
+placey ludoy(seat12, walk12)
 p -2.6400 -5.0000 -2.6432 -4.9720 -2.6545 -4.9271 -2.6769 -4.8741 -2.7114 -4.8196 -2.7578 -4.7692 -2.8145 -4.7272 -2.8794 -4.6967
 p -2.9497 -4.6800 -3.0220 -4.6785 -3.0928 -4.6925 -3.1589 -4.7216 -3.2168 -4.7643 -3.2637 -4.8188 -3.2974 -4.8822 -3.3162 -4.9515
 p -3.3190 -5.0231 -3.3059 -5.0936 -3.2774 -5.1593 -3.2350 -5.2171 -3.1808 -5.2640 -3.1175 -5.2976 -3.0483 -5.3163 -2.9767 -5.3191
@@ -384,8 +460,8 @@ p -2.9063 -5.3059 -2.8406 -5.2774 -2.7829 -5.2350 -2.7360 -5.1808 -2.7024 -5.117
 p -2.6511 -5.0210 -2.6472 -5.0136 -2.6447 -5.0089
 mark round 0.1000 taper 0.1200 colour E0A44A fill closed
 group 14
-placex ludox(seat13, at13)
-placey ludoy(seat13, at13)
+placex ludox(seat13, walk13)
+placey ludoy(seat13, walk13)
 p -2.6400 -3.0000 -2.6432 -2.9720 -2.6545 -2.9271 -2.6769 -2.8741 -2.7114 -2.8196 -2.7578 -2.7692 -2.8145 -2.7272 -2.8794 -2.6967
 p -2.9497 -2.6800 -3.0220 -2.6785 -3.0928 -2.6925 -3.1589 -2.7216 -3.2168 -2.7643 -3.2637 -2.8188 -3.2974 -2.8822 -3.3162 -2.9515
 p -3.3190 -3.0231 -3.3059 -3.0936 -3.2774 -3.1593 -3.2350 -3.2171 -3.1808 -3.2640 -3.1175 -3.2976 -3.0483 -3.3163 -2.9767 -3.3191
@@ -393,8 +469,8 @@ p -2.9063 -3.3059 -2.8406 -3.2774 -2.7829 -3.2350 -2.7360 -3.1808 -2.7024 -3.117
 p -2.6511 -3.0210 -2.6472 -3.0136 -2.6447 -3.0089
 mark round 0.1000 taper 0.1200 colour E0A44A fill closed
 group 15
-placex ludox(seat14, at14)
-placey ludoy(seat14, at14)
+placex ludox(seat14, walk14)
+placey ludoy(seat14, walk14)
 p -4.6400 -5.0000 -4.6432 -4.9720 -4.6545 -4.9271 -4.6769 -4.8741 -4.7114 -4.8196 -4.7578 -4.7692 -4.8145 -4.7272 -4.8794 -4.6967
 p -4.9497 -4.6800 -5.0220 -4.6785 -5.0928 -4.6925 -5.1589 -4.7216 -5.2168 -4.7643 -5.2637 -4.8188 -5.2974 -4.8822 -5.3162 -4.9515
 p -5.3190 -5.0231 -5.3059 -5.0936 -5.2774 -5.1593 -5.2350 -5.2171 -5.1808 -5.2640 -5.1175 -5.2976 -5.0483 -5.3163 -4.9767 -5.3191
@@ -402,8 +478,8 @@ p -4.9063 -5.3059 -4.8406 -5.2774 -4.7829 -5.2350 -4.7360 -5.1808 -4.7024 -5.117
 p -4.6511 -5.0210 -4.6472 -5.0136 -4.6447 -5.0089
 mark round 0.1000 taper 0.1200 colour E0A44A fill closed
 group 16
-placex ludox(seat15, at15)
-placey ludoy(seat15, at15)
+placex ludox(seat15, walk15)
+placey ludoy(seat15, walk15)
 p -4.6400 -3.0000 -4.6432 -2.9720 -4.6545 -2.9271 -4.6769 -2.8741 -4.7114 -2.8196 -4.7578 -2.7692 -4.8145 -2.7272 -4.8794 -2.6967
 p -4.9497 -2.6800 -5.0220 -2.6785 -5.0928 -2.6925 -5.1589 -2.7216 -5.2168 -2.7643 -5.2637 -2.8188 -5.2974 -2.8822 -5.3162 -2.9515
 p -5.3190 -3.0231 -5.3059 -3.0936 -5.2774 -3.1593 -5.2350 -3.2171 -5.1808 -3.2640 -5.1175 -3.2976 -5.0483 -3.3163 -4.9767 -3.3191

@@ -162,6 +162,9 @@ struct Where {
     hix: f64,
     hiy: f64,
     px: usize,
+    /// Which still half the page already holds. Nought means none.
+    #[serde(default)]
+    have: u64,
 }
 
 impl From<&Where> for Look {
@@ -172,7 +175,10 @@ impl From<&Where> for Look {
 
 async fn scene(State(s): State<Shared>, Query(w): Query<Where>) -> impl IntoResponse {
     let studio = s.lock().expect("the drawing");
-    ([(header::CONTENT_TYPE, "application/json")], easel::wire::scene(&studio.board, (&w).into()))
+    (
+        [(header::CONTENT_TYPE, "application/json")],
+        easel::wire::since(&studio.board, (&w).into(), "", w.have),
+    )
 }
 
 /// Everything the browser can ask the drawing to do.
@@ -219,7 +225,7 @@ async fn act(State(s): State<Shared>, Query(w): Query<Where>, Json(ask): Json<As
     let mut studio = s.lock().expect("the drawing");
     apply(&mut studio, ask);
     let word = std::mem::take(&mut studio.say);
-    ([(header::CONTENT_TYPE, "application/json")], easel::wire::with_word(&studio.board, (&w).into(), &word))
+    ([(header::CONTENT_TYPE, "application/json")], easel::wire::since(&studio.board, (&w).into(), &word, w.have))
 }
 
 /// Do one thing to the drawing.

@@ -251,6 +251,21 @@ This is what lets a rule say *"send home whichever token is on this square"*.
 Without it a rule can only change a number it already knows the name of, and a
 game cannot be written.
 
+### A star
+
+```text
+star(x, y, size)             the usual five-pointed one
+star(x, y, size, 6)          six points
+star(x, y, size, 6, 0.5)     …and a fatter waist
+star(x, y, size, 6, 0.5, t)  …turning
+```
+
+Only the count is usually worth saying, so it is the first thing after the
+size. The waist is `inner/outer` and is the whole character of it: about 0.4 is
+a star, much above 0.6 is a cog, much below 0.25 is a set of needles that
+vanish when small. A star takes the colour of the row, like `param` and
+`circle`.
+
 ### A die
 
 A thrown die is not a random number with a picture on it, and it is not

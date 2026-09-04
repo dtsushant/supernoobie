@@ -173,6 +173,34 @@ pub fn place(seat: usize, step: usize) -> Cx {
     cell(x, y)
 }
 
+/// Where a token is at a **fractional** step — part way from one square to
+/// the next.
+///
+/// A token that jumps from square 10 to square 14 has teleported. Walking it
+/// means asking where it is at 10.3, 10.7, 11.4 — so the step has to be a real
+/// number, and the answer is the straight line between the two squares it is
+/// between.
+///
+/// Straight lines and not a curve round the corners: the squares are a grid,
+/// consecutive ones are a square apart, and over that distance nobody can tell.
+pub fn along(seat: usize, step: f64) -> Cx {
+    if !step.is_finite() {
+        return cell(7, 7);
+    }
+    if step < 0.0 {
+        return waiting(seat, (-step - 1.0).max(0.0) as usize);
+    }
+    let top = FINISH as f64;
+    let step = step.min(top);
+    let (a, part) = (step.floor(), step - step.floor());
+    if part < 1e-9 {
+        return place(seat, a as usize);
+    }
+    let from = place(seat, (a as usize).min(FINISH));
+    let to = place(seat, ((a as usize) + 1).min(FINISH));
+    from + (to - from).scale(part)
+}
+
 /// Where a token waits before it comes out.
 pub fn waiting(seat: usize, token: usize) -> Cx {
     let spots = yard(seat % 4);
@@ -186,6 +214,38 @@ pub fn waiting(seat: usize, token: usize) -> Cx {
 mod tests {
     use super::*;
     use std::collections::HashSet;
+
+    /// ★ **A token can stand between two squares**, which is what walking it
+    /// one tile at a time needs. Whole steps are exactly where they always
+    /// were, so nothing that asked for square 7 gets anything different.
+    #[test]
+    fn a_fractional_step_is_between_two_squares() {
+        for seat in 0..4 {
+            for k in 0..50 {
+                assert_eq!(along(seat, k as f64), place(seat, k), "whole steps are unmoved");
+            }
+            let (a, b) = (place(seat, 10), place(seat, 11));
+            let half = along(seat, 10.5);
+            assert!((half - (a + b).scale(0.5)).abs() < 1e-9, "half way is half way");
+            assert!((half - a).abs() > 1e-6 && (half - b).abs() > 1e-6, "and not on either");
+        }
+    }
+
+    /// A walking token keeps very nearly a steady pace — **except at the four
+    /// corners**, where the path turns diagonally and one step is √2 long
+    /// rather than 1. That is the same four corners that make the track 52
+    /// squares and not 56, and a token crossing one moves 41% faster for that
+    /// step. Nobody sees it; it is written down because a test that demanded
+    /// uniformity here would be wrong about the board.
+    #[test]
+    fn walking_is_steady_but_for_four_corners() {
+        let gaps: Vec<f64> = (0..TRACK - 1).map(|k| (place(0, k + 1) - place(0, k)).abs()).collect();
+        let long = gaps.iter().filter(|g| **g > 1.2).count();
+        assert_eq!(long, 4, "exactly four diagonal steps");
+        for g in &gaps {
+            assert!(*g < std::f64::consts::SQRT_2 + 1e-9, "and none longer than a diagonal: {g}");
+        }
+    }
 
     /// ★ Fifty-two squares, all different, and the loop closes — the last is
     /// next to the first. A track with a repeat in it is one where two tokens

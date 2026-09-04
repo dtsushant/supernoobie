@@ -120,6 +120,19 @@ pub struct Made {
     ///
     /// Drawn after the outlines, so a solid thing covers what it is lying on.
     pub solid: Vec<(Shape, u32)>,
+    /// Which of [`shapes`](Made::shapes) cannot change between frames, and then
+    /// the same for [`solid`](Made::solid).
+    ///
+    /// **A Ludo board is a hundred squares that never move**, re-sampled and
+    /// re-sent thirty-five times a second beside the one die that does. Knowing
+    /// which is which is what lets the still half be sent once.
+    ///
+    /// A row is still when it mentions no name that can change: not `time`,
+    /// not anything the game has written down, and not anything worked out from
+    /// those. Anything with a subscript counts as moving, since `at[k]` cannot
+    /// be resolved without knowing `k`.
+    pub still: Vec<bool>,
+    pub still_solid: Vec<bool>,
     /// Every binding, for the sliders.
     pub vars: Vec<(String, Cx)>,
     /// `(row, message)`. Reported, never fatal.
@@ -202,6 +215,37 @@ impl Script {
         self.play(time, &Tally::new())
     }
 
+    /// The names that can change from one frame to the next.
+    ///
+    /// `time` to begin with, and whatever the game has written down; then
+    /// anything worked out from those, and anything worked out from *those*.
+    /// Walking the rows once in order is enough, because a row can only read
+    /// what is above it.
+    ///
+    /// Everything else is **still**, and a still row draws the same picture
+    /// every frame for ever — which is a hundred squares of Ludo board that
+    /// need not be sent again.
+    pub fn live(&self, tally: &Tally) -> std::collections::HashSet<String> {
+        let mut live: std::collections::HashSet<String> = std::collections::HashSet::new();
+        live.insert("time".into());
+        for k in tally.values.keys() {
+            live.insert(k.clone());
+        }
+        for r in &self.rows {
+            if !r.on {
+                continue;
+            }
+            let Some(name) = r.binds() else { continue };
+            // Only the right of the `=`. A row that reads itself -- `n = n + 1`
+            // -- would otherwise be called live by its own name.
+            let rhs = r.text.split_once('=').map_or("", |(_, b)| b);
+            if !still(rhs, &live) {
+                live.insert(name.to_string());
+            }
+        }
+        live
+    }
+
     /// Run it as a game that has got somewhere.
     pub fn play(&self, time: f64, tally: &Tally) -> Made {
         let program = plotkit::expr::run(&self.source(time, tally));
@@ -219,11 +263,31 @@ impl Script {
             vars: program.vars.clone(),
             shapes: Vec::new(),
             solid: Vec::new(),
+            still: Vec::new(),
+            still_solid: Vec::new(),
         };
 
         let mut colour = PALETTE[0];
         let mut pinned = false;
         let mut next = 0usize;
+
+        // Which rows can change. Worked out once, from the text, because by the
+        // time a `Cmd` exists its numbers have already been worked out and it
+        // can no longer say where they came from.
+        let live = self.live(tally);
+        let mut drawn_still: Vec<bool> = Vec::new();
+        // Only the rows that `plotkit` turns into a `Cmd`, by name, so the two
+        // lists stay in step. The easel-only commands -- `dice`, `star`,
+        // `token` -- are drawn separately and counted separately.
+        let mut cmd_rows = self
+            .rows
+            .iter()
+            .filter(|r| r.on)
+            .filter(|r| {
+                let t = r.text.trim_start();
+                plotkit::expr::COMMANDS.iter().any(|c| *c != "color" && t.starts_with(&format!("{c}(")))
+            })
+            .map(|r| still(&r.text, &live));
 
         for cmd in &program.cmds {
             if let Cmd::Color(c) = cmd {
@@ -240,11 +304,18 @@ impl Script {
             };
             if let Some(shape) = shape_of(cmd, &env) {
                 made.shapes.push((shape, col));
+                // The k-th command row made the k-th shape, so the two lists
+                // walk together. A row that would not parse made nothing and
+                // is not in either.
+                drawn_still.push(cmd_rows.next().unwrap_or(false));
             }
         }
-        let (lines, solid) = self.shown(&env);
+        made.still = drawn_still;
+        let (lines, solid, shown_still, shown_still_solid) = self.shown(&env, &live);
         made.shapes.extend(lines);
+        made.still.extend(shown_still);
         made.solid.extend(solid);
+        made.still_solid.extend(shown_still_solid);
         made
     }
 
@@ -260,14 +331,32 @@ impl Script {
     fn shown(
         &self,
         env: &std::collections::HashMap<String, Cx>,
-    ) -> (Vec<(Shape, u32)>, Vec<(Shape, u32)>) {
+        live: &std::collections::HashSet<String>,
+    ) -> (Vec<(Shape, u32)>, Vec<(Shape, u32)>, Vec<bool>, Vec<bool>) {
         let mut out = Vec::new();
         let mut solid: Vec<(Shape, u32)> = Vec::new();
+        let mut out_still: Vec<bool> = Vec::new();
+        let mut solid_still: Vec<bool> = Vec::new();
+        // What `color(...)` last said. The older commands here each pick their
+        // own ink -- a die is ivory, a ghost is violet -- because they are
+        // pictures of particular things. A star is a shape like any other, so
+        // it takes the colour of the row, the way `param` and `circle` do.
+        let mut ink = PALETTE[0];
         for r in &self.rows {
             if !r.on {
                 continue;
             }
             let t = r.text.trim();
+            if let Some(rest) = t.strip_prefix("color(").and_then(|a| a.strip_suffix(')')) {
+                if let Some(c) = plotkit::expr::parse(rest.trim())
+                    .ok()
+                    .and_then(|e| e.eval(env).ok())
+                    .filter(|z| z.re.is_finite() && z.re >= 0.0)
+                {
+                    ink = (c.re.round() as i64).clamp(0, 0xFF_FF_FF) as u32;
+                }
+                continue;
+            }
             let Some((word, args)) =
                 FACES.iter().chain(OURS.iter()).chain(["digits"].iter()).find_map(|w| {
                     t.strip_prefix(&format!("{w}(")).and_then(|a| a.strip_suffix(')')).map(|a| (*w, a))
@@ -275,6 +364,7 @@ impl Script {
             else {
                 continue;
             };
+            let fixed = still(t, live);
             let mut arg = split_args(args).into_iter();
             let mut number = |fallback: f64| {
                 arg.next()
@@ -344,6 +434,24 @@ impl Script {
                         }
                     }
                 }
+                // A star. `star(x, y, size)` for the usual five-pointed one, and
+                // a fourth argument when it should be something else -- a
+                // six-pointed sparkle, a three-pointed spark, a twelve-pointed
+                // cog. The count is the only thing anybody wants to change, so
+                // it is the only one that has a place in the row.
+                "star" => {
+                    let (x, y) = (number(0.0), number(0.0));
+                    let size = number(0.3).abs().min(20.0);
+                    let points = number(5.0).round().clamp(2.0, 60.0) as usize;
+                    let waist = number(shapes::star::WAIST).clamp(0.05, 0.95);
+                    let turn = number(0.0);
+                    if size > 0.005 {
+                        out.push((
+                            shapes::star::spiked(Cx::new(x, y), size, waist, points, turn),
+                            ink,
+                        ));
+                    }
+                }
                 "digits" => {
                     let value = number(0.0);
                     let (x, y, size) = (number(0.0), number(0.0), number(1.0));
@@ -366,8 +474,14 @@ impl Script {
                     }
                 }
             }
+            // One command may have pushed several shapes -- a die is a body and
+            // its pips, a board is a hundred squares -- and they are all as
+            // still as the row that asked for them. Filling up to the new
+            // length marks however many it turned out to be.
+            out_still.resize(out.len(), fixed);
+            solid_still.resize(solid.len(), fixed);
         }
-        (out, solid)
+        (out, solid, out_still, solid_still)
     }
 
     /// The bindings that are plain real numbers, which are the ones a slider
@@ -453,12 +567,41 @@ fn split_args(args: &str) -> Vec<String> {
     out
 }
 
+/// Does this row draw the same thing every frame?
+///
+/// Crudely: it does if none of the names in it can change. The names are found
+/// by scanning for runs of letters and digits rather than by parsing, because a
+/// command row is not one expression — `param(f, 0, tau)` is three — and this
+/// only has to be right about *whether* a name appears.
+///
+/// Wrong in the safe direction. A row wrongly called moving is redrawn every
+/// frame, which is what used to happen to all of them. A row wrongly called
+/// still would freeze, so anything doubtful — a subscript, which cannot be
+/// resolved without knowing its index — counts as moving.
+pub fn still(text: &str, live: &std::collections::HashSet<String>) -> bool {
+    if text.contains('[') {
+        return false;
+    }
+    let mut here = String::new();
+    for c in text.chars().chain(std::iter::once(' ')) {
+        if c.is_ascii_alphanumeric() || c == '_' {
+            here.push(c);
+        } else {
+            if !here.is_empty() && live.contains(&here) {
+                return false;
+            }
+            here.clear();
+        }
+    }
+    true
+}
+
 /// The faces a script can ask for. Drawn by [`shapes::face`], which
 /// `plotkit::expr` has never heard of.
 pub const FACES: [&str; 2] = ["smiley", "ghost"];
 
 /// The rows this crate reads itself, beyond the faces and `digits`.
-pub const OURS: [&str; 3] = ["ludo", "token", "dice"];
+pub const OURS: [&str; 4] = ["ludo", "token", "dice", "star"];
 
 /// Is this row one this crate handles rather than `plotkit::expr`?
 fn mine(text: &str) -> bool {

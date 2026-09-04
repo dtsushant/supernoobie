@@ -316,13 +316,10 @@ impl Expr {
                         if a.len() != 2 {
                             return Err(format!("'{f}' takes a seat and a step"));
                         }
+                        // The step is NOT rounded: a token part way between two
+                        // squares is how it walks rather than teleports.
                         let seat = a[0].re.round().rem_euclid(4.0) as usize;
-                        let step = a[1].re.round();
-                        let at = if step < 0.0 {
-                            crate::ludo::waiting(seat, (-step - 1.0).max(0.0) as usize)
-                        } else {
-                            crate::ludo::place(seat, (step as usize).min(crate::ludo::FINISH))
-                        };
+                        let at = crate::ludo::along(seat, a[1].re);
                         Cx::new(if f == "ludox" { at.re } else { at.im }, 0.0)
                     }
                     // A die in mid-throw. Five functions rather than one giving

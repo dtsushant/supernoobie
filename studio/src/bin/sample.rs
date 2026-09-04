@@ -467,6 +467,30 @@ fn ludogame() -> Board {
         rows.push(format!("cuts{seat} = 0"));
     }
     add!("");
+    add!("# --- walking, rather than teleporting ---------------------------");
+    add!("# A token that goes from square 10 to square 14 has TELEPORTED. What");
+    add!("# it should do is walk, and walking needs two more numbers: where it");
+    add!("# set off from, and when.");
+    add!("#");
+    add!("# Then where it is drawn is a function of the clock, like everything");
+    add!("# else here -- no stepping, no frame counter, and a move that can be");
+    add!("# scrubbed backwards and looks the same.");
+    add!("pace = 7");
+    for k in 0..tokens {
+        rows.push(format!("from{k} = at{k}"));
+        rows.push(format!("moved{k} = -99"));
+    }
+    add!("");
+    add!("# how far along it has got. `min` is what stops it: it walks at `pace`");
+    add!("# squares a second and simply stops when it arrives, so no rule has to");
+    add!("# notice that it has.");
+    add!("#");
+    add!("# A token sent home does not walk -- `at` goes negative and the min");
+    add!("# takes it at once, which is right: it was carried, not walked.");
+    for k in 0..tokens {
+        rows.push(format!("walk{k} = min(at{k}, from{k} + pace*max(0, time - moved{k}))"));
+    }
+    add!("");
     add!("# where each token counts as standing. the yard and the home column");
     add!("# get numbers no other token can hold, so nobody can be caught there.");
     for k in 0..tokens {
@@ -566,7 +590,7 @@ fn ludogame() -> Board {
     add!("color(0xE3E9EF)");
     for k in 0..tokens {
         rows.push(format!(
-            "param(if(can{k}, 0.52, 0)*exp(i*t) + ludox(seat{k}, at{k}) + i*ludoy(seat{k}, at{k}), 0, tau)"
+            "param(if(can{k}, 0.52, 0)*exp(i*t) + ludox(seat{k}, walk{k}) + i*ludoy(seat{k}, walk{k}), 0, tau)"
         ));
     }
 
@@ -597,6 +621,12 @@ fn ludogame() -> Board {
         deeds.push(format!("was = at{k}"));
         // Where everybody stood, so a capture can be noticed afterwards.
         deeds.push(format!("each j in 0..{tokens} (was[j] = at[j])"));
+        // Where it set off from and when, so it can walk there. Coming out of
+        // the yard it does not walk: it is placed on its start square, and a
+        // token sliding out from the yard would be walking a path that is not
+        // part of the board.
+        deeds.push(format!("from[{k}] = if(ok, if(at{k} < 0, 0, at{k}), from{k})"));
+        deeds.push(format!("moved[{k}] = if(ok, time, moved{k})"));
         deeds.push(format!("at[{k}] = if(ok, if(at{k} < 0, 0, at{k} + die), at{k})"));
         deeds.push(format!(
             "here = if(ok, if(was < 0, mod(13*seat{k}, 52), \
@@ -641,15 +671,21 @@ fn ludogame() -> Board {
     add!("# --- the safe stars ---------------------------------------------");
     add!("# Drawn at no size when the house does not use them, which is how a");
     add!("# thing is hidden here.");
-    add!("color(0x6B7987)");
-    for k in (0..52).step_by(13) {
-        for off in [0usize, 8] {
-            rows.push(format!(
-                "param(if(stars == 1, 0.3, 0)*exp(i*t) + ludox(0, {}) + i*ludoy(0, {}), 0, tau)",
-                k + off,
-                k + off
-            ));
-        }
+    add!("# A star, because that is what a safe square is called. The four");
+    add!("# starts are in each seat's own colour -- they are that seat's square,");
+    add!("# and drawing them all in grey was why they looked misplaced rather");
+    add!("# than looking like starts.");
+    for seat in 0..4 {
+        // The seat's own start square, in its own colour.
+        rows.push(format!("color({})", ["0xE0704A", "0x6FCF97", "0x4FBCD4", "0xE0A44A"][seat]));
+        rows.push(format!(
+            "star(ludox({seat}, 0), ludoy({seat}, 0), if(stars == 1, 0.34, 0), 5)"
+        ));
+        // And the starred square eight on from it, which belongs to nobody.
+        rows.push("color(0x8A97A5)".into());
+        rows.push(format!(
+            "star(ludox({seat}, 8), ludoy({seat}, 8), if(stars == 1, 0.3, 0), 5)"
+        ));
     }
 
     add!("");
@@ -691,7 +727,7 @@ fn ludogame() -> Board {
         // circle drawn on one. Everything here was outlines, and outlines on
         // outlines is why it looked like a diagram.
         m.filled = true;
-        m.place = Some((format!("ludox(seat{k}, at{k})"), format!("ludoy(seat{k}, at{k})")));
+        m.place = Some((format!("ludox(seat{k}, walk{k})"), format!("ludoy(seat{k}, walk{k})")));
         b.selected = vec![b.sheet.len() - 1];
         b.group_alone();
     }

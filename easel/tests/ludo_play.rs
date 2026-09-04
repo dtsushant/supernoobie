@@ -581,3 +581,79 @@ fn the_board_and_the_game_are_different_files() {
     game.load("../samples/ludogame.easel").expect("the game opens");
     assert_eq!(game.sheet.len(), 17, "the game has sixteen tokens and a die");
 }
+
+/// ★ **A token walks; it does not teleport.** Going from square 6 to square 10
+/// it should pass through 7, 8 and 9 — which means being *between* squares at
+/// the moments in between, and that is what a fractional step is for.
+#[test]
+fn a_token_walks_one_square_at_a_time() {
+    let mut b = game();
+    b.clock = 10.0;
+    b.tally.values.insert("at0".into(), 6.0);
+    b.tally.values.insert("turn".into(), 0.0);
+    b.tally.values.insert("rolled".into(), 1.0);
+    b.tally.values.insert("die".into(), 4.0);
+    b.tally.values.insert("settled".into(), 1.0);
+    b.play_tap(1);
+    assert_eq!(v(&b, "at0"), 10.0, "it is going to square ten");
+
+    let where_drawn = |b: &Board| {
+        let env = b.sheet.script.env(b.clock, &b.tally);
+        b.sheet.marks[0].pose_in(b.clock, &env).apply(plotkit::Cx::ZERO)
+    };
+    let start = where_drawn(&b);
+
+    // Part way through, it is neither where it was nor where it is going.
+    b.clock = 10.0 + 0.2;
+    let part = v(&b, "walk0");
+    assert!(part > 6.0 && part < 10.0, "part way along, not at either end: {part}");
+    assert!((part - part.round()).abs() > 1e-6, "and between two squares, not on one");
+    assert!((where_drawn(&b) - start).abs() > 0.3, "so it has visibly set off");
+
+    // It goes forwards, never back.
+    let mut last = 6.0;
+    for k in 0..20 {
+        b.clock = 10.0 + k as f64 * 0.04;
+        let now = v(&b, "walk0");
+        assert!(now >= last - 1e-9, "it went backwards at {}: {last} then {now}", b.clock);
+        last = now;
+    }
+
+    // And it arrives, and stays.
+    b.clock = 10.0 + 5.0;
+    assert_eq!(v(&b, "walk0"), 10.0, "arrived");
+    b.clock = 10.0 + 60.0;
+    assert_eq!(v(&b, "walk0"), 10.0, "and stopped there");
+}
+
+/// ★ A token sent home does **not** walk there. It was carried, not walked,
+/// and sliding it across the board would be walking a path that is not on it.
+#[test]
+fn a_captured_token_does_not_walk_home() {
+    let mut b = game();
+    b.clock = 10.0;
+    b.tally.values.insert("turn".into(), 0.0);
+    b.tally.values.insert("rolled".into(), 1.0);
+    b.tally.values.insert("die".into(), 1.0);
+    b.tally.values.insert("settled".into(), 1.0);
+    b.tally.values.insert("at0".into(), 8.0);
+    b.tally.values.insert("at4".into(), 48.0);
+    b.play_tap(1);
+    assert!(v(&b, "at4") < 0.0, "it was cut");
+    assert_eq!(v(&b, "walk4"), v(&b, "at4"), "and is in the yard at once");
+}
+
+/// ★ Coming out of the yard is a placing, not a walk — there is no path from
+/// the yard to the start square to walk along.
+#[test]
+fn coming_out_of_the_yard_is_not_a_walk() {
+    let mut b = game();
+    b.clock = 10.0;
+    b.tally.values.insert("turn".into(), 0.0);
+    b.tally.values.insert("rolled".into(), 1.0);
+    b.tally.values.insert("die".into(), 6.0);
+    b.tally.values.insert("settled".into(), 1.0);
+    b.play_tap(1);
+    assert_eq!(v(&b, "at0"), 0.0, "out on its start square");
+    assert_eq!(v(&b, "walk0"), 0.0, "and drawn there straight away");
+}
