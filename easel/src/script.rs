@@ -489,6 +489,35 @@ impl Script {
     ///
     /// `time` is left out: it has a clock of its own, and a slider that fought
     /// the clock would be maddening.
+    /// The house rules a drawing declares, in the order they are written.
+    ///
+    /// A row ending `# rule: <name>` is one:
+    ///
+    /// ```text
+    ///     opens = 6        # rule: what brings a token out
+    ///     again6 = 1       # rule: a six earns another turn
+    /// ```
+    ///
+    /// **Nothing here knows the word `ludo`.** A house rule is already just a
+    /// number in a row; all this adds is the row saying *"and I am one of the
+    /// ones worth asking about before we start"*, together with words a person
+    /// can read. Any game gets a setup screen by writing the comment.
+    pub fn house(&self, at: f64) -> Vec<(usize, String, String, f64)> {
+        let dials = self.dials(at);
+        self.rows
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.on)
+            .filter_map(|(k, r)| {
+                let name = r.binds()?;
+                let (_, after) = r.text.split_once('#')?;
+                let label = after.trim().strip_prefix("rule:")?.trim();
+                let value = dials.iter().find(|(n, _)| n == name).map(|(_, v)| *v)?;
+                (!label.is_empty()).then(|| (k, name.to_string(), label.to_string(), value))
+            })
+            .collect()
+    }
+
     pub fn dials(&self, at: f64) -> Vec<(String, f64)> {
         self.run(at)
             .vars
@@ -531,7 +560,12 @@ impl Script {
     pub fn set_dial(&mut self, name: &str, value: f64) -> bool {
         for r in self.rows.iter_mut() {
             if r.binds() == Some(name) {
-                r.text = format!("{name} = {value:.4}");
+                // **The comment survives.** A house rule declares itself with
+                // a trailing `# rule: ...`, and rewriting the row without it
+                // meant that setting a rule quietly deleted it from the setup
+                // screen -- the one action guaranteed to be taken on it.
+                let note = r.text.split_once('#').map(|(_, c)| format!("  #{c}")).unwrap_or_default();
+                r.text = format!("{name} = {value:.4}{note}");
                 return true;
             }
         }

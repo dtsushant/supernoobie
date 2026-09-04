@@ -141,6 +141,21 @@ pub fn since(board: &Board, look: Look, word: &str, have: u64) -> String {
 
     let _ = write!(out, ",\"clock\":{:.3},\"playing\":{}", board.clock, board.playing);
     let _ = write!(out, ",\"game\":{},\"watching\":{}", board.playing_game, board.watching);
+    // The house rules this drawing declares, for the setup screen. Sent every
+    // frame because they are a handful of numbers, and because a page that had
+    // to ask for them separately could show a stale one.
+    out.push_str(",\"rules\":[");
+    for (n, (id, name, label, value)) in board.sheet.script.house(board.clock).into_iter().enumerate() {
+        if n > 0 {
+            out.push(',');
+        }
+        let _ = write!(out, "{{\"id\":{id},\"name\":");
+        text(&mut out, &name);
+        out.push_str(",\"label\":");
+        text(&mut out, &label);
+        let _ = write!(out, ",\"value\":{value}}}");
+    }
+    out.push(']');
     out.push_str(",\"say\":");
     text(&mut out, word);
     out.push_str(",\"tree\":");

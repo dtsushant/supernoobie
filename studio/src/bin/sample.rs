@@ -436,20 +436,18 @@ fn ludogame() -> Board {
     add!("# Set these before you start. Each is a plain number, so each gets a");
     add!("# slider -- a house rule is a dial, and two tables differ by a file.");
     add!("#");
-    add!("# what brings a token out of the yard");
-    add!("opens = 6");
-    add!("# ...and whether a one does as well");
-    add!("alsoone = 0");
-    add!("# must a seat have cut somebody before it may go home?");
-    add!("mustcut = 0");
-    add!("# what earns another turn: a six, a capture, getting one home");
-    add!("again6 = 1");
-    add!("againcut = 0");
-    add!("againhome = 0");
-    add!("# may you land on a square where two of one seat already stand?");
-    add!("blockade = 1");
-    add!("# show the eight safe squares");
-    add!("stars = 1");
+    add!("# The `# rule:` at the end of a line is what puts it on the setup");
+    add!("# screen, with that text as its name. Any game can do it; nothing here");
+    add!("# knows the word `ludo`.");
+    add!("opens = 6                # rule: what brings a token out");
+    add!("alsoone = 0              # rule: a one brings one out as well");
+    add!("mustcut = 0              # rule: no way home until you have cut somebody");
+    add!("mercy = 1                # rule: ...but your farthest token may go home anyway");
+    add!("again6 = 1               # rule: a six earns another turn");
+    add!("againcut = 0             # rule: a capture earns another turn");
+    add!("againhome = 0            # rule: getting one home earns another turn");
+    add!("blockade = 1             # rule: two together block the square");
+    add!("stars = 1                # rule: show the safe stars");
     add!("");
     add!("# --- the state -------------------------------------------------");
     add!("seed = 137");
@@ -489,6 +487,19 @@ fn ludogame() -> Board {
     add!("# takes it at once, which is right: it was carried, not walked.");
     for k in 0..tokens {
         rows.push(format!("walk{k} = min(at{k}, from{k} + pace*max(0, time - moved{k}))"));
+    }
+
+    add!("");
+    add!("# --- the mercy rule ---------------------------------------------");
+    add!("# `no way home until you have cut somebody` can leave a seat that has");
+    add!("# cut nobody unable to finish at all, which is not a rule, it is a");
+    add!("# deadlock. So its FARTHEST token is let home anyway -- one of them,");
+    add!("# the one that has earned it.");
+    for seat in 0..4 {
+        let mine: Vec<String> =
+            (0..tokens).filter(|k| seat_of(*k) == seat).map(|k| format!("at{k}")).collect();
+        let far = mine.iter().skip(1).fold(mine[0].clone(), |acc, t| format!("max({acc}, {t})"));
+        rows.push(format!("far{seat} = {far}"));
     }
     add!("");
     add!("# where each token counts as standing. the yard and the home column");
@@ -573,7 +584,8 @@ fn ludogame() -> Board {
             "can{k} = and(and(and(seat{k} == turn, rolled == 1), settled), \
              if(at{k} < 0, or(die == opens, and(alsoone == 1, die == 1)), \
              and(and({lands} <= 57, not(onto{k})), \
-             or(or(mustcut == 0, cuts[seat{k}] > 0), {lands} <= 50))))"
+             or(or(or(mustcut == 0, cuts[seat{k}] > 0), {lands} <= 50), \
+             and(mercy == 1, at{k} >= far[seat{k}])))))"
         ));
     }
     rows.push(format!(
@@ -646,7 +658,8 @@ fn ludogame() -> Board {
         // index rather than written down sixteen times.
         deeds.push(format!(
             "each j in 0..{tokens} (at[j] = if(and(and(and(seat[j] != seat{k}, sq[j] == here), \
-             and(here >= 0, here < 52)), not(or(mod(here, 13) == 0, mod(here, 13) == 8))), \
+             and(here >= 0, here < 52)), not(or(or(mod(here, 13) == 0, mod(here, 13) == 6), \
+             mod(here, 13) == 9))), \
              0 - 1 - mod(j, 4), at[j]))"
         ));
         // Did this move cut anybody? Counted, because a house rule may ask for
@@ -675,17 +688,23 @@ fn ludogame() -> Board {
     add!("# starts are in each seat's own colour -- they are that seat's square,");
     add!("# and drawing them all in grey was why they looked misplaced rather");
     add!("# than looking like starts.");
+    add!("#");
+    add!("# The other two a seat has sit FIVE and TWO squares before its home");
+    add!("# entrance -- steps 45 and 48 of the 51 it walks. Which means every");
+    add!("# one of the eight is at `mod(square, 13) == 6` or `== 9`, and the");
+    add!("# four starts at `== 0`. Three numbers instead of twelve to mistype.");
     for seat in 0..4 {
         // The seat's own start square, in its own colour.
         rows.push(format!("color({})", ["0xE0704A", "0x6FCF97", "0x4FBCD4", "0xE0A44A"][seat]));
         rows.push(format!(
             "star(ludox({seat}, 0), ludoy({seat}, 0), if(stars == 1, 0.34, 0), 5)"
         ));
-        // And the starred square eight on from it, which belongs to nobody.
         rows.push("color(0x8A97A5)".into());
-        rows.push(format!(
-            "star(ludox({seat}, 8), ludoy({seat}, 8), if(stars == 1, 0.3, 0), 5)"
-        ));
+        for step in [45, 48] {
+            rows.push(format!(
+                "star(ludox({seat}, {step}), ludoy({seat}, {step}), if(stars == 1, 0.3, 0), 5)"
+            ));
+        }
     }
 
     add!("");

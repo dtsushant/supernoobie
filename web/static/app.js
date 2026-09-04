@@ -143,6 +143,11 @@ function keep() {
   }
 }
 
+// Whether the game has been started. The setup screen is shown until it has,
+// and never again -- house rules are settled before the first throw, not
+// half way through somebody's turn.
+let started = false;
+
 function paint() {
   const r = size();
   ctx.clearRect(0, 0, r.width, r.height);
@@ -219,6 +224,8 @@ function show() {
     }
   }
   document.getElementById('play').classList.toggle('on', scene.playing);
+  setup();
+  document.getElementById('setup').hidden = started || !(scene.rules || []).length;
 }
 
 function groupLine(g) {
@@ -394,6 +401,60 @@ document.getElementById('ink').oninput = (e) => ask({ do: 'Paint', colour: e.tar
 document.getElementById('add-row').onclick = () => ask({ do: 'AddRow' });
 document.getElementById('add-shape').onclick = () => ask({ do: 'AddShape' });
 document.getElementById('play').onclick = () => ask({ do: 'Play', on: !scene.playing });
+
+// ---- the setup screen ----------------------------------------------------
+
+// Built from `rules` on the wire. Nothing here knows what Ludo is: a row that
+// ends `# rule: what brings a token out` is a house rule, and any game gets a
+// setup screen by writing one.
+//
+// Nought-or-one is a tick box and anything else a number, which is the only
+// distinction worth making -- and it is made from the VALUE, so a rule that is
+// a count reads as a count without having to say so.
+let shownRules = '';
+function setup() {
+  const rules = scene.rules || [];
+  const key = JSON.stringify(rules.map((r) => [r.name, r.label]));
+  if (key === shownRules) {
+    // Only rebuild when the rules themselves change. Rebuilding every frame
+    // would take the focus out of a box the moment anybody typed in it.
+    for (const r of rules) {
+      const el = document.getElementById(`rule-${r.name}`);
+      if (el && document.activeElement !== el) {
+        if (el.type === 'checkbox') el.checked = r.value > 0.5;
+        else el.value = r.value;
+      }
+    }
+    return;
+  }
+  shownRules = key;
+  const box = document.getElementById('rules');
+  box.innerHTML = '';
+  for (const r of rules) {
+    const line = document.createElement('label');
+    const words = document.createElement('span');
+    words.textContent = r.label;
+    const yesno = r.value === 0 || r.value === 1;
+    const input = document.createElement('input');
+    input.id = `rule-${r.name}`;
+    input.type = yesno ? 'checkbox' : 'number';
+    if (yesno) input.checked = r.value > 0.5;
+    else input.value = r.value;
+    input.oninput = () => {
+      const v = yesno ? (input.checked ? 1 : 0) : Number(input.value);
+      if (Number.isFinite(v)) ask({ do: 'Dial', id: r.id, value: v });
+    };
+    line.append(words, input);
+    box.append(line);
+  }
+}
+
+document.getElementById('begin').onclick = async () => {
+  document.getElementById('setup').hidden = true;
+  started = true;
+  setFull(true);
+  await ask({ do: 'Play', on: true });
+};
 // Putting the tools away and picking the pen up are the same act: a drawing
 // with no tools on screen invites a hand, and a hand that leaves a line
 // through it is the first thing anybody does.
@@ -444,8 +505,15 @@ document.getElementById('shown-file').textContent = file || 'drawing.easel';
 (async () => {
   if (file) await ask({ do: 'OpenFile', name: file });
   else await refresh();
+  // A drawing with house rules asks about them first; one without just plays.
   if (wanted.get('play')) {
-    setFull(true);
-    await ask({ do: 'Play', on: true });
+    if ((scene.rules || []).length) {
+      setup();
+      document.getElementById('setup').hidden = false;
+    } else {
+      started = true;
+      setFull(true);
+      await ask({ do: 'Play', on: true });
+    }
   }
 })();

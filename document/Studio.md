@@ -251,6 +251,27 @@ This is what lets a rule say *"send home whichever token is on this square"*.
 Without it a rule can only change a number it already knows the name of, and a
 game cannot be written.
 
+### House rules a drawing declares
+
+A row ending `# rule: <words>` is a **house rule** — a number the players settle
+before they start:
+
+```text
+opens = 6      # rule: what brings a token out
+again6 = 1     # rule: a six earns another turn
+mustcut = 0    # rule: no way home until you have cut somebody
+```
+
+Nothing in the studio knows what any particular game is. A house rule was
+already just a number in a row; the comment only adds *"and I am one of the ones
+worth asking about before we start"*, together with words a person can read. Any
+game gets a setup screen by writing it.
+
+A rule that is 0 or 1 is offered as a tick box and anything else as a number,
+which is the only distinction a setup screen needs. Setting one rewrites the row
+and **keeps the comment** — otherwise setting a rule would delete it from the
+screen, which is the one thing guaranteed to happen to it.
+
 ### A star
 
 ```text

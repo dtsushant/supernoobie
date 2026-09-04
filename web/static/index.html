@@ -79,6 +79,18 @@
     </div>
 
     <canvas id="paper"></canvas>
+
+    <!-- Before the game starts: the house rules the drawing declares for
+         itself. Built from `rules` on the wire, so nothing here knows what
+         Ludo is -- any game gets this by writing `# rule: ...` on a row. -->
+    <div id="setup" hidden>
+      <div class="sheet">
+        <h2>house rules</h2>
+        <p>set these before you start &mdash; two tables differ by a file</p>
+        <div id="rules"></div>
+        <button id="begin">start the game</button>
+      </div>
+    </div>
     <div id="hint">drag to draw &middot; tap to choose &middot; shift-drag or middle-drag moves the paper &middot; wheel zooms</div>
   </main>
 </div>

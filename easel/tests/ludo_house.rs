@@ -56,6 +56,9 @@ fn a_table_can_open_on_any_number() {
 fn a_table_can_ask_for_a_cut_before_home() {
     let mut b = game();
     b.tally.values.insert("mustcut".into(), 1.0);
+    // Mercy off, or the farthest token is let home anyway -- which is the
+    // point of the mercy rule and would hide what this test is asking.
+    b.tally.values.insert("mercy".into(), 0.0);
     b.tally.values.insert("at0".into(), 49.0);
     ready(&mut b, 4.0);
     b.play_tap(1);
@@ -82,8 +85,10 @@ fn without_that_rule_the_column_is_always_open() {
 fn a_capture_is_counted() {
     let mut b = game();
     assert_eq!(v(&b, "cuts0"), 0.0);
-    b.tally.values.insert("at0".into(), 8.0);
-    b.tally.values.insert("at4".into(), 48.0); // seat 1, square 9
+    // Square 10, which is not safe: the eight stars are at mod 13 of 6 and 9,
+    // and the four starts at 0.
+    b.tally.values.insert("at0".into(), 9.0);
+    b.tally.values.insert("at4".into(), 49.0); // seat 1, square 10
     ready(&mut b, 1.0);
     b.play_tap(1);
     assert!(v(&b, "at4") < 0.0, "it cut");
@@ -98,8 +103,8 @@ fn a_table_can_give_another_turn_for_a_capture() {
     let set = |again: f64| {
         let mut b = game();
         b.tally.values.insert("againcut".into(), again);
-        b.tally.values.insert("at0".into(), 8.0);
-        b.tally.values.insert("at4".into(), 48.0);
+        b.tally.values.insert("at0".into(), 9.0);
+        b.tally.values.insert("at4".into(), 49.0);
         ready(&mut b, 1.0);
         b.play_tap(1);
         v(&b, "turn")
