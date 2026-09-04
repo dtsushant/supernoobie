@@ -270,3 +270,19 @@ a.asbutton:hover { background: var(--lit); color: var(--ink); }
   cursor: pointer;
 }
 #begin:hover { background: #6fd0e4; }
+
+/* The microphone. On is a colour rather than a shape, so it reads at a glance
+   from across the room -- which is where the other three people are. */
+#mic.on {
+  background: #6fcf97;
+  color: #08121a;
+}
+/* Kept in the full-screen game view: the whole point is talking WHILE
+   playing, so the one control that must survive is this one. */
+#app.full #mic, .to-play #mic {
+  display: inline-block;
+  position: absolute;
+  top: 0.7rem;
+  right: 0.7rem;
+  z-index: 30;
+}

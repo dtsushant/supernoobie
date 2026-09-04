@@ -3,7 +3,27 @@
 //! ```text
 //!     cargo run -p web --release
 //!     cargo run -p web --release -- samples/adding.easel
+//!     cargo run -p web --release -- --open        and let the network in
 //!     then open http://127.0.0.1:8088
+//! ```
+//!
+//! ## Letting another machine in
+//!
+//! `--open` binds every interface instead of loopback. Off by default because
+//! this server opens files by name, and a thing that reads files should not
+//! appear on a network because somebody forgot that it could.
+//!
+//! **The game works over plain `http` on a network; the talking does not.** A
+//! browser will not hand a page a microphone unless the page is a *secure
+//! context* — `https`, or `localhost` — and on `http://192.168.x.x` the
+//! microphone API is not blocked, it is **absent**, so the failure is a
+//! `TypeError` about `undefined` rather than a refusal anybody could act on.
+//!
+//! The cheapest way round it needs no certificate at all: forward the port from
+//! the other machine, so *its* browser is talking to `localhost`.
+//!
+//! ```text
+//!     ssh -N -L 8088:localhost:8088 you@this-machine
 //! ```
 //!
 //! ## Why a server and not WebAssembly
@@ -58,10 +78,18 @@ use easel::{Action, Board, Tool};
 use plotkit::Cx;
 use serde::Deserialize;
 
+mod talk;
+
 type Shared = Arc<Mutex<Studio>>;
 
 /// The drawing, and the one thing about it the browser cannot hold.
 struct Studio {
+    /// Who is in the room and what post is waiting for them. Only signalling —
+    /// no voice passes through this server. See [`talk`].
+    room: talk::Room,
+    /// When the server started, so a peer's "last heard from" is a number
+    /// rather than a clock reading.
+    began: std::time::Instant,
     board: Board,
     file: String,
     say: String,
@@ -69,7 +97,15 @@ struct Studio {
 
 #[tokio::main]
 async fn main() {
-    let file = std::env::args().nth(1).unwrap_or_else(|| "drawing.easel".to_string());
+    // `--open` puts the server on every interface so another machine on the
+    // same network can reach it. Off by default, and deliberately: this server
+    // opens files by name, and a thing that reads files should not appear on a
+    // network because somebody forgot it could.
+    let open = std::env::args().any(|a| a == "--open");
+    let file = std::env::args()
+        .skip(1)
+        .find(|a| !a.starts_with("--"))
+        .unwrap_or_else(|| "drawing.easel".to_string());
     let mut board = Board::new();
     let mut say = String::new();
     if std::path::Path::new(&file).exists() {
@@ -81,7 +117,7 @@ async fn main() {
         println!("{say}");
     }
 
-    let shared: Shared = Arc::new(Mutex::new(Studio { board, file, say }));
+    let shared: Shared = Arc::new(Mutex::new(Studio { board, file, say, room: talk::Room::new(), began: std::time::Instant::now() }));
     let app = Router::new()
         .route("/", get(home))
         .route("/studio", get(page))
@@ -90,11 +126,35 @@ async fn main() {
         .route("/app.css", get(css))
         .route("/scene", get(scene))
         .route("/do", post(act))
+        .route("/talk", post(chat))
         .with_state(shared);
 
-    let at = SocketAddr::from(([127, 0, 0, 1], 8088));
+    let at = SocketAddr::from((if open { [0, 0, 0, 0] } else { [127, 0, 0, 1] }, 8088));
     let listener = tokio::net::TcpListener::bind(at).await.expect("could not take the port");
-    println!("http://{at}");
+    println!("http://127.0.0.1:8088");
+    if open {
+        println!("open to the network on port 8088 -- find this machine's address with `ip addr` or `ipconfig`");
+        println!();
+        // The one text, from the one place that is tested for it.
+        if let Some(why) = talk::Room::advice(false, "0.0.0.0") {
+            println!("  NOTE ON VOICE: {why}");
+        }
+        println!("  It is not blocked, it is ABSENT -- the page fails with a TypeError.");
+        println!("  The game itself works over http perfectly well; only the talking does not.");
+        println!();
+        println!("  Three ways round it, cheapest first:");
+        println!("   1. From the other machine, forward the port so its browser sees");
+        println!("      localhost -- which IS a secure context, with no certificate:");
+        println!("        ssh -N -L 8088:localhost:8088 you@this-machine");
+        println!("      then open http://localhost:8088 there.");
+        println!("   2. Tell that browser to trust this origin. In Chrome, at");
+        println!("      chrome://flags/#unsafely-treat-insecure-origin-as-secure,");
+        println!("      add http://<this machine>:8088 and restart it.");
+        println!("   3. Put it behind https properly -- a reverse proxy or a tunnel.");
+        println!();
+    } else {
+        println!("(only this machine -- pass --open to let others on the network in)");
+    }
     axum::serve(listener, app).await.expect("the server stopped");
 }
 
@@ -226,6 +286,75 @@ async fn act(State(s): State<Shared>, Query(w): Query<Where>, Json(ask): Json<As
     apply(&mut studio, ask);
     let word = std::mem::take(&mut studio.say);
     ([(header::CONTENT_TYPE, "application/json")], easel::wire::since(&studio.board, (&w).into(), &word, w.have))
+}
+
+/// What a page sends to the post office, and gets back.
+///
+/// One call does both halves: it says the peer is still here, hands over
+/// anything it wants delivered, and collects whatever is waiting. A peer that
+/// is collecting is by that fact still here, so there is nothing a client can
+/// forget to do.
+#[derive(serde::Deserialize)]
+struct Chat {
+    /// Who is calling.
+    me: String,
+    /// Notes to leave for other people, if any.
+    #[serde(default)]
+    post: Vec<Outbound>,
+}
+
+#[derive(serde::Deserialize)]
+struct Outbound {
+    to: String,
+    kind: String,
+    body: String,
+}
+
+/// **Signalling only.** No voice passes through this server -- see [`talk`].
+async fn chat(State(s): State<Shared>, Json(chat): Json<Chat>) -> impl IntoResponse {
+    let mut studio = s.lock().expect("the drawing");
+    let now = studio.began.elapsed().as_secs_f64();
+    for out in chat.post {
+        let note = talk::Note { from: chat.me.clone(), kind: out.kind, body: out.body };
+        studio.room.send(&out.to, note);
+    }
+    let mine = studio.room.call(&chat.me, now);
+    let here = studio.room.here();
+
+    // Who this peer should ring. Worked out HERE, with the tested rule, rather
+    // than in the page: both sides deciding independently is how a rule ends up
+    // in two places and disagrees with itself.
+    let ring: Vec<&String> =
+        here.iter().filter(|w| **w != chat.me && talk::Room::calls(&chat.me, w)).collect();
+
+    let mut body = String::from("{\"here\":[");
+    for (k, who) in here.iter().enumerate() {
+        if k > 0 {
+            body.push(',');
+        }
+        body.push_str(&serde_json::to_string(who).unwrap_or_else(|_| "\"\"".into()));
+    }
+    body.push_str("],\"ring\":[");
+    for (k, who) in ring.iter().enumerate() {
+        if k > 0 {
+            body.push(',');
+        }
+        body.push_str(&serde_json::to_string(who).unwrap_or_else(|_| "\"\"".into()));
+    }
+    body.push_str("],\"post\":[");
+    for (k, n) in mine.iter().enumerate() {
+        if k > 0 {
+            body.push(',');
+        }
+        body.push_str(&format!(
+            "{{\"from\":{},\"kind\":{},\"body\":{}}}",
+            serde_json::to_string(&n.from).unwrap_or_default(),
+            serde_json::to_string(&n.kind).unwrap_or_default(),
+            serde_json::to_string(&n.body).unwrap_or_default()
+        ));
+    }
+    body.push_str("]}");
+    ([(header::CONTENT_TYPE, "application/json")], body)
 }
 
 /// Do one thing to the drawing.
@@ -439,7 +568,7 @@ mod tests {
     fn a_game() -> Studio {
         let mut board = Board::new();
         board.load("../samples/adding.easel").expect("the game opens");
-        Studio { board, file: String::new(), say: String::new() }
+        Studio { board, file: String::new(), say: String::new(), room: talk::Room::new(), began: std::time::Instant::now() }
     }
 
     fn score(st: &Studio) -> f64 {
@@ -467,7 +596,7 @@ mod tests {
     fn ludo() -> Studio {
         let mut board = Board::new();
         board.load("../samples/ludogame.easel").expect("the game opens");
-        Studio { board, file: String::new(), say: String::new() }
+        Studio { board, file: String::new(), say: String::new(), room: talk::Room::new(), began: std::time::Instant::now() }
     }
 
     /// Where the die is lying. The board throws it across the whole square, so
@@ -574,6 +703,27 @@ mod tests {
         assert!(var(&st, "at0") < 0.0, "and the token did not move");
     }
 
+    /// ★ **The post office, over the wire.** Four peers, six links, and every
+    /// pair with exactly one caller — worked out on this side so the rule is
+    /// not written twice.
+    #[test]
+    fn the_room_tells_each_peer_who_to_ring() {
+        let mut room = talk::Room::new();
+        for who in ["ann", "bob", "cat", "dan"] {
+            room.call(who, 0.0);
+        }
+        let here = room.here();
+        let mut rings = 0;
+        for me in &here {
+            for other in &here {
+                if me != other && talk::Room::calls(me, other) {
+                    rings += 1;
+                }
+            }
+        }
+        assert_eq!(rings, 6, "four people, six connections, nobody ringing twice");
+    }
+
     /// ★ A server that opens whatever path it is handed will one day be
     /// asked for something it should not have. That this one is meant for one
     /// person on one machine is not a reason to leave the door open -- it is a
@@ -596,7 +746,7 @@ mod tests {
     /// mistake: that is how you ask for one.
     #[test]
     fn a_name_that_is_not_there_yet_is_a_blank_page() {
-        let mut st = Studio { board: Board::new(), file: String::new(), say: String::new() };
+        let mut st = Studio { board: Board::new(), file: String::new(), say: String::new(), room: talk::Room::new(), began: std::time::Instant::now() };
         apply(&mut st, Ask::OpenFile { name: "nothing-here-yet.easel".into() });
         assert!(st.board.sheet.is_empty());
         assert_eq!(st.file, "nothing-here-yet.easel", "and saving will go there");
@@ -614,7 +764,7 @@ mod tests {
         first.sheet.script.add("circle(0, 3)");
         first.save("web-test-open.easel").expect("wrote one");
 
-        let mut st = Studio { board: Board::new(), file: String::new(), say: String::new() };
+        let mut st = Studio { board: Board::new(), file: String::new(), say: String::new(), room: talk::Room::new(), began: std::time::Instant::now() };
         st.board.sheet.script.add("ngon(0, 1, 5)");
         apply(&mut st, Ask::OpenFile { name: "web-test-open.easel".into() });
 

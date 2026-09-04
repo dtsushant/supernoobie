@@ -508,6 +508,202 @@ function noises() {
   }
 }
 
+// ---- talking to each other -----------------------------------------------
+//
+// Four people in a mesh: everybody connects to everybody, which is 4*3/2 = 6
+// links. That is the right shape for four and the wrong shape for forty --
+// each person sends their voice n-1 times, so a mesh grows as the square and a
+// server-side mixer eventually wins. At four it does not.
+//
+// NO VOICE GOES THROUGH THE SERVER. It carries the half-dozen notes two
+// browsers must swap to find each other -- see `web/src/talk.rs` -- and then
+// gets out of the way.
+//
+// The one thing that will stop this working: a browser will not give a page a
+// microphone unless the page is a SECURE CONTEXT. https, or localhost. On a
+// plain http address over a network `navigator.mediaDevices` is not blocked,
+// it is ABSENT, and the failure is a TypeError about undefined rather than
+// anything a person could act on. Hence `canTalk()`.
+
+// A name for this browser, for as long as the tab is open. Kept in
+// sessionStorage so a reload is the same peer rather than a new one appearing
+// beside the ghost of the old.
+let me = sessionStorage.getItem('peer');
+if (!me) {
+  me = Math.random().toString(36).slice(2, 10);
+  sessionStorage.setItem('peer', me);
+}
+
+let mine = null; // my microphone
+const links = new Map(); // peer id -> RTCPeerConnection
+let talking = false;
+
+// Only the public STUN servers. STUN is cheap -- it answers one question,
+// "what address did this packet come from" -- so running one costs nothing and
+// several people give theirs away. TURN, which forwards actual audio, is the
+// part nobody gives away, and without one two people behind strict routers
+// cannot reach each other at all.
+const ICE = { iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }] };
+
+function canTalk() {
+  return !!(window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+}
+
+function whyNot() {
+  if (!window.isSecureContext) {
+    return 'a browser will not give a page a microphone over plain http \u2014 open this on localhost, or put it behind https';
+  }
+  if (!navigator.mediaDevices) return 'this browser has no microphone support';
+  return '';
+}
+
+// Somewhere to put the far end. An <audio> element per peer, off screen: the
+// browser mixes them, and the operating system has done the echo cancellation
+// before we ever see the samples.
+function speaker(who) {
+  let el = document.getElementById(`ear-${who}`);
+  if (!el) {
+    el = document.createElement('audio');
+    el.id = `ear-${who}`;
+    el.autoplay = true;
+    document.body.append(el);
+  }
+  return el;
+}
+
+function link(who) {
+  if (links.has(who)) return links.get(who);
+  const pc = new RTCPeerConnection(ICE);
+  links.set(who, pc);
+
+  // Every address this machine might be reachable at, as they are discovered.
+  // They arrive over a second or two, which is why they are sent as they come
+  // rather than waited for -- "trickle ICE", and it is most of the difference
+  // between a connection that takes half a second and one that takes five.
+  pc.onicecandidate = (e) => {
+    if (e.candidate) outbox.push({ to: who, kind: 'ice', body: JSON.stringify(e.candidate) });
+  };
+  pc.ontrack = (e) => {
+    speaker(who).srcObject = e.streams[0];
+  };
+  pc.onconnectionstatechange = () => {
+    if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+      drop(who);
+    }
+  };
+  if (mine) for (const t of mine.getTracks()) pc.addTrack(t, mine);
+  return pc;
+}
+
+function drop(who) {
+  const pc = links.get(who);
+  if (pc) pc.close();
+  links.delete(who);
+  const el = document.getElementById(`ear-${who}`);
+  if (el) el.remove();
+}
+
+// Notes waiting to go out, sent with the next call.
+let outbox = [];
+
+// Who offers is decided by the SERVER, in `talk::Room::calls`, and arrives as
+// `ring`. Both offering at once is the "glare" condition -- each answers the
+// other and two connections form where one was wanted -- and a rule that
+// mattered that much had no business being written twice.
+
+async function gotNote(note) {
+  const pc = link(note.from);
+  const body = JSON.parse(note.body);
+  if (note.kind === 'offer') {
+    await pc.setRemoteDescription(body);
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    outbox.push({ to: note.from, kind: 'answer', body: JSON.stringify(answer) });
+  } else if (note.kind === 'answer') {
+    await pc.setRemoteDescription(body);
+  } else if (note.kind === 'ice') {
+    // A candidate can arrive before the description it belongs to. Swallowing
+    // that is normal and not an error worth showing anybody.
+    try {
+      await pc.addIceCandidate(body);
+    } catch (e) {
+      /* it will be offered again */
+    }
+  }
+}
+
+async function ring(who) {
+  const pc = link(who);
+  if (pc.signalingState !== 'stable') return;
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  outbox.push({ to: who, kind: 'offer', body: JSON.stringify(offer) });
+}
+
+// One call: say I am here, hand over the post, collect mine.
+async function callIn() {
+  if (!talking) return;
+  const post = outbox;
+  outbox = [];
+  let answer;
+  try {
+    answer = await (
+      await fetch('/talk', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ me, post }),
+      })
+    ).json();
+  } catch (e) {
+    outbox = post.concat(outbox); // keep it for the next try
+    return;
+  }
+  for (const note of answer.post || []) await gotNote(note);
+
+  const here = (answer.here || []).filter((w) => w !== me);
+  for (const who of answer.ring || []) if (!links.has(who)) await ring(who);
+  for (const who of [...links.keys()]) if (!here.includes(who)) drop(who);
+
+  say(here.length ? `talking to ${here.length}` : 'nobody else is here yet');
+}
+
+async function talk(on) {
+  if (!on) {
+    talking = false;
+    for (const who of [...links.keys()]) drop(who);
+    if (mine) for (const t of mine.getTracks()) t.stop();
+    mine = null;
+    document.getElementById('mic').classList.remove('on');
+    return;
+  }
+  if (!canTalk()) {
+    say(whyNot());
+    return;
+  }
+  try {
+    mine = await navigator.mediaDevices.getUserMedia({
+      // The browser's own echo cancellation, noise suppression and gain
+      // control. Four people in a room without these is a howl -- each
+      // microphone picks up the others' speakers and feeds it back round.
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      video: false,
+    });
+  } catch (e) {
+    say(`no microphone: ${e.name}`);
+    return;
+  }
+  talking = true;
+  document.getElementById('mic').classList.add('on');
+  callIn();
+}
+
+// Called in twice a second while talking. Fast enough that an offer is
+// answered before anybody notices, slow enough to be nothing at all beside
+// thirty scenes a second.
+setInterval(callIn, 500);
+
+document.getElementById('mic').onclick = () => talk(!talking);
+
 // ---- the setup screen ----------------------------------------------------
 
 // Built from `rules` on the wire. Nothing here knows what Ludo is: a row that
