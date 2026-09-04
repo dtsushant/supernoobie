@@ -286,3 +286,49 @@ a.asbutton:hover { background: var(--lit); color: var(--ink); }
   right: 0.7rem;
   z-index: 30;
 }
+
+/* ---- who is talking ------------------------------------------------------ */
+#voices {
+  position: absolute;
+  top: 3.2rem;
+  right: 0.7rem;
+  z-index: 30;
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid #22303c;
+  border-radius: 0.45rem;
+  background: rgba(11, 16, 23, 0.86);
+  font-size: 0.72rem;
+  color: #94a1ae;
+}
+#voices > div {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+#voices .who {
+  width: 2.2rem;
+  font-family: ui-monospace, monospace;
+}
+#voices .bar {
+  display: block;
+  width: 4.5rem;
+  height: 0.35rem;
+  border-radius: 0.2rem;
+  background: #1b2530;
+  overflow: hidden;
+}
+#voices .bar > i {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: 0.2rem;
+  background: #6fcf97;
+  /* Fast up, slow down -- an ear does the same, and a bar that falls as fast
+     as it rises reads as flicker rather than as a voice. */
+  transition: width 0.06s linear;
+}
+#voices .none {
+  color: #6b7987;
+}

@@ -26,6 +26,22 @@
 //!     ssh -N -L 8088:localhost:8088 you@this-machine
 //! ```
 //!
+//! ## Testing the talking with two tabs
+//!
+//! Two tabs on one machine is `localhost`, so the microphone works with no
+//! certificate and nothing forwarded. Open `http://127.0.0.1:8088/studio`
+//! twice and press the microphone in both. They get different names because
+//! the peer id lives in `sessionStorage`, which is per-tab.
+//!
+//! Two things to know before deciding it is broken:
+//!
+//! - **Use headphones, or expect a howl.** Each tab's microphone hears the
+//!   other tab's speaker. Echo cancellation is meant for a person in a room,
+//!   not for two copies of the same page a centimetre apart.
+//! - **Watch the meter rather than listening.** Sound arriving into a muted
+//!   element is indistinguishable from no sound at all, so the level bars are
+//!   the only honest answer to *is it connected*.
+//!
 //! ## Why a server and not WebAssembly
 //!
 //! Both put the drawing in a browser. WebAssembly needs a second compiler
@@ -151,6 +167,12 @@ async fn main() {
         println!("      chrome://flags/#unsafely-treat-insecure-origin-as-secure,");
         println!("      add http://<this machine>:8088 and restart it.");
         println!("   3. Put it behind https properly -- a reverse proxy or a tunnel.");
+        println!();
+        println!("  To try the talking WITHOUT another machine: open this page twice on");
+        println!("  this one. Two tabs are two peers. Use headphones -- each tab's");
+        println!("  microphone hears the other's speaker -- and watch the level bars");
+        println!("  rather than listening, since audio arriving into a muted element");
+        println!("  sounds exactly like no audio at all.");
         println!();
     } else {
         println!("(only this machine -- pass --open to let others on the network in)");

@@ -571,6 +571,88 @@ function speaker(who) {
   return el;
 }
 
+// ---- watching a voice rather than hearing it ------------------------------
+//
+// Two tabs on one machine is the easiest way to test this, and the hardest way
+// to tell whether it works: each tab's microphone hears the other tab's
+// speaker, so without headphones the two howl at each other, and with the
+// speakers off there is nothing to hear at all.
+//
+// A level meter answers the question without listening. It also answers a
+// question listening cannot: is the audio ARRIVING, as distinct from being
+// audible -- a stream connected to a muted element looks and sounds identical
+// to no stream at all.
+//
+// The measurement is root-mean-square, which is the loudness of a signal in the
+// only sense that matters: the square root of the mean of the squares, which is
+// the same average an engineer means by the "RMS" of an alternating current.
+// Peak would flicker on every consonant; RMS is what an ear integrates.
+const meters = new Map();
+
+function watch(who, stream) {
+  const c = listen();
+  if (!c || !stream) return;
+  const source = c.createMediaStreamSource(stream);
+  const eye = c.createAnalyser();
+  // 1024 samples is about 23 milliseconds at 44.1 kHz -- long enough to
+  // average out a waveform, short enough to follow a syllable.
+  eye.fftSize = 1024;
+  source.connect(eye);
+  meters.set(who, { eye, buf: new Float32Array(eye.fftSize) });
+}
+
+// How loud, 0 to 1, on a scale an ear would agree with.
+function level(who) {
+  const m = meters.get(who);
+  if (!m) return 0;
+  m.eye.getFloatTimeDomainData(m.buf);
+  let sum = 0;
+  for (const v of m.buf) sum += v * v;
+  const rms = Math.sqrt(sum / m.buf.length);
+  // Loudness is roughly logarithmic -- Weber and Fechner, 1860, and the reason
+  // decibels exist at all. A linear bar spends its whole length on the loudest
+  // tenth of what people actually say.
+  const db = 20 * Math.log10(rms + 1e-9);
+  return Math.max(0, Math.min(1, (db + 60) / 60));
+}
+
+// The strip of who is here, with a bar each. Redrawn from the animation frame
+// rather than from the poll, because a meter that updates twice a second looks
+// broken even when it is right.
+function meterFrame() {
+  const box = document.getElementById('voices');
+  if (box && !box.hidden) {
+    for (const el of box.children) {
+      const bar = el.querySelector('.bar > i');
+      if (bar) bar.style.width = `${Math.round(level(el.dataset.who) * 100)}%`;
+    }
+  }
+  requestAnimationFrame(meterFrame);
+}
+requestAnimationFrame(meterFrame);
+
+// Who is in the room. Rebuilt only when the list changes, so a bar being
+// animated is not thrown away sixty times a second.
+let shownHere = '';
+function showHere(here) {
+  const box = document.getElementById('voices');
+  if (!box) return;
+  box.hidden = !talking;
+  const key = here.join(',');
+  if (key === shownHere) return;
+  shownHere = key;
+  box.innerHTML = '';
+  for (const who of here) {
+    const row = document.createElement('div');
+    row.dataset.who = who;
+    // The peer id is eight characters of nothing; the first four are enough to
+    // tell two tabs apart and short enough not to matter.
+    row.innerHTML = `<span class="who">${who.slice(0, 4)}</span><span class="bar"><i></i></span>`;
+    box.append(row);
+  }
+  if (!here.length) box.innerHTML = '<div class="none">waiting for somebody else</div>';
+}
+
 function link(who) {
   if (links.has(who)) return links.get(who);
   const pc = new RTCPeerConnection(ICE);
@@ -585,6 +667,7 @@ function link(who) {
   };
   pc.ontrack = (e) => {
     speaker(who).srcObject = e.streams[0];
+    watch(who, e.streams[0]);
   };
   pc.onconnectionstatechange = () => {
     if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
@@ -599,6 +682,8 @@ function drop(who) {
   const pc = links.get(who);
   if (pc) pc.close();
   links.delete(who);
+  meters.delete(who);
+  shownHere = '';
   const el = document.getElementById(`ear-${who}`);
   if (el) el.remove();
 }
@@ -664,12 +749,15 @@ async function callIn() {
   for (const who of answer.ring || []) if (!links.has(who)) await ring(who);
   for (const who of [...links.keys()]) if (!here.includes(who)) drop(who);
 
+  showHere(here);
   say(here.length ? `talking to ${here.length}` : 'nobody else is here yet');
 }
 
 async function talk(on) {
   if (!on) {
     talking = false;
+    showHere([]);
+    document.getElementById('voices').hidden = true;
     for (const who of [...links.keys()]) drop(who);
     if (mine) for (const t of mine.getTracks()) t.stop();
     mine = null;
@@ -694,6 +782,10 @@ async function talk(on) {
   }
   talking = true;
   document.getElementById('mic').classList.add('on');
+  // My own level too, so the meter shows something before anybody else joins
+  // -- otherwise a working microphone and a broken one look the same until a
+  // second person turns up.
+  watch(me, mine);
   callIn();
 }
 
