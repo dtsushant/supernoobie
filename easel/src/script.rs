@@ -457,7 +457,19 @@ impl Script {
                 // it does not recognise, so an unhandled command becomes a
                 // ghost the size of its first argument -- which is how this
                 // one turned into a nine-unit ghost across the whole board.
-                "bounds" => {}
+                "bounds" | "sound" => {}
+                // A no-entry sign: a ring with a bar across it. Drawn at no
+                // size when the way is open, which is how anything is hidden
+                // here.
+                "noway" => {
+                    let (x, y) = (number(0.0), number(0.0));
+                    let size = number(0.3).abs().min(20.0);
+                    if size > 0.005 {
+                        for part in shapes::sign::noway(Cx::new(x, y), size) {
+                            out.push((part, ink));
+                        }
+                    }
+                }
                 "digits" => {
                     let value = number(0.0);
                     let (x, y, size) = (number(0.0), number(0.0), number(1.0));
@@ -526,6 +538,44 @@ impl Script {
             return None;
         }
         Some((Cx::new(n[0], n[1]), Cx::new(n[2], n[3])))
+    }
+
+    /// The sounds a drawing asks for, and what each one is watching.
+    ///
+    /// ```text
+    ///     sound(roll, rolls)
+    ///     sound(cut, cuts0 + cuts1 + cuts2 + cuts3)
+    /// ```
+    ///
+    /// **A sound plays when its number goes up.** Not when a condition is true
+    /// — true is a state and a sound is an event, and a rule that fired while
+    /// something *was* true would play forty times a second. Counting is the
+    /// natural shape for this anyway: the game already counts throws, and cuts,
+    /// and tokens home, because it needed to for other reasons.
+    ///
+    /// It also means the page needs no notion of what any of them mean. It
+    /// keeps the last number it saw and plays the sound when the new one is
+    /// bigger, which works for a counter, for a nought that becomes a one, and
+    /// for anything else anybody thinks of.
+    ///
+    /// Draws nothing.
+    pub fn sounds(&self, at: f64, tally: &Tally) -> Vec<(String, f64)> {
+        let env = self.env(at, tally);
+        self.rows
+            .iter()
+            .filter(|r| r.on)
+            .filter_map(|r| {
+                let args = r.text.trim().strip_prefix("sound(")?.strip_suffix(')')?;
+                let mut arg = split_args(args).into_iter();
+                let name = arg.next()?.trim().to_string();
+                let ok = !name.is_empty()
+                    && name.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+                    && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+                let watching = arg.next()?;
+                let v = plotkit::expr::parse(watching.trim()).ok()?.eval(&env).ok()?.re;
+                (ok && v.is_finite()).then_some((name, v))
+            })
+            .collect()
     }
 
     /// The house rules a drawing declares, in the order they are written.
@@ -678,7 +728,7 @@ pub const FACES: [&str; 2] = ["smiley", "ghost"];
 /// `bounds` is here although it draws nothing: it still has to be a row this
 /// crate owns, or `plotkit` reports it as an unknown command and the drawing
 /// arrives with an error on it.
-pub const OURS: [&str; 5] = ["ludo", "token", "dice", "star", "bounds"];
+pub const OURS: [&str; 7] = ["ludo", "token", "dice", "star", "bounds", "sound", "noway"];
 
 /// Is this row one this crate handles rather than `plotkit::expr`?
 fn mine(text: &str) -> bool {

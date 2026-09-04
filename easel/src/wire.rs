@@ -156,6 +156,19 @@ pub fn since(board: &Board, look: Look, word: &str, have: u64) -> String {
         }
         None => out.push_str(",\"bounds\":null"),
     }
+    // What each sound is watching. The page keeps the last number it saw and
+    // plays when the new one is bigger, so it needs to know nothing about what
+    // any of them mean.
+    out.push_str(",\"sounds\":[");
+    for (n, (name, at)) in board.sheet.script.sounds(board.clock, &board.tally).into_iter().enumerate() {
+        if n > 0 {
+            out.push(',');
+        }
+        out.push_str("{\"name\":");
+        text(&mut out, &name);
+        let _ = write!(out, ",\"at\":{at}}}");
+    }
+    out.push(']');
     out.push_str(",\"rules\":[");
     for (n, (id, name, label, value)) in board.sheet.script.house(board.clock).into_iter().enumerate() {
         if n > 0 {

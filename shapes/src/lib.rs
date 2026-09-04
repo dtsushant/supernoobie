@@ -67,6 +67,7 @@ pub mod fourier;
 pub mod glyph;
 pub mod grab;
 pub mod dice;
+pub mod sign;
 pub mod star;
 pub mod ludo;
 pub mod motion;

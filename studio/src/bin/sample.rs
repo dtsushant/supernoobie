@@ -730,6 +730,25 @@ fn ludogame() -> Board {
     }
 
     add!("");
+    add!("# --- the way home, and whether it is shut -----------------------");
+    add!("# When the table plays `no way home until you have cut somebody`, a");
+    add!("# seat that has cut nobody cannot turn in -- so say so, at the mouth");
+    add!("# of its own column, rather than leaving somebody to work out why a");
+    add!("# legal-looking move is refused.");
+    add!("#");
+    add!("# Drawn at no size when the way is open, which is how anything is");
+    add!("# hidden here.");
+    add!("color(0xE0704A)");
+    for seat in 0..4 {
+        rows.push(format!(
+            "shut{seat} = and(mustcut == 1, cuts{seat} == 0)"
+        ));
+        rows.push(format!(
+            "noway(ludox({seat}, 51), ludoy({seat}, 51), if(shut{seat}, 0.38, 0))"
+        ));
+    }
+
+    add!("");
     add!("# --- how many are in --------------------------------------------");
     for seat in 0..4 {
         let mine: Vec<String> =
@@ -738,6 +757,31 @@ fn ludogame() -> Board {
         rows.push(format!("color({})", ["0xE0704A", "0x6FCF97", "0x4FBCD4", "0xE0A44A"][seat]));
         rows.push(format!("digits(home{seat}, -8.4, {}, 0.4)", 4.0 - seat as f64 * 1.1));
     }
+
+    add!("");
+    add!("# --- what makes a noise -----------------------------------------");
+    add!("# A sound plays when its number goes UP. Not when something is true:");
+    add!("# true is a state and a sound is an event, and a sound tied to a");
+    add!("# condition would play forty times a second while it held.");
+    add!("#");
+    add!("# Counting suits this anyway -- the game already counts throws and");
+    add!("# cuts and tokens home, because it needed to for other reasons.");
+    add!("sound(roll, rolls)");
+    add!("");
+    add!("# One tick a square. The whole number part of every token's walk,");
+    add!("# added up: it goes up by one each time any token crosses onto a new");
+    add!("# square, and DOWN when one is sent back -- which is why a capture");
+    add!("# does not also tick.");
+    rows.push(format!(
+        "steps = {}",
+        (0..tokens)
+            .map(|k| format!("floor(max(0, walk{k}))"))
+            .fold(String::new(), |acc, t| if acc.is_empty() { t } else { format!("{acc} + {t}") })
+    ));
+    add!("sound(step, steps)");
+    add!("");
+    add!("sound(cut, cuts0 + cuts1 + cuts2 + cuts3)");
+    add!("sound(home, home0 + home1 + home2 + home3)");
 
     add!("");
     add!("# --- winning ----------------------------------------------------");

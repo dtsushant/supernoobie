@@ -356,6 +356,24 @@ row on star(ludox(3, 0), ludoy(3, 0), if(stars == 1, 0.34, 0), 5)
 row on color(0x8A97A5)
 row on star(ludox(3, starstep), ludoy(3, starstep), if(stars == 1, 0.3, 0), 5)
 row on 
+row on # --- the way home, and whether it is shut -----------------------
+row on # When the table plays `no way home until you have cut somebody`, a
+row on # seat that has cut nobody cannot turn in -- so say so, at the mouth
+row on # of its own column, rather than leaving somebody to work out why a
+row on # legal-looking move is refused.
+row on #
+row on # Drawn at no size when the way is open, which is how anything is
+row on # hidden here.
+row on color(0xE0704A)
+row on shut0 = and(mustcut == 1, cuts0 == 0)
+row on noway(ludox(0, 51), ludoy(0, 51), if(shut0, 0.38, 0))
+row on shut1 = and(mustcut == 1, cuts1 == 0)
+row on noway(ludox(1, 51), ludoy(1, 51), if(shut1, 0.38, 0))
+row on shut2 = and(mustcut == 1, cuts2 == 0)
+row on noway(ludox(2, 51), ludoy(2, 51), if(shut2, 0.38, 0))
+row on shut3 = and(mustcut == 1, cuts3 == 0)
+row on noway(ludox(3, 51), ludoy(3, 51), if(shut3, 0.38, 0))
+row on 
 row on # --- how many are in --------------------------------------------
 row on home0 = (at0 == 57) + (at1 == 57) + (at2 == 57) + (at3 == 57)
 row on color(0xE0704A)
@@ -369,6 +387,25 @@ row on digits(home2, -8.4, 1.7999999999999998, 0.4)
 row on home3 = (at12 == 57) + (at13 == 57) + (at14 == 57) + (at15 == 57)
 row on color(0xE0A44A)
 row on digits(home3, -8.4, 0.6999999999999997, 0.4)
+row on 
+row on # --- what makes a noise -----------------------------------------
+row on # A sound plays when its number goes UP. Not when something is true:
+row on # true is a state and a sound is an event, and a sound tied to a
+row on # condition would play forty times a second while it held.
+row on #
+row on # Counting suits this anyway -- the game already counts throws and
+row on # cuts and tokens home, because it needed to for other reasons.
+row on sound(roll, rolls)
+row on 
+row on # One tick a square. The whole number part of every token's walk,
+row on # added up: it goes up by one each time any token crosses onto a new
+row on # square, and DOWN when one is sent back -- which is why a capture
+row on # does not also tick.
+row on steps = floor(max(0, walk0)) + floor(max(0, walk1)) + floor(max(0, walk2)) + floor(max(0, walk3)) + floor(max(0, walk4)) + floor(max(0, walk5)) + floor(max(0, walk6)) + floor(max(0, walk7)) + floor(max(0, walk8)) + floor(max(0, walk9)) + floor(max(0, walk10)) + floor(max(0, walk11)) + floor(max(0, walk12)) + floor(max(0, walk13)) + floor(max(0, walk14)) + floor(max(0, walk15))
+row on sound(step, steps)
+row on 
+row on sound(cut, cuts0 + cuts1 + cuts2 + cuts3)
+row on sound(home, home0 + home1 + home2 + home3)
 row on 
 row on # --- winning ----------------------------------------------------
 row on when and(at0 == 57, at1 == 57): won = 1

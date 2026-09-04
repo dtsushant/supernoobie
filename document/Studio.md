@@ -270,6 +270,45 @@ row. A box with no width, or one whose corners are the wrong way round, is
 refused rather than believed: dividing by a width of nothing gives an empty
 screen, which looks like the drawing having failed to load.
 
+### Sound
+
+```text
+sound(roll, rolls)
+sound(cut, cuts0 + cuts1 + cuts2 + cuts3)
+```
+
+**A sound plays when its number goes up.** Not when a condition is true — true
+is a *state* and a sound is an *event*, and a sound tied to a condition plays
+forty times a second for as long as it holds.
+
+Counting suits it anyway: a game already counts its throws and its captures,
+because it needed to for other reasons. One tick a square falls out the same
+way — add up the whole-number part of every token's walk, and it goes up by one
+whenever any of them crosses onto a new square, and *down* when one is sent
+back, which is why a capture does not also tick.
+
+The page keeps the last number it saw and plays when the new one is bigger, so
+it knows nothing about what any of them mean. A name it has no noise for is
+simply ignored, which is what lets a drawing ask for `creak` before anybody has
+written one.
+
+The noises themselves are made in the browser, and every one is the same shape:
+a tone, and an envelope decaying as `e^{-t/τ}`. The same decay that settles the
+die. A browser will not make a sound until somebody has clicked something, so
+nothing is heard before the first tap.
+
+### A sign that says no
+
+```text
+noway(x, y, size)
+```
+
+A ring with a bar across it, upper-left to lower-right. Drawn at no size when
+the way is open, which is how anything is hidden here. Used at the mouth of a
+Ludo home column when the table plays *no way home until you have cut somebody*
+— a legal-looking move that is refused with no explanation is the worst thing a
+rule can do.
+
 ### House rules a drawing declares
 
 A row ending `# rule: <words>` is a **house rule** — a number the players settle
