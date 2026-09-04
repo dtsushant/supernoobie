@@ -448,6 +448,15 @@ fn ludogame() -> Board {
     add!("againhome = 0            # rule: getting one home earns another turn");
     add!("blockade = 1             # rule: two together block the square");
     add!("stars = 1                # rule: show the safe stars");
+    add!("starback = 2             # rule: squares the star sits before the home turn");
+    add!("");
+    add!("# Worked out HERE, beside the rule it comes from, and not down with the");
+    add!("# drawing that shows it -- which is thirty rows below the tap rules that");
+    add!("# read it. A name bound after its reader is not an error, it is an");
+    add!("# unknown name: the comparison quietly fails and every square becomes");
+    add!("# capturable. That is the second time this has happened in this file.");
+    add!("starstep = 51 - starback");
+    add!("starmod = mod(starstep, 13)");
     add!("");
     add!("# --- the state -------------------------------------------------");
     add!("seed = 137");
@@ -658,8 +667,8 @@ fn ludogame() -> Board {
         // index rather than written down sixteen times.
         deeds.push(format!(
             "each j in 0..{tokens} (at[j] = if(and(and(and(seat[j] != seat{k}, sq[j] == here), \
-             and(here >= 0, here < 52)), not(or(or(mod(here, 13) == 0, mod(here, 13) == 6), \
-             mod(here, 13) == 9))), \
+             and(here >= 0, here < 52)), \
+             not(or(mod(here, 13) == 0, mod(here, 13) == starmod))), \
              0 - 1 - mod(j, 4), at[j]))"
         ));
         // Did this move cut anybody? Counted, because a house rule may ask for
@@ -689,10 +698,15 @@ fn ludogame() -> Board {
     add!("# and drawing them all in grey was why they looked misplaced rather");
     add!("# than looking like starts.");
     add!("#");
-    add!("# The other two a seat has sit FIVE and TWO squares before its home");
-    add!("# entrance -- steps 45 and 48 of the 51 it walks. Which means every");
-    add!("# one of the eight is at `mod(square, 13) == 6` or `== 9`, and the");
-    add!("# four starts at `== 0`. Three numbers instead of twelve to mistype.");
+    add!("# The other one a seat has sits `starback` squares before it turns into");
+    add!("# its home column. A token turns in off step 50, so the star is on");
+    add!("# step 51 - starback -- and that is a DIAL, because which square this");
+    add!("# is differs from board to board and is far easier to point at than to");
+    add!("# describe. Slide it and watch the star move.");
+    add!("#");
+    add!("# Whatever it is set to, all four land on the same `mod 13`, since the");
+    add!("# seats are thirteen apart. So `safe` stays two comparisons however far");
+    add!("# round it is moved.");
     for seat in 0..4 {
         // The seat's own start square, in its own colour.
         rows.push(format!("color({})", ["0xE0704A", "0x6FCF97", "0x4FBCD4", "0xE0A44A"][seat]));
@@ -700,11 +714,9 @@ fn ludogame() -> Board {
             "star(ludox({seat}, 0), ludoy({seat}, 0), if(stars == 1, 0.34, 0), 5)"
         ));
         rows.push("color(0x8A97A5)".into());
-        for step in [45, 48] {
-            rows.push(format!(
-                "star(ludox({seat}, {step}), ludoy({seat}, {step}), if(stars == 1, 0.3, 0), 5)"
-            ));
-        }
+        rows.push(format!(
+            "star(ludox({seat}, starstep), ludoy({seat}, starstep), if(stars == 1, 0.3, 0), 5)"
+        ));
     }
 
     add!("");

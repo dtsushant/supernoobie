@@ -195,6 +195,9 @@ a.asbutton:hover { background: var(--lit); color: var(--ink); }
 /* ---- the setup screen ---------------------------------------------------
    Over the drawing, not instead of it: you can see the board you are about to
    play on while you decide how to play on it. */
+/* An ID selector beats the browser's own `[hidden] { display: none }`, so
+   without this the start button set `hidden` and nothing happened. */
+#setup[hidden] { display: none; }
 #setup {
   position: absolute;
   inset: 0;

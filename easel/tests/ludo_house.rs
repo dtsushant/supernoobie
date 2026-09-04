@@ -87,8 +87,8 @@ fn a_capture_is_counted() {
     assert_eq!(v(&b, "cuts0"), 0.0);
     // Square 10, which is not safe: the eight stars are at mod 13 of 6 and 9,
     // and the four starts at 0.
-    b.tally.values.insert("at0".into(), 9.0);
-    b.tally.values.insert("at4".into(), 49.0); // seat 1, square 10
+    b.tally.values.insert("at0".into(), 3.0);
+    b.tally.values.insert("at4".into(), 43.0); // seat 1, square 4
     ready(&mut b, 1.0);
     b.play_tap(1);
     assert!(v(&b, "at4") < 0.0, "it cut");
@@ -103,8 +103,8 @@ fn a_table_can_give_another_turn_for_a_capture() {
     let set = |again: f64| {
         let mut b = game();
         b.tally.values.insert("againcut".into(), again);
-        b.tally.values.insert("at0".into(), 9.0);
-        b.tally.values.insert("at4".into(), 49.0);
+        b.tally.values.insert("at0".into(), 3.0);
+        b.tally.values.insert("at4".into(), 43.0);
         ready(&mut b, 1.0);
         b.play_tap(1);
         v(&b, "turn")

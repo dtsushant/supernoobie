@@ -267,6 +267,11 @@ already just a number in a row; the comment only adds *"and I am one of the ones
 worth asking about before we start"*, together with words a person can read. Any
 game gets a setup screen by writing it.
 
+If the page shows the setup screen and the start button does nothing, the cause
+is almost certainly an ID selector: `#setup { display: grid }` beats the
+browser's own `[hidden] { display: none }`, so setting `hidden` has no effect at
+all. `#setup[hidden] { display: none }` puts it back.
+
 A rule that is 0 or 1 is offered as a tick box and anything else as a number,
 which is the only distinction a setup screen needs. Setting one rewrites the row
 and **keeps the comment** — otherwise setting a rule would delete it from the

@@ -235,18 +235,18 @@ fn you_cannot_move_on_somebody_elses_turn() {
 #[test]
 fn landing_on_an_enemy_sends_it_home() {
     let mut b = game();
-    // Seat 0's token at step 10 is on square 10. Seat 1 starts at 13, so its
-    // token needs step 10 - 13 + 52 = 49 to stand on the same square.
-    b.tally.values.insert("at0".into(), 7.0);
-    b.tally.values.insert("at4".into(), 49.0);
-    assert_eq!(v(&b, "sq4"), 10.0, "the two are on the same square");
+    // Seat 1 starts at 13, so its token needs step 43 to stand on square 4 --
+    // which is neither a start nor the star, so it can be taken.
+    b.tally.values.insert("at0".into(), 1.0);
+    b.tally.values.insert("at4".into(), 43.0);
+    assert_eq!(v(&b, "sq4"), 4.0, "where seat 0 is about to land");
 
     b.tally.values.insert("rolled".into(), 1.0);
     b.clock = 99.0;
     b.tally.values.insert("die".into(), 3.0);
     b.tally.values.insert("turn".into(), 0.0);
     b.play_tap(1);
-    assert_eq!(v(&b, "at0"), 10.0, "it moved");
+    assert_eq!(v(&b, "at0"), 4.0, "it moved");
     assert!(v(&b, "at4") < 0.0, "and sent the enemy home");
     assert_eq!(v(&b, "at1"), -2.0, "its team-mate is untouched");
 }
@@ -364,41 +364,63 @@ fn nobody_is_captured_on_a_safe_square() {
 #[test]
 fn an_ordinary_square_is_not_safe() {
     let mut b = game();
-    b.tally.values.insert("at0".into(), 9.0);
-    b.tally.values.insert("at4".into(), 49.0); // 13 + 49 mod 52 = 10
-    assert_eq!(v(&b, "sq4"), 10.0);
-    assert_eq!(v(&b, "sq0"), 9.0);
+    b.tally.values.insert("at0".into(), 3.0);
+    b.tally.values.insert("at4".into(), 43.0); // 13 + 43 mod 52 = 4
+    assert_eq!(v(&b, "sq4"), 4.0);
+    assert_eq!(v(&b, "sq0"), 3.0);
 
     b.tally.values.insert("rolled".into(), 1.0);
     b.tally.values.insert("die".into(), 1.0);
     b.tally.values.insert("turn".into(), 0.0);
     b.clock = 99.0;
     b.play_tap(1);
-    assert_eq!(v(&b, "at0"), 10.0);
-    assert!(v(&b, "at4") < 0.0, "square 10 is neither a start nor a star, so it is fair game");
+    assert_eq!(v(&b, "at0"), 4.0);
+    assert!(v(&b, "at4") < 0.0, "square 4 is neither a start nor a star, so it is fair game");
 }
 
-/// ★ **The twelve safe squares, counted.** Four starts and eight stars — two
-/// for each seat, five and two squares before its home entrance. Every one of
-/// them lands on `mod 13` of 0, 6 or 9, which is three numbers to check rather
-/// than twelve to mistype.
+/// ★ **The eight safe squares.** Four starts and four stars, one a seat.
+///
+/// Where the star sits is a dial — `starback` squares before the home turn —
+/// because which square that is differs from board to board, and it is far
+/// easier to point at than to describe. Whatever it is set to, all four land on
+/// the **same** `mod 13`, since the seats are thirteen apart. So the capture
+/// rule stays two comparisons however far round it is moved.
 #[test]
-fn there_are_twelve_safe_squares() {
-    let mut safe: Vec<usize> = Vec::new();
-    for seat in 0..4usize {
-        for step in [0usize, 45, 48] {
+fn the_safe_squares_share_one_remainder_at_any_setting() {
+    for back in 0..13usize {
+        let step = 51 - back;
+        // `starback` 12 puts the star on step 39, which is a multiple of
+        // thirteen -- so it lands on a seat's own start square and there are
+        // four safe squares rather than eight. A real setting, and a silly
+        // one; it is checked rather than skipped so nobody has to wonder.
+        let doubled = step % 13 == 0;
+        let mut safe: Vec<usize> = Vec::new();
+        for seat in 0..4usize {
+            safe.push((13 * seat) % 52);
             safe.push((13 * seat + step) % 52);
         }
+        safe.sort();
+        safe.dedup();
+        assert_eq!(
+            safe.len(),
+            if doubled { 4 } else { 8 },
+            "starback {back} puts the star on step {step}"
+        );
+        for sq in &safe {
+            let m = sq % 13;
+            assert!(m == 0 || m == step % 13, "square {sq} at starback {back}: mod 13 = {m}");
+        }
     }
-    safe.sort();
-    safe.dedup();
-    assert_eq!(safe.len(), 12, "four starts and eight stars, none shared");
-    for sq in &safe {
-        let m = sq % 13;
-        assert!(m == 0 || m == 6 || m == 9, "square {sq} is at mod 13 = {m}");
-    }
-    // And the stars really are five and two before the home entrance at 50.
-    assert_eq!([50 - 45, 50 - 48], [5, 2]);
+}
+
+/// And the default puts it two squares before the turn, which is where the
+/// board it was copied from has it.
+#[test]
+fn the_star_sits_two_before_the_home_turn() {
+    let b = game();
+    assert_eq!(v(&b, "starback"), 2.0);
+    assert_eq!(v(&b, "starstep"), 49.0, "the last track square is 50, so 49 is two before the turn");
+    assert_eq!(v(&b, "starmod"), 10.0, "and all four land on mod 13 = 10");
 }
 
 /// ★ Three sixes forfeit the turn. The face is not known until the die stops,
@@ -493,14 +515,14 @@ fn a_whole_stack_is_captured_at_once() {
     b.tally.values.insert("rolled".into(), 1.0);
     b.tally.values.insert("die".into(), 1.0);
     b.tally.values.insert("blockade".into(), 0.0); // else the stack is a wall
-    b.tally.values.insert("at0".into(), 9.0);
+    b.tally.values.insert("at0".into(), 3.0);
     // Seat 1 owns tokens 4..7. Three of them stand on square 10 -- not 9,
     // which is one of the eight safe stars.
     for k in [4, 5, 6] {
-        b.tally.values.insert(format!("at{k}"), 49.0);
+        b.tally.values.insert(format!("at{k}"), 43.0);
     }
     b.play_tap(1);
-    assert_eq!(v(&b, "at0"), 10.0, "it moved on");
+    assert_eq!(v(&b, "at0"), 4.0, "it moved on");
     for k in [4, 5, 6] {
         assert!(v(&b, &format!("at{k}")) < 0.0, "token {k} went home");
     }
@@ -517,9 +539,9 @@ fn a_captured_token_returns_to_its_own_place() {
     b.tally.values.insert("rolled".into(), 1.0);
     b.tally.values.insert("die".into(), 1.0);
     b.tally.values.insert("blockade".into(), 0.0);
-    b.tally.values.insert("at0".into(), 9.0);
-    b.tally.values.insert("at5".into(), 49.0);
-    b.tally.values.insert("at6".into(), 49.0);
+    b.tally.values.insert("at0".into(), 3.0);
+    b.tally.values.insert("at5".into(), 43.0);
+    b.tally.values.insert("at6".into(), 43.0);
     b.play_tap(1);
     assert_eq!(v(&b, "at5"), -2.0, "token 5 is its seat's second");
     assert_eq!(v(&b, "at6"), -3.0, "and token 6 its third");
@@ -664,8 +686,8 @@ fn a_captured_token_does_not_walk_home() {
     b.tally.values.insert("rolled".into(), 1.0);
     b.tally.values.insert("die".into(), 1.0);
     b.tally.values.insert("settled".into(), 1.0);
-    b.tally.values.insert("at0".into(), 9.0);
-    b.tally.values.insert("at4".into(), 49.0);
+    b.tally.values.insert("at0".into(), 3.0);
+    b.tally.values.insert("at4".into(), 43.0);
     b.play_tap(1);
     assert!(v(&b, "at4") < 0.0, "it was cut");
     assert_eq!(v(&b, "walk4"), v(&b, "at4"), "and is in the yard at once");
