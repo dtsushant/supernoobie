@@ -44,6 +44,9 @@ body {
   overflow-y: auto;
 }
 #app.full #tree, #app.full #bar, #app.full #hint { display: none; }
+/* Set from the address before the page is painted, so a link straight into a
+   game never flashes the studio furniture on its way. */
+.to-play #tree, .to-play #bar, .to-play #hint { display: none; }
 
 #tree header {
   display: flex;

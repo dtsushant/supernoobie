@@ -144,6 +144,18 @@ pub fn since(board: &Board, look: Look, word: &str, have: u64) -> String {
     // The house rules this drawing declares, for the setup screen. Sent every
     // frame because they are a handful of numbers, and because a page that had
     // to ask for them separately could show a stale one.
+    // The box the drawing says it lives in, if it says. A page that gets one
+    // fits to it and stops offering the wheel.
+    match board.sheet.script.bounds(board.clock) {
+        Some((lo, hi)) => {
+            let _ = write!(
+                out,
+                ",\"bounds\":[{:.3},{:.3},{:.3},{:.3}]",
+                lo.re, lo.im, hi.re, hi.im
+            );
+        }
+        None => out.push_str(",\"bounds\":null"),
+    }
     out.push_str(",\"rules\":[");
     for (n, (id, name, label, value)) in board.sheet.script.house(board.clock).into_iter().enumerate() {
         if n > 0 {

@@ -2,6 +2,14 @@
 <meta charset="utf-8">
 <title>studio</title>
 <link rel="stylesheet" href="/app.css">
+<script>
+  // Before a single pixel is painted. A page opened to play should never show
+  // the studio furniture, not even for the frame it takes a script at the end
+  // of the body to run -- which is exactly how long it used to flash for.
+  if (new URLSearchParams(location.search).get('play')) {
+    document.documentElement.classList.add('to-play');
+  }
+</script>
 
 <div id="app">
   <aside id="tree">

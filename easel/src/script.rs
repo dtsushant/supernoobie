@@ -452,6 +452,12 @@ impl Script {
                         ));
                     }
                 }
+                // Says how big the drawing is and draws nothing. It has to be
+                // named here even so: the arm below draws a FACE for anything
+                // it does not recognise, so an unhandled command becomes a
+                // ghost the size of its first argument -- which is how this
+                // one turned into a nine-unit ghost across the whole board.
+                "bounds" => {}
                 "digits" => {
                     let value = number(0.0);
                     let (x, y, size) = (number(0.0), number(0.0), number(1.0));
@@ -489,6 +495,39 @@ impl Script {
     ///
     /// `time` is left out: it has a clock of its own, and a slider that fought
     /// the clock would be maddening.
+    /// The box this drawing lives in, if it says it has one.
+    ///
+    /// ```text
+    ///     bounds(-8, -8, 8, 8)
+    /// ```
+    ///
+    /// **A bounded drawing does not want panning or zooming.** A Ludo board is
+    /// a board: it has edges, it is meant to be seen whole, and a wheel that
+    /// scrolls it away is a way to lose it rather than a way to look at it. A
+    /// drawing that goes on for ever — a graph, a plot, a sketch — is the
+    /// opposite, and gets both.
+    ///
+    /// So the drawing says which it is, rather than the studio guessing from
+    /// what happens to be on screen. It draws nothing.
+    pub fn bounds(&self, at: f64) -> Option<(Cx, Cx)> {
+        let env = self.env(at, &Tally::new());
+        let row = self
+            .rows
+            .iter()
+            .filter(|r| r.on)
+            .find_map(|r| r.text.trim().strip_prefix("bounds(")?.strip_suffix(')'))?;
+        let n: Vec<f64> = split_args(row)
+            .iter()
+            .filter_map(|a| plotkit::expr::parse(a.trim()).ok()?.eval(&env).ok())
+            .map(|z| z.re)
+            .filter(|v| v.is_finite())
+            .collect();
+        if n.len() != 4 || n[2] <= n[0] || n[3] <= n[1] {
+            return None;
+        }
+        Some((Cx::new(n[0], n[1]), Cx::new(n[2], n[3])))
+    }
+
     /// The house rules a drawing declares, in the order they are written.
     ///
     /// A row ending `# rule: <name>` is one:
@@ -635,7 +674,11 @@ pub fn still(text: &str, live: &std::collections::HashSet<String>) -> bool {
 pub const FACES: [&str; 2] = ["smiley", "ghost"];
 
 /// The rows this crate reads itself, beyond the faces and `digits`.
-pub const OURS: [&str; 4] = ["ludo", "token", "dice", "star"];
+///
+/// `bounds` is here although it draws nothing: it still has to be a row this
+/// crate owns, or `plotkit` reports it as an unknown command and the drawing
+/// arrives with an error on it.
+pub const OURS: [&str; 5] = ["ludo", "token", "dice", "star", "bounds"];
 
 /// Is this row one this crate handles rather than `plotkit::expr`?
 fn mine(text: &str) -> bool {

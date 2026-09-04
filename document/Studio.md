@@ -251,6 +251,25 @@ This is what lets a rule say *"send home whichever token is on this square"*.
 Without it a rule can only change a number it already knows the name of, and a
 game cannot be written.
 
+### Saying how big a drawing is
+
+```text
+bounds(-9.5, -7.7, 9.5, 7.7)
+```
+
+A drawing that says this is **fitted to the window and left there** — no wheel,
+no drag. A board has edges and is meant to be seen whole; scrolling a Ludo board
+away is a way to lose it, not a way to look at it.
+
+A drawing that says nothing goes on for ever and keeps both. That is the right
+default for a graph, a plot or a sketch, which is most of what this is for — so
+the bounded case is the one that has to declare itself.
+
+It draws nothing, and the four numbers may be worked out like anything else in a
+row. A box with no width, or one whose corners are the wrong way round, is
+refused rather than believed: dividing by a width of nothing gives an empty
+screen, which looks like the drawing having failed to load.
+
 ### House rules a drawing declares
 
 A row ending `# rule: <words>` is a **house rule** — a number the players settle

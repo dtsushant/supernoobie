@@ -132,10 +132,31 @@ function say(what) {
 // ---- drawing -------------------------------------------------------------
 
 // Hold on to the still half when a new one arrives, and note which one it is.
+// A drawing that says it is bounded is fitted to its box and left there. It
+// has edges and is meant to be seen whole -- a wheel that scrolls a Ludo board
+// away is a way to lose it, not a way to look at it. One that says nothing goes
+// on for ever and keeps both the wheel and the drag.
+function bounded() {
+  return Array.isArray(scene.bounds);
+}
+
+function fit() {
+  if (!bounded()) return;
+  const [lox, loy, hix, hiy] = scene.bounds;
+  const r = size();
+  // A tenth of a turn of margin, so the edge of the board is not the edge of
+  // the window.
+  const pad = 1.06;
+  view.x = (lox + hix) / 2;
+  view.y = (loy + hiy) / 2;
+  view.scale = Math.min(r.width / ((hix - lox) * pad), r.height / ((hiy - loy) * pad));
+}
+
 function keep() {
   if (scene.still) {
     still = scene.still;
     held = scene.stillv;
+    fit();
   } else if (scene.stillv !== undefined && scene.stillv !== held) {
     // It changed and we were not sent one: ask again rather than draw a board
     // that is no longer the board.
@@ -196,7 +217,8 @@ function paint() {
 function show() {
   paint();
   // Nothing to draw with while watching, and the pointer says so.
-  paper.style.cursor = scene.watching ? 'pointer' : 'crosshair';
+  paper.style.cursor = scene.watching || scene.game ? 'pointer' : 'crosshair';
+  document.getElementById('hint').hidden = bounded();
   const shapes = document.getElementById('shapes');
   const rows = document.getElementById('rows');
   // The focused input is rebuilt below, so where the caret was has to be put
@@ -310,7 +332,7 @@ let dragging = null;
 paper.onpointerdown = (e) => {
   paper.setPointerCapture(e.pointerId);
   const r = paper.getBoundingClientRect();
-  if (e.shiftKey || e.button === 1) {
+  if ((e.shiftKey || e.button === 1) && !bounded()) {
     dragging = { pan: true, px: e.clientX - r.left, py: e.clientY - r.top };
     return;
   }
@@ -354,6 +376,7 @@ paper.onpointerup = (e) => {
 };
 
 paper.onwheel = (e) => {
+  if (bounded()) return;
   e.preventDefault();
   const r = paper.getBoundingClientRect();
   const before = toWorld(e.clientX - r.left, e.clientY - r.top);
@@ -492,6 +515,7 @@ function frame(now) {
 requestAnimationFrame(frame);
 
 window.onresize = () => {
+  fit();
   paint();
   refresh();
 };

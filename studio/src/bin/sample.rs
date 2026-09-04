@@ -430,6 +430,16 @@ fn ludogame() -> Board {
     }
 
     add!("# LUDO, four players, one screen. tap the DIE, then tap a token.");
+    add!("");
+    add!("# The box this drawing lives in. A board has edges and is meant to be");
+    add!("# seen whole, so saying so fits it to the window and takes away the");
+    add!("# wheel -- scrolling a Ludo board is a way to lose it, not a way to");
+    add!("# look at it. A drawing that says nothing goes on for ever and keeps");
+    add!("# both the wheel and the drag.");
+    add!("#");
+    add!("# Wide enough for the counters down the left and the turn marker on");
+    add!("# the right, and symmetric so the board itself sits in the middle.");
+    add!("bounds(-9.5, -7.7, 9.5, 7.7)");
     add!("ludo()");
     add!("");
     add!("# --- HOUSE RULES ------------------------------------------------");
