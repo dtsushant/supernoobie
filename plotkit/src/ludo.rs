@@ -138,9 +138,23 @@ pub fn track() -> Vec<(i32, i32)> {
     (0..4).flat_map(|q| spun(&QUARTER, q)).collect()
 }
 
+/// How far round the quarter a seat's start square sits.
+///
+/// **Two, and it has to be two.** A seat's home column runs outward-to-inward
+/// along the middle row of its arm, and the outer square in line with it is the
+/// last square of the *track* — the one you turn in from. Start a seat there and
+/// its start square sits in the mouth of its own home column, which is what it
+/// looked like and is not where any board has it.
+///
+/// Two squares on puts the start on the row above, and — the part that matters —
+/// leaves the last track square directly beside the door. One or three land it
+/// diagonally opposite instead, a gap of √2, which is a token stepping into its
+/// home column through a corner.
+pub const OFF: usize = 2;
+
 /// Which track square a seat starts on.
 pub fn start(seat: usize) -> usize {
-    (seat % 4) * APART
+    ((seat % 4) * APART + OFF) % TRACK
 }
 
 /// The six squares of a seat's home column, from the outside in.
@@ -247,6 +261,51 @@ mod tests {
         }
     }
 
+    /// ★ **A seat turns into its home column from the square next door.**
+    ///
+    /// The whole reason [`OFF`] is two. Walk the fifty-one squares a token
+    /// walks and you must end up beside the door, not diagonally across from
+    /// it — and the start square must not be sitting in the doorway.
+    #[test]
+    fn the_last_track_square_is_beside_the_door() {
+        for seat in 0..4 {
+            let last = place(seat, TRACK - 2); // step 50, the last on the track
+            let door = { let (x, y) = home(seat)[0]; cell(x, y) };
+            assert!((door - last).abs() < 1.001, "seat {seat} turns in through a corner");
+            assert_ne!(place(seat, 0), door, "seat {seat} starts in its own doorway");
+            assert_ne!(place(seat, 0), last, "nor on the square it will turn in from");
+        }
+    }
+
+    /// ★ **What rules out the offsets either side of [`OFF`].**
+    ///
+    /// Two things have to hold, and each rules out different offsets:
+    ///
+    /// - the door must be **beside** the last track square, not diagonally
+    ///   across from it — which rules out 1 and 3;
+    /// - the start must not lie **in line with** the home column, or it sits in
+    ///   the mouth of it and reads as the entrance — which rules out 0, and is
+    ///   exactly what it looked like.
+    ///
+    /// Four survives both and is simply further round than any board puts it.
+    /// Worked out rather than asserted, so this says *why* and would catch a
+    /// change to the quarter that moved the door.
+    #[test]
+    fn the_offsets_either_side_are_ruled_out() {
+        let t = track();
+        let door = { let (x, y) = home(0)[0]; cell(x, y) };
+        let at = |k: usize| { let (x, y) = t[k % TRACK]; cell(x, y) };
+        // Beside the door rather than through a corner.
+        let square_on = |off: usize| (door - at(off + TRACK - 2)).abs() < 1.001;
+        // The home column runs along im == door.im, so a start on that line is
+        // in the mouth of it.
+        let clear_of_the_mouth = |off: usize| (at(off).im - door.im).abs() > 0.5;
+
+        assert!(square_on(OFF) && clear_of_the_mouth(OFF), "the offset in use must satisfy both");
+        assert!(!square_on(1) && !square_on(3), "1 and 3 turn in through a corner");
+        assert!(square_on(0) && !clear_of_the_mouth(0), "0 starts in the mouth of its own column");
+    }
+
     /// ★ Fifty-two squares, all different, and the loop closes — the last is
     /// next to the first. A track with a repeat in it is one where two tokens
     /// can be in the same place and only one of them knows.
@@ -285,10 +344,16 @@ mod tests {
         }
     }
 
-    /// The four seats are evenly spaced, a quarter of the loop apart.
+    /// The four seats are evenly spaced, a quarter of the loop apart. The
+    /// **spacing** is the property; where the first one happens to sit is
+    /// [`OFF`], and moving that must not disturb this.
     #[test]
     fn the_four_seats_are_a_quarter_apart() {
-        assert_eq!((0..4).map(start).collect::<Vec<_>>(), vec![0, 13, 26, 39]);
+        let s: Vec<usize> = (0..4).map(start).collect();
+        assert_eq!(s, vec![OFF, OFF + APART, OFF + 2 * APART, OFF + 3 * APART]);
+        for k in 0..4 {
+            assert_eq!((s[(k + 1) % 4] + TRACK - s[k]) % TRACK, APART, "seat {k} to the next");
+        }
     }
 
     /// ★ Home columns are **derived** from the track, so no seat can walk into

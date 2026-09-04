@@ -277,6 +277,18 @@ which is the only distinction a setup screen needs. Setting one rewrites the row
 and **keeps the comment** — otherwise setting a rule would delete it from the
 screen, which is the one thing guaranteed to happen to it.
 
+### Where a Ludo seat starts
+
+`plotkit::ludo::OFF` is **two**, and it has to be. A seat's home column runs
+outward-to-inward along the middle row of its arm, and the outer square in line
+with it is the last square of the *track* — the one you turn in from. Start a
+seat there and its start square sits in the mouth of its own home column, which
+is what it looked like and is not where any board has it.
+
+Two squares on puts the start on the row beside, and leaves the last track
+square directly next to the door. One or three land it diagonally opposite
+instead, a gap of √2 — a token stepping into its home column through a corner.
+
 ### A star
 
 ```text
