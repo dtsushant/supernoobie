@@ -5,9 +5,16 @@
 //! and each one exists because getting it wrong is audible.
 
 use sound::kit;
-use sound::noise::{brightness, fades, knocks, length, peak, render, tonality};
+use sound::noise::{brightness, fades, knocks, length, peak, render, tonality, Grain};
 
 const RATE: u32 = 44_100;
+
+/// The contacts of a roll: the knocks, without the low body note that sits
+/// under each one. A contact is two grains, so consecutive grains are not
+/// consecutive contacts.
+fn contacts(g: &[Grain]) -> Vec<Grain> {
+    g.iter().filter(|g| g.freq == 0.0).copied().collect()
+}
 
 /// ★ **A die rolls; it does not clang.** "Like a spoon hitting metal, not
 /// quite rolling" was the complaint, and it was two faults at once: one hit
@@ -24,7 +31,7 @@ fn a_roll_is_many_knocks_and_none_of_them_ring() {
 /// losing speed — the same curve it is drawn with, read backwards.
 #[test]
 fn the_contacts_get_further_apart() {
-    let g = kit::roll(12);
+    let g = contacts(&kit::roll(12));
     let gaps: Vec<f64> = g.windows(2).map(|w| w[1].at - w[0].at).collect();
     for k in 1..gaps.len() {
         assert!(gaps[k] > gaps[k - 1], "gap {k} did not grow: {gaps:?}");
@@ -45,7 +52,7 @@ fn the_roll_ends_when_the_throw_does() {
 /// rocking to a stop, not bouncing as hard as it did.
 #[test]
 fn the_contacts_die_away() {
-    let g = kit::roll(10);
+    let g = contacts(&kit::roll(10));
     for k in 1..g.len() {
         assert!(g[k].gain < g[k - 1].gain, "hit {k} was not quieter");
         assert!(g[k].cut < g[k - 1].cut, "hit {k} was not duller");
@@ -114,4 +121,41 @@ fn everything_fades_and_nothing_clips() {
 fn the_same_throw_sounds_the_same() {
     assert_eq!(render(&kit::roll(9), RATE), render(&kit::roll(9), RATE));
     assert_ne!(kit::roll(9), kit::roll(14), "and a different tumble does not");
+}
+
+/// ★ **It lands on wood, not on metal.** The complaint was that it sounded
+/// metallic, and metal is *bright* — a hard, thin thing keeps its high partials
+/// and a board does not. So this is the number that says wood, and it is the
+/// one that had to move.
+#[test]
+fn the_die_lands_on_something_wooden() {
+    let roll = brightness(&render(&kit::roll(11), RATE));
+    assert!(roll < 0.10, "a wooden knock is dull: {roll:.3}");
+
+    // Everything that touches this board is dull. A step on glass and a die on
+    // wood in the same game is worse than either.
+    for (name, g) in [("step", kit::step()), ("cut", kit::cut())] {
+        let b = brightness(&render(&g, RATE));
+        assert!(b < 0.12, "{name} is too bright for a board: {b:.3}");
+    }
+}
+
+/// ★ And the thing that makes it wooden is the **slope** of the filter, not
+/// just where it is set. One pole rolls off at six decibels an octave, which
+/// leaves a great deal of the top still there — and what is left is hiss, and
+/// hiss is what the ear reads as metal.
+#[test]
+fn two_poles_are_duller_than_one() {
+    use sound::mixer::{Mixer, Voice};
+    let sample = |v: Voice| {
+        let mut mix = Mixer::new();
+        mix.strike(v);
+        let mut out = vec![0.0f32; RATE as usize / 10];
+        mix.fill(&mut out, 1, RATE);
+        brightness(&out)
+    };
+    // A knock is two poles; a rustle is one. Same corner, same noise.
+    let knock = sample(Voice::knock(600.0, 0.05));
+    let rustle = sample(Voice::rustle(600.0).at(0.5));
+    assert!(knock < rustle * 0.7, "two poles {knock:.3} against one {rustle:.3}");
 }

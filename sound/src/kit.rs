@@ -313,8 +313,20 @@ pub fn roll(flips: usize) -> Vec<Grain> {
             // Quieter as it settles, and duller: the last few are the die
             // rocking to a stop rather than bouncing.
             let left = 1.0 - part;
-            Grain::knock(at, 620.0 + 900.0 * left, 0.012 + 0.010 * left, 0.10 + 0.24 * left)
+            // Low, because a die lands on a board and a board is wood. The
+            // cut is the whole of the difference: above about a kilohertz what
+            // comes through is hiss, and hiss is what the ear reads as metal.
+            let knock = Grain::knock(at, 240.0 + 380.0 * left, 0.016 + 0.014 * left, 0.07 + 0.15 * left);
+            // And a thump of the board itself under it. Wood has a body: a low
+            // resonance that does not last long enough to be a pitch but
+            // without which the contact is a click and not a knock.
+            //
+            // Short on purpose -- long enough and it starts to ring, which is
+            // the fault being fixed. `tonality` is what says whether it has.
+            let body = Grain::note(at, 132.0, 0.009 + 0.006 * left, 0.025 + 0.040 * left);
+            [knock, body]
         })
+        .flatten()
         .collect()
 }
 
@@ -324,14 +336,17 @@ pub fn step() -> Vec<Grain> {
     // Measured rather than guessed: at a gain of 0.16 this came out at 0.39
     // peak, which is louder than a capture. A step has to sit UNDER everything
     // else in the game -- four of them go past in a second.
-    vec![Grain::knock(0.0, 2400.0, 0.008, 0.08)]
+    //
+    // And low, like everything else that touches this board. At 2400 it was a
+    // tick on glass.
+    vec![Grain::knock(0.0, 900.0, 0.007, 0.06)]
 }
 
 /// **A capture.** Low and with a bite on it: a knock for the contact and a
 /// short low note under it, because something has been hit hard enough to make
 /// the board itself sound.
 pub fn cut() -> Vec<Grain> {
-    vec![Grain::knock(0.0, 700.0, 0.03, 0.34), Grain::note(0.004, 98.0, 0.09, 0.20)]
+    vec![Grain::knock(0.0, 380.0, 0.035, 0.24), Grain::note(0.004, 88.0, 0.030, 0.07)]
 }
 
 /// **A token home.** Two notes going up a fifth — the one place a *note* is

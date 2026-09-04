@@ -115,12 +115,14 @@ pub struct Voice {
     grit: u32,
     /// The low-pass filter's memory. One number is a whole filter.
     memory: f64,
+    /// A second one, for a knock — see [`Voice::hiss`].
+    memory2: f64,
 }
 
 impl Voice {
     /// A note: a bounce, a creak, a tap.
     pub fn note(tone: Tone) -> Voice {
-        Voice { source: Source::Note(tone), gain: 1.0, t: 0.0, grit: 0x2545_F491, memory: 0.0 }
+        Voice { source: Source::Note(tone), gain: 1.0, t: 0.0, grit: 0x2545_F491, memory: 0.0, memory2: 0.0 }
     }
 
     /// One thing striking another: filtered noise that dies away.
@@ -131,12 +133,13 @@ impl Voice {
             t: 0.0,
             grit: 0x1D8E_3B4F,
             memory: 0.0,
+            memory2: 0.0,
         }
     }
 
     /// Noise through a low-pass: wind, rushing, rustling.
     pub fn rustle(cut: f64) -> Voice {
-        Voice { source: Source::Rustle { cut }, gain: 1.0, t: 0.0, grit: 0x9E37_79B9, memory: 0.0 }
+        Voice { source: Source::Rustle { cut }, gain: 1.0, t: 0.0, grit: 0x9E37_79B9, memory: 0.0, memory2: 0.0 }
     }
 
     /// How loud to start.
@@ -184,16 +187,28 @@ impl Voice {
     /// `memory += (x − memory)·a`, which moves part of the way towards each
     /// new value — the same equation as everything else here that approaches a
     /// target, with τ = 1/2πcut.
-    fn hiss(&mut self, cut: f64, dt: f64) -> f64 {
+    fn hiss(&mut self, cut: f64, dt: f64, poles: usize) -> f64 {
         self.grit ^= self.grit << 13;
         self.grit ^= self.grit >> 17;
         self.grit ^= self.grit << 5;
         let white = f64::from(self.grit) / f64::from(u32::MAX) * 2.0 - 1.0;
         let a = (1.0 - (-std::f64::consts::TAU * cut * dt).exp()).clamp(0.0, 1.0);
         self.memory += (white - self.memory) * a;
+        let out = if poles > 1 {
+            // **Two poles, for a knock.** One pole rolls off at six decibels an
+            // octave, which leaves a great deal of the top still there — and
+            // what is left is hiss, and hiss is what the ear reads as *metal*.
+            // Cascading two is twelve an octave and the difference between a
+            // die on a board and a spoon on a saucepan.
+            self.memory2 += (self.memory - self.memory2) * a;
+            self.memory2
+        } else {
+            self.memory
+        };
         // Filtering takes energy out, so put some back -- otherwise a low cut
-        // is not a rumble, it is silence.
-        self.memory * (1.0 + 2.0 / a.max(1e-6).sqrt()).min(6.0)
+        // is not a rumble, it is silence. Twice the filtering, twice the loss.
+        let back = (1.0 + 2.0 / a.max(1e-6).sqrt()).min(6.0);
+        out * if poles > 1 { back * back * 0.55 } else { back }
     }
 
     /// The next sample, and move on by `dt` seconds.
@@ -203,12 +218,12 @@ impl Voice {
         let out = match self.source {
             Source::Note(ref tone) => tone.at(self.t),
             Source::Knock { cut, decay } => {
-                let raw = self.hiss(cut, dt);
+                let raw = self.hiss(cut, dt, 2);
                 // The same e^{-t/tau} as everything else here. A knock is a
                 // gust that lasts fifteen milliseconds.
                 raw * (-self.t / decay.max(1e-4)).exp()
             }
-            Source::Rustle { cut } => self.hiss(cut, dt),
+            Source::Rustle { cut } => self.hiss(cut, dt, 1),
         };
         self.t += dt;
         out * self.gain
