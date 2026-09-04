@@ -54,6 +54,34 @@
 //! quarter anticlockwise is a thing you have to ask for, with an extra key
 //! part way, and that is the right default: nobody expects the long way home.
 //!
+//! ## Whose idea this is
+//!
+//! `a₀·(a₁/a₀)^s` is the **exponential map**: it is a straight line drawn not
+//! in the plane but in the *logarithm* of it. Sophus Lie's whole programme
+//! (1870s) was that a continuous group of motions is understood through the
+//! algebra of its infinitesimal generators, and `exp` and `log` are the bridge
+//! between them. Rotations under multiplication are a group; `ln` sends them to
+//! a line where interpolation is just addition; `exp` sends the answer back.
+//! Lie died in 1899 largely unrecognised outside Norway, having quarrelled with
+//! Klein over credit; the entire subject is now named after him.
+//!
+//! The same formula in three dimensions is **slerp** — spherical linear
+//! interpolation — which **Ken Shoemake** gave to computer graphics in
+//! *Animating Rotation with Quaternion Curves* (SIGGRAPH 1985), the paper that
+//! got quaternions into every animation system there is. His argument is the
+//! one being made here in the plane: averaging two rotations component by
+//! component takes a chord through the sphere instead of an arc along it, so
+//! the thing shrinks in the middle and speeds up at the ends. In 2D the same
+//! mistake collapses a half-turn through zero, which is the bug this avoids.
+//!
+//! Interpolating *sizes* geometrically rather than arithmetically is much
+//! older: the geometric mean is in Book V of **Euclid**, and it is the right
+//! average whenever the quantity is a ratio. Doubling then quadrupling is
+//! multiplying by four; half way is two, not two and a half.
+//!
+//! **To read further:** Shoemake's 1985 paper is four pages and worth the time
+//! even in 2D. For the general picture, Stillwell's *Naive Lie Theory*.
+//!
 //! ## Easing
 //!
 //! Straight interpolation moves at a constant speed and stops dead, which is

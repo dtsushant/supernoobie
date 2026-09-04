@@ -24,6 +24,34 @@
 //! `e^{−t/τ}` settles a branch after a gust and kills a note after it is
 //! struck — Laplace, doing the only thing it ever does.
 //!
+//! ## Who this decay belongs to
+//!
+//! `dy/dt = −y/τ` — a thing losing a constant *fraction* of itself each
+//! moment rather than a constant amount — is the most reused equation in this
+//! repository, and it turns up under a different name every time:
+//!
+//! | | |
+//! |---|---|
+//! | **Newton**, 1701 | a hot body cools in proportion to how much hotter it is |
+//! | **Fourier**, 1822 | the same, done properly, in *Théorie analytique de la chaleur* |
+//! | **Laplace**, 1785 | the transform that turns it into algebra |
+//! | **Rutherford & Soddy**, 1902 | radioactive decay, and the half-life |
+//! | **Kelvin**, 1850s | charge leaking off a submarine telegraph cable |
+//!
+//! Laplace is the name attached to it here because his transform is what makes
+//! a decaying system a *number* rather than a differential equation: the
+//! transform of `e^{−t/τ}` is `1/(s + 1/τ)`, and the pole at `s = −1/τ` **is**
+//! the decay. Everything in this crate that settles — a die, a branch after a
+//! gust, a note after it is struck — is that one pole moved about.
+//!
+//! Fourier is worth the detour: he wrote the heat equation while Napoleon's
+//! prefect of Isère, having earlier gone to Egypt with the expedition, and the
+//! series he invented to solve it were rejected by Lagrange as insufficiently
+//! rigorous. Lagrange was right about the rigour and wrong about the idea.
+//!
+//! **To read further:** any first course on ODEs; for the transform, Bracewell's
+//! *The Fourier Transform and Its Applications* is the friendly one.
+//!
 //! ## Bouncing is folding
 //!
 //! A ball bouncing between two walls travels the same path as one going
@@ -40,6 +68,32 @@
 //! also means the wall never has to be *detected*. There is no frame on which
 //! the die is a little way through the wall and has to be pushed back, which is
 //! the usual way this goes wrong.
+//!
+//! ### Whose trick this is
+//!
+//! **Unfolding** is the standard move in the study of *mathematical billiards*.
+//! Rather than reflect the ball at the wall, reflect the *table* and let the
+//! ball go straight — the two pictures are identical, and the second has no
+//! collisions in it at all. For a rectangle the reflected copies tile the
+//! plane, so a billiard path becomes a straight line on a torus, and questions
+//! about bouncing become questions about a line of given slope, which are
+//! much easier.
+//!
+//! The idea goes back to **Hermann Schwarz** and to Fagnano's problem (1775:
+//! inscribe the shortest triangle in a triangle — solved by unfolding).
+//! **George Birkhoff** made billiards a subject in its own right in *Dynamical
+//! Systems* (1927), and the rectangle case connects to Weyl's equidistribution
+//! theorem (1916): an irrational slope visits every part of the table, a
+//! rational one closes into a loop. That is why a die thrown at a "nice" angle
+//! would retrace its own path and one thrown at any other angle does not.
+//!
+//! Reflection itself — that the angle in equals the angle out — is **Hero of
+//! Alexandria**, c. 60 AD, who derived it from the assumption that light takes
+//! the shortest path. Fermat generalised it to *least time* in 1662, which is
+//! how refraction falls out of the same principle.
+//!
+//! **To read further:** Tabachnikov, *Geometry and Billiards* — short, and the
+//! unfolding picture is on about page ten.
 //!
 //! ## Which face it lands on
 //!
@@ -123,6 +177,28 @@ pub struct Roll {
 /// multiple of a whole number wanders across its range without settling into a
 /// pattern anybody spots, and the seed is a number nobody is looking at. So a
 /// throw is unpredictable in play and **exactly repeatable** from its seed.
+/// ## Where this hash comes from, and what it is not
+///
+/// `fract(sin(x) * 43758.5453)` is **folklore from graphics shaders**, and it
+/// is worth being plain that nobody published it: it appears in shader code
+/// from the late 2000s, is repeated in thousands of demos, and the constant is
+/// carried along without anybody quite knowing who chose it. It works because
+/// `sin` is smooth but its *high-order digits* are not — multiplying by a large
+/// number and keeping the fraction throws away everything the smoothness lives
+/// in.
+///
+/// It is a **hash**, not a random number generator, and the difference matters:
+/// it maps an input to a number that looks unrelated, which is what is wanted
+/// here, but it has no period, no state, and no guarantees. It fails serious
+/// statistical tests and varies between machines when `sin` is implemented
+/// differently. For a die that must be *fair*, that is not good enough on its
+/// own — which is why `plotkit/tests/fair.rs` measures the result with a
+/// chi-square test (**Karl Pearson**, 1900, the first of the modern
+/// goodness-of-fit tests) rather than trusting it.
+///
+/// The respectable alternatives, if this ever needs replacing: **PCG**
+/// (Melissa O'Neill, 2014) or **xoshiro** (Blackman & Vigna, 2018). Both are a
+/// few lines and both have real analysis behind them.
 fn spread(seed: f64, roll: f64, salt: f64) -> f64 {
     let x = (seed + salt) * 12.9898 + roll * 78.233;
     let v = x.sin() * 43758.5453;

@@ -213,6 +213,27 @@ impl Canvas {
     /// one and the middle is crossed twice, so it stays empty — which is how a
     /// letter O gets its hole with no code that knows what a hole is.
     ///
+    /// ## Where the argument comes from
+    ///
+    /// That "a ray crosses an odd number of times" is a *theorem* and not an
+    /// observation is the **Jordan curve theorem**: a simple closed curve
+    /// divides the plane into exactly two regions, an inside and an outside, and
+    /// any path from one to the other must cross it. **Camille Jordan** stated
+    /// it in his *Cours d'analyse* (1887), and it is the standard example of a
+    /// result that is obvious to look at and brutal to prove — Jordan's own
+    /// proof was long held to be flawed, Veblen gave a rigorous one in 1905, and
+    /// a machine-checked proof took Hales until 2005 and about 140 000 lines.
+    ///
+    /// The two ways of counting crossings are the **even–odd** rule and the
+    /// **non-zero winding** rule, which differ only for self-overlapping paths;
+    /// PostScript (Warnock & Geschke, Adobe, 1982) offered both, and every
+    /// drawing system since has copied that choice, including SVG and this file.
+    /// Winding number is the same integer that appears in Cauchy's residue
+    /// theorem — a fill rule and a contour integral counting the same thing.
+    ///
+    /// **To read further:** Jordan's theorem in any topology text; for the
+    /// graphics side, the PostScript Language Reference on fill rules.
+    ///
     /// ## The two details that are easy to get wrong
     ///
     /// **A horizontal edge is skipped**, because it does not *cross* the row —

@@ -5,6 +5,42 @@
 //! Geometric reading: a complex number is a **length and an angle**.
 //! Multiplication multiplies the lengths and ADDS the angles. That single fact
 //! is why this type can drive an entire animation with no rotation matrices.
+//!
+//! ## Who worked this out, and how badly it went
+//!
+//! The *algebra* came first and nobody believed it. **Cardano** (1545) hit
+//! square roots of negatives while dividing 10 into two parts multiplying to
+//! 40, wrote down `5 ± √−15`, checked that it worked, and called the process
+//! "as subtle as it is useless". **Bombelli** (1572) took them seriously enough
+//! to give rules for arithmetic, because Cardano's formula for the cubic
+//! reaches *real* roots by way of imaginary intermediate steps — the
+//! `casus irreducibilis`, where the answer is plainly real and the only known
+//! road to it goes through numbers nobody could interpret.
+//!
+//! Descartes coined "imaginary" in 1637 as an insult, and it stuck. Euler used
+//! them brilliantly for a century without a picture of what they were, and gave
+//! us `e^{iθ} = cos θ + i sin θ` (1748) — the identity this whole file leans on.
+//!
+//! The **picture** — that a complex number is a point in a plane and that
+//! multiplying rotates — is much later and was found three times over:
+//! **Caspar Wessel**, a Norwegian surveyor, in 1799, in a paper nobody read for
+//! a hundred years; **Jean-Robert Argand**, a Parisian bookkeeper, in 1806, in
+//! a pamphlet he published anonymously; and **Gauss**, who had it privately
+//! long before and published in 1831, coining "complex number" and doing more
+//! than anyone to make them respectable. The plane is usually called the Argand
+//! diagram, which is the amateur bookkeeper beating the two professionals to
+//! the credit.
+//!
+//! Hamilton finally made them *rigorous* in 1837 by defining a complex number
+//! as an ordered pair of reals with a multiplication rule — which is exactly
+//! how [`Cx`] is defined below, and is the point at which "imaginary" stopped
+//! being a philosophical problem and became a definition. He then spent
+//! thirteen years trying to do the same in three dimensions, failed, and in
+//! 1843 realised it needs four: quaternions, carved into Broom Bridge in
+//! Dublin.
+//!
+//! **To read further:** Needham, *Visual Complex Analysis* — the book this file
+//! is written in the spirit of. For the history, Nahin's *An Imaginary Tale*.
 
 // This is a general-purpose number type: a complete, symmetric API is the
 // point, even where iteration 1 does not yet call every method.

@@ -187,6 +187,46 @@ impl Voice {
     /// `memory += (x − memory)·a`, which moves part of the way towards each
     /// new value — the same equation as everything else here that approaches a
     /// target, with τ = 1/2πcut.
+    /// ## Where the filter comes from
+    ///
+    /// `y += (x − y)·a` is a **resistor and a capacitor**, written down. Charge
+    /// a capacitor through a resistor and its voltage approaches the input
+    /// exponentially with time constant τ = RC; sample that at intervals `dt`
+    /// and you get exactly this line, with `a = 1 − e^{−dt/τ}`. It is the same
+    /// equation as Newton's law of cooling (1701, published anonymously in the
+    /// *Philosophical Transactions*): a hot thing loses heat in proportion to
+    /// how much hotter it is than the room, so the gap shrinks by a constant
+    /// fraction each moment.
+    ///
+    /// Statisticians call it an **exponential moving average**; control
+    /// engineers call it a first-order lag; in signal processing it is a
+    /// one-pole IIR filter. All four are this line.
+    ///
+    /// The "pole" is literal. The transfer function `H(z) = a / (1 − (1−a)z⁻¹)`
+    /// has a single value of `z` where the denominator vanishes and `H` runs to
+    /// infinity — a pole, in the sense of a tent pole holding up a surface over
+    /// the complex plane. Cascading two filters multiplies the transfer
+    /// functions, giving a double pole and twice the roll-off. That is why two
+    /// of these sound like wood and one sounds like metal.
+    ///
+    /// **To read further:** Oppenheim & Schafer, *Discrete-Time Signal
+    /// Processing*, on one-pole filters and the z-transform; or Julius O.
+    /// Smith's *Introduction to Digital Filters*, which is free online and
+    /// starts exactly here.
+    ///
+    /// ## Where the noise comes from
+    ///
+    /// The three shifts are **xorshift**, from George Marsaglia's 2003 paper
+    /// *Xorshift RNGs* — four lines long, and famous for being about the
+    /// cheapest generator that still passes the tests he had spent thirty years
+    /// designing to break generators. Marsaglia is also the man who, in 1968,
+    /// showed in *Random numbers fall mainly in the planes* that the linear
+    /// congruential generators everybody was using put their points on a small
+    /// number of hyperplanes — a result that quietly invalidated a great deal
+    /// of published Monte Carlo work.
+    ///
+    /// The shifts 13, 17, 5 are not arbitrary: Marsaglia searched for triples
+    /// giving a full period of 2³²−1, and this is one of the 81 that do.
     fn hiss(&mut self, cut: f64, dt: f64, poles: usize) -> f64 {
         self.grit ^= self.grit << 13;
         self.grit ^= self.grit >> 17;

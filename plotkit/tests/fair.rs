@@ -19,6 +19,23 @@ fn faces(seed: f64) -> Vec<u8> {
 
 /// ★ **Every face comes up equally often.** Chi-square with five degrees of
 /// freedom: 11.07 is the 5% line, 15.09 the 1% line. The old die scored 38.8.
+///
+/// The test is **Karl Pearson's**, from *On the criterion that a given system
+/// of deviations…* (1900) — the first general goodness-of-fit test and, by most
+/// accounts, the beginning of modern statistics. The statistic is
+/// `Σ (observed − expected)² / expected`, and the reason it is compared against
+/// a chi-square distribution is that a sum of squares of independent standard
+/// normals has that distribution; the counts are approximately normal for large
+/// samples by the central limit theorem, hence the shape.
+///
+/// Degrees of freedom are five and not six because the counts must add up to
+/// the number of throws: fix five of them and the sixth follows. Pearson
+/// originally got this wrong — he used `k` rather than `k − 1` — and **Ronald
+/// Fisher** corrected him in 1922, which began a feud that lasted the rest of
+/// Pearson's life.
+///
+/// **To read further:** any introductory statistics text; for the quarrel,
+/// Salsburg's *The Lady Tasting Tea*.
 #[test]
 fn the_die_is_fair() {
     for seed in [137.0, 41.0, 9001.0] {

@@ -143,6 +143,24 @@ pub fn fades(samples: &[f32]) -> f64 {
 ///
 /// **Not a zero-crossing count.** That was tried, and it read a shorter note as
 /// duller and could not see harmonics at all.
+/// ## Why the difference between samples measures brightness
+///
+/// Differencing a signal is a **high-pass filter**: it is the discrete
+/// derivative, and differentiating multiplies each frequency component by its
+/// own frequency (`d/dt e^{iωt} = iω e^{iωt}`). So the energy in the
+/// differences, against the energy in the signal, is a weighted average of
+/// frequency — a cheap cousin of the **spectral centroid**, which is the
+/// standard measure of brightness in music information retrieval and dates to
+/// Grey's 1977 work on timbre perception at Stanford's CCRMA.
+///
+/// John Grey's contribution was to show, by multidimensional scaling of how
+/// listeners judged instrument sounds, that timbre is *low-dimensional*: two or
+/// three numbers account for most of what people hear as the difference between
+/// a clarinet and a trumpet, and the first of them is brightness. That is why
+/// one number here is worth having at all.
+///
+/// **To read further:** Grey, *Multidimensional perceptual scaling of musical
+/// timbres* (JASA, 1977).
 pub fn brightness(samples: &[f32]) -> f64 {
     if samples.len() < 4 {
         return 0.0;
@@ -170,6 +188,31 @@ pub fn brightness(samples: &[f32]) -> f64 {
 /// card does not. Brightness cannot see it — filtered noise changes faster
 /// between samples than a pure tone does, so by that measure the wrong sound
 /// scored *better*.
+/// ## Whose idea this is
+///
+/// Matching a signal against a delayed copy of itself is **autocorrelation**,
+/// and the reason it works is the Wiener–Khinchin theorem: the
+/// autocorrelation of a signal and its power spectrum are Fourier transforms of
+/// one another. Norbert Wiener proved it in 1930 (*Generalized harmonic
+/// analysis*) and Aleksandr Khinchin independently in 1934. So asking "how well
+/// does this line up with itself" and asking "what frequencies is this made of"
+/// are the same question asked two ways — which is why a periodicity measure
+/// can stand in for a spectrum without ever computing one.
+///
+/// Wiener built the theory during the war for gun-laying predictors: given a
+/// noisy track of an aeroplane, where will it be in four seconds. The
+/// Wiener filter that came out of it is the direct ancestor of everything in
+/// this file.
+///
+/// Autocorrelation as a **pitch detector** is older than computers in spirit
+/// and was made practical by Noll in 1967 (cepstrum) and Rabiner in 1977, whose
+/// paper *On the use of autocorrelation analysis for pitch detection* is still
+/// the standard reference. The modern refinement most people reach for is YIN
+/// (de Cheveigné & Kawahara, 2002), which is this with the normalisation done
+/// more carefully.
+///
+/// **To read further:** Rabiner's 1977 paper is short and readable; for the
+/// theorem, any book on stochastic processes — Papoulis is the usual one.
 pub fn tonality(samples: &[f32]) -> f64 {
     // From the loud part, since the tail of anything is mostly nothing.
     let take = samples.len().min(4096);

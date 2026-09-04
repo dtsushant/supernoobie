@@ -83,8 +83,20 @@ pub fn with_word(board: &Board, look: Look, word: &str) -> String {
 /// it is the same board. When the page already holds this number, the still
 /// half is left out of the answer entirely.
 ///
-/// Any hash would do; this is FNV over the rows, the marks and the view, which
-/// is a few thousand bytes and costs nothing beside the frame it saves.
+/// Any hash would do; this is **FNV-1a** over the rows, the marks and the view,
+/// which is a few thousand bytes and costs nothing beside the frame it saves.
+///
+/// FNV is Glenn Fowler, Landon Curt Noll and Phong Vo, 1991 — proposed in an
+/// IEEE POSIX committee meeting, never formally published, and everywhere. Two
+/// lines: exclusive-or the byte, multiply by a prime. The prime for 64 bits is
+/// 2¹⁰⁰ + 2⁸ + 0xb3, chosen so the multiply mixes every byte into every output
+/// bit within a few rounds.
+///
+/// It is a **non-cryptographic** hash and that is the right choice here: this
+/// answers "is this the same drawing as last frame", where an adversary does
+/// not exist and a collision costs one stale board. It would be the wrong
+/// choice for anything anybody might attack — FNV is trivially collidable on
+/// purpose.
 pub fn still_mark(board: &Board, look: Look) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     let mut eat = |bytes: &[u8]| {

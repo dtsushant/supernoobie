@@ -104,6 +104,31 @@ pub fn circle_pts(centre: Cx, r: f64, n: usize) -> Vec<Cx> {
 
 /// Line segments approximating `F(x, y) = level`, by **marching squares**.
 ///
+/// ## Whose algorithm this is
+///
+/// The two-dimensional case of **marching cubes**, published by William
+/// Lorensen and Harvey Cline of General Electric at SIGGRAPH 1987 — one of the
+/// most cited papers in computer graphics, written to turn stacks of CT and MRI
+/// slices into surfaces a surgeon could look at. GE patented it, which is why a
+/// generation of free software used the clumsier "marching tetrahedra" until
+/// the patent expired in 2005.
+///
+/// The idea is the same in any dimension: sample `F` on a grid, note only the
+/// **sign** at each corner, and look up which edges the curve must cross. In 2D
+/// there are 2⁴ = 16 corner patterns; in 3D, 2⁸ = 256, which Lorensen and Cline
+/// reduced to 15 by symmetry. Two of the 2D cases are genuinely ambiguous — a
+/// saddle, where opposite corners agree — and the same ambiguity in 3D left
+/// holes in the original surfaces until Dürst pointed it out in 1988.
+///
+/// It rests on the **intermediate value theorem** (Bolzano, 1817): if `F` is
+/// continuous and changes sign along an edge, it is zero somewhere on it.
+/// Bolzano proved it to get analysis away from geometric hand-waving; it is
+/// what makes the sign at the corners enough to place a line.
+///
+/// **To read further:** Lorensen & Cline, *Marching Cubes: A High Resolution 3D
+/// Surface Construction Algorithm* (1987) — six pages, and the pictures carry
+/// it.
+///
 /// Sample `F` on a grid. On each little square, look at the sign at the four
 /// corners: where two adjacent corners disagree the curve crosses that edge,
 /// and linear interpolation says where. Join the crossings up.
