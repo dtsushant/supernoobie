@@ -34,7 +34,7 @@ fn sy(p: Cx) -> i32 {
 }
 
 /// Deterministic noise, so a scene can be reproduced exactly. Same SplitMix64
-/// idea the lending crate uses for its forests.
+/// idea the the other application crate uses for its forests.
 struct Rng(u64);
 impl Rng {
     fn next(&mut self) -> u64 {

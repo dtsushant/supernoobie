@@ -31,7 +31,7 @@
 //!
 //! **The game works over plain `http` on a network; the talking does not.** A
 //! browser will not hand a page a microphone unless the page is a *secure
-//! context* — `https`, or `localhost` — and on `http://192.168.x.x` the
+//! context* — `https`, or `localhost` — and on `http://192.0.2.10` the
 //! microphone API is not blocked, it is **absent**, so the failure is a
 //! `TypeError` about `undefined` rather than a refusal anybody could act on.
 //!

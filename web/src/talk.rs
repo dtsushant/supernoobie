@@ -438,8 +438,8 @@ mod tests {
     /// fails with a `TypeError` about `undefined`.
     #[test]
     fn it_says_why_the_microphone_is_missing() {
-        assert!(Room::advice(false, "192.168.1.20:8088").is_some());
-        assert!(Room::advice(true, "192.168.1.20:8088").is_none(), "https is fine");
+        assert!(Room::advice(false, "192.0.2.10:8088").is_some());
+        assert!(Room::advice(true, "192.0.2.10:8088").is_none(), "https is fine");
         assert!(Room::advice(false, "localhost:8088").is_none(), "and so is localhost");
         assert!(Room::advice(false, "127.0.0.1:8088").is_none());
     }

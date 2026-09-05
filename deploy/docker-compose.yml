@@ -1,0 +1,55 @@
+# The studio on the test server, standing entirely on its own.
+#
+# ## What this deliberately does not touch
+#
+# The same host runs the Loop the other application stack: another application behind one Caddy on
+# ports 80 and 443, with a database under its own data. Nothing in this
+# file joins that network, mounts its config, or publishes a port it uses. The
+# only thing shared is the certificate directory, read only.
+#
+# `the other application/docs/its own deploy notes` opens by saying that server has been taken
+# down twice by the same class of mistake, both times by running the wrong
+# compose file. This one has its own project name and its own everything, so
+# there is no wrong file to run.
+#
+#     docker compose -p ludo -f deploy/docker-compose.yml up -d
+#     docker compose -p ludo -f deploy/docker-compose.yml down     # and it is gone
+#
+# ## Reaching it
+#
+# 8443, because 443 belongs to the other hosts. The name has to be one the wildcard
+# certificate covers -- anything `*.example` -- or the browser refuses
+# the page a microphone, which is most of the point.
+
+services:
+  ludo:
+    image: ludo:latest
+    container_name: ludo-app
+    restart: unless-stopped
+    # No `ports:`. Nothing outside this compose can reach the game directly;
+    # the edge below is the only way in.
+    expose:
+      - "8088"
+    # The app reads files by name. It cannot write, and there is nothing in the
+    # image to read but the drawings -- but a read-only root filesystem costs
+    # nothing and makes that a property rather than a hope.
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+  edge:
+    image: caddy:2-alpine
+    container_name: ludo-edge
+    restart: unless-stopped
+    ports:
+      - "8443:8443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # The wildcard bundle, read only. Shared with the host's existing service because
+      # it is the same certificate for the same domain -- and read only because
+      # nothing here has any business changing it.
+      - /etc/ssl/wildcard:/certs:ro
+    depends_on:
+      - ludo

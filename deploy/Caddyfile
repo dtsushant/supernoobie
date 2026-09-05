@@ -1,0 +1,32 @@
+# The studio's own edge.
+#
+# Deliberately NOT the host's existing service's Caddy. That one fronts another application, and
+# the rule in `the other application/docs/its own deploy notes` exists because the server has been
+# taken down twice by people editing the wrong thing on it. Nothing here can
+# reach that config, that container, or ports 80 and 443.
+#
+# This one listens on 8443 only, and the only thing it can proxy to is the
+# game.
+
+{
+	# Same reasoning as the the other application edge: there is no ACME path out of this
+	# box, so the certificate is the wildcard bundle on disk. With automatic
+	# HTTPS on, Caddy would spend the day failing to reach Let's Encrypt.
+	auto_https off
+	# No admin API. It is not needed, and an unauthenticated one listening on
+	# 2019 is a way to reconfigure a proxy from inside the network.
+	admin off
+}
+
+studio.example:8443 {
+	encode gzip
+	tls /certs/bundle.crt /certs/private.key
+
+	# WHY THE CERTIFICATE MATTERS MORE THAN IT LOOKS. A browser will not give a
+	# page a microphone unless the page is a secure context, and on plain http
+	# `getUserMedia` is not refused, it is ABSENT. Serving this over the
+	# wildcard certificate under a name it covers is the whole reason for
+	# putting a proxy here at all -- the game itself would be perfectly happy
+	# on a bare port.
+	reverse_proxy ludo:8088
+}
