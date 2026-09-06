@@ -244,10 +244,28 @@ impl Room {
         self.begun
     }
 
-    /// Begin it, for everybody. There is no un-beginning: a game that could be
-    /// restarted by whoever pressed last is a game anybody can wipe.
-    pub fn begin(&mut self) {
+    /// Begin it, for everybody, **sitting down whoever has not**.
+    ///
+    /// Being in the room is meant to be enough. Two people opened a link,
+    /// neither pressed a colour, and starting gave every seat to a bot and both
+    /// of them a game to watch — which is right by the letter of "a bot plays
+    /// an empty seat" and obviously not what anybody wanted.
+    ///
+    /// So arriving is taken as playing. Anybody who wants to watch can stand up
+    /// again, and that is a deliberate choice they have made rather than one
+    /// made for them by not noticing a button.
+    ///
+    /// Lowest free seat first, in a settled order, so the same room of people
+    /// is seated the same way twice.
+    pub fn begin(&mut self, how_many: usize) {
         self.begun = true;
+        let mut waiting: Vec<String> =
+            self.here().into_iter().filter(|who| self.seat_of(who).is_none()).collect();
+        waiting.sort();
+        for who in waiting {
+            let Some(seat) = self.empty_seats(how_many).first().copied() else { break };
+            self.sit(&who, seat, how_many);
+        }
     }
 
     /// Which seat somebody is in, if any.
@@ -571,8 +589,47 @@ mod tests {
         r.call("ann", 0.0);
         r.call("bob", 0.0);
         assert!(!r.begun(), "nobody has started it");
-        r.begin();
+        r.begin(4);
         assert!(r.begun(), "and now it has, for both of them");
+    }
+
+    /// ★ **Starting sits down whoever has not.** Two people opened a link,
+    /// neither pressed a colour, and starting gave every seat to a bot and both
+    /// of them a game to watch. Being in the room is meant to be enough.
+    #[test]
+    fn starting_seats_everybody_who_is_here() {
+        let mut r = Room::new();
+        r.call("ann", 0.0);
+        r.call("bob", 0.0);
+        assert_eq!(r.empty_seats(4), vec![0, 1, 2, 3], "nobody has chosen a colour");
+        r.begin(4);
+        assert_eq!(r.seated().len(), 2, "and now both are playing");
+        assert_eq!(r.empty_seats(4), vec![2, 3], "with two seats left for bots");
+    }
+
+    /// Somebody who did choose keeps what they chose.
+    #[test]
+    fn starting_leaves_a_chosen_seat_alone() {
+        let mut r = Room::new();
+        r.call("ann", 0.0);
+        r.call("bob", 0.0);
+        r.sit("ann", 3, 4);
+        r.begin(4);
+        assert_eq!(r.seat_of("ann"), Some(3), "she wanted yellow");
+        assert_eq!(r.seat_of("bob"), Some(0), "and bob got the lowest free one");
+    }
+
+    /// More people than seats: the ones who fit sit, and the rest watch rather
+    /// than shoving somebody out.
+    #[test]
+    fn more_people_than_seats_is_not_a_crash() {
+        let mut r = Room::new();
+        for who in ["a", "b", "c", "d", "e", "f"] {
+            r.call(who, 0.0);
+        }
+        r.begin(4);
+        assert_eq!(r.seated().len(), 4);
+        assert!(r.empty_seats(4).is_empty(), "no bots needed");
     }
 
     /// ★ **One person decides when it starts.** Four start buttons is four

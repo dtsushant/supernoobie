@@ -611,7 +611,8 @@ async fn chat(State(s): State<Shared>, Json(chat): Json<Chat>) -> impl IntoRespo
         studio.room.call_them(&chat.me, name);
     }
     if chat.start {
-        studio.room.begin();
+        let how_many = seats_for_bots(studio);
+        studio.room.begin(how_many);
     }
     let mine = studio.room.call(&chat.me, now);
     let here = studio.room.here();
@@ -1149,7 +1150,7 @@ mod tests {
         apply(&mut st, Ask::Play { on: true });
         st.room.call("ann", 0.0);
         st.room.sit("ann", 1, 4); // ann is green; seats 0, 2 and 3 are bots
-        st.room.begin();
+        st.room.begin(4);
         assert_eq!(st.board.whose_turn(), Some(0), "a bot's turn");
 
         let before = st.board.tally.values.clone();
@@ -1168,7 +1169,7 @@ mod tests {
         apply(&mut st, Ask::Play { on: true });
         st.room.call("ann", 0.0);
         st.room.sit("ann", 0, 4); // ann has the seat that plays first
-        st.room.begin();
+        st.room.begin(4);
         let before = st.board.tally.values.clone();
         for _ in 0..60 {
             apply(&mut st, Ask::Tick { seconds: 0.1 });
@@ -1199,7 +1200,7 @@ mod tests {
         apply(&mut st, Ask::Play { on: true });
         st.room.call("ann", 0.0);
         st.room.sit("ann", 3, 4);
-        st.room.begin();
+        st.room.begin(4);
         apply(&mut st, Ask::Tick { seconds: 0.1 });
         let after_one = st.board.tally.values.clone();
         // Well within the pause: nothing more should happen.

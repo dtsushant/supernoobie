@@ -175,6 +175,9 @@ let begun = false;
 // the house rules underneath one another and whoever presses last wins an
 // argument nobody knew they were having.
 let amHost = false;
+// Whether a seat has been chosen for or by this browser, so arriving takes one
+// seat and not a new one every poll.
+let satDown = false;
 
 function paint() {
   const r = size();
@@ -756,6 +759,22 @@ function showSeats(answer) {
   if (!howMany) return;
   mySeat = answer.mine;
   if (answer.begun) begun = true;
+
+  // **Arriving is playing.** Somebody who opens a game link means to play it,
+  // and leaving them unseated until they notice a row of coloured buttons is
+  // how two people ended up watching four bots.
+  //
+  // Only before the game begins, only once, and only if there is a seat: a
+  // latecomer chooses for themselves, which is right, because the seat they
+  // want is the one a bot is holding rather than whichever is lowest.
+  if (!begun && !satDown && (answer.mine === null || answer.mine === undefined)) {
+    const free = (answer.bots || []).filter((k) => !(answer.seats || []).some((s) => s.seat === k));
+    if (free.length) {
+      satDown = true;
+      sit(free[0]);
+      return;
+    }
+  }
   const taken = new Map((answer.seats || []).map((s) => [s.seat, s.who]));
   const key = `${howMany}|${[...taken].join(',')}|${answer.mine}|${answer.turn}`;
   if (key === seatWord) return;
@@ -785,7 +804,12 @@ function showSeats(answer) {
     // in rather than the game refusing to start.
     b.disabled = !!who && !mine;
     b.title = mine ? 'tap to stand up' : who ? `${under} is here` : bot ? 'a bot is playing this -- sit here to take over' : 'sit here';
-    b.onclick = () => sit(mine ? -1 : k);
+      b.onclick = () => {
+      // Standing up is a decision, so it is remembered -- otherwise the next
+      // poll would sit them straight back down.
+      satDown = true;
+      sit(mine ? -1 : k);
+    };
     // Your own seat is where you change your name -- there is no other button
     // it could belong to, and a whole field for it would sit there empty all
     // game.
