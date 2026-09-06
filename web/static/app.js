@@ -645,6 +645,16 @@ function meterFrame() {
       if (bar) bar.style.width = `${Math.round(level(el.dataset.who) * 100)}%`;
     }
   }
+  // The same measurement in the lobby, where there is still time to do
+  // something about a microphone that is not working.
+  const lobby = document.getElementById('lobby-list');
+  const sheet = document.getElementById('setup');
+  if (lobby && sheet && !sheet.hidden) {
+    for (const el of lobby.children) {
+      const bar = el.querySelector('.lvl > i');
+      if (bar && el.dataset.who) bar.style.width = `${Math.round(level(el.dataset.who) * 100)}%`;
+    }
+  }
   requestAnimationFrame(meterFrame);
 }
 requestAnimationFrame(meterFrame);
@@ -663,6 +673,75 @@ let mySeat = null;
 let seatWord = '';
 const SEATNAMES = ['red', 'green', 'blue', 'yellow'];
 const SEATINK = ['#E0704A', '#6FCF97', '#4FBCD4', '#E0A44A'];
+
+// ---- the lobby ------------------------------------------------------------
+//
+// Everybody in the room, seated or not. `seats` only ever carried the people
+// who had chosen a colour, so somebody who had opened the link and was still
+// deciding appeared nowhere -- and "who is here" is the whole question a room
+// waiting to start is asking.
+//
+// The voice bar is here for a reason beyond decoration: this is the one moment
+// in a game when there is time to notice a microphone is not working and do
+// something about it.
+let lobbyWord = '';
+
+function lowestSeat(seats) {
+  return seats.length ? Math.min(...seats.map((s) => s.seat)) : -1;
+}
+
+function showLobby(answer) {
+  const list = document.getElementById('lobby-list');
+  if (!list) return;
+  const who = answer.who || [];
+  const seats = answer.seats || [];
+  const bots = begun ? [] : answer.bots || [];
+
+  const title = document.getElementById('lobby-title');
+  const note = document.getElementById('lobby-note');
+  const others = who.filter((w) => w.id !== me).length;
+  if (amHost) {
+    title.textContent = others ? (others + 1) + ' in the room' : 'waiting for the others';
+    note.textContent = others
+      ? 'start when everybody is ready \u2014 any empty seat is played by a bot'
+      : 'send them the link \u2014 they will appear here, and empty seats are played by bots';
+  } else {
+    const low = lowestSeat(seats);
+    const hostSeat = seats.find((s) => s.seat === low);
+    title.textContent = (others + 1) + ' in the room';
+    note.textContent = (hostSeat ? hostSeat.name : 'the first player') + ' starts the game when everybody is ready';
+  }
+
+  const key = JSON.stringify([who.map((w) => [w.id, w.name, w.seat]), bots, amHost]);
+  if (key === lobbyWord) return;
+  lobbyWord = key;
+  list.innerHTML = '';
+
+  for (const w of who) {
+    const row = document.createElement('div');
+    row.dataset.who = w.id;
+    const seated = w.seat !== null && w.seat !== undefined;
+    row.innerHTML =
+      '<span class="dot"></span><span class="nm"></span>' +
+      '<span class="tag"></span><span class="lvl"><i></i></span>';
+    row.querySelector('.dot').style.background = seated ? SEATINK[w.seat % 4] : 'transparent';
+    row.querySelector('.nm').textContent = w.name + (w.id === me ? ' (you)' : '');
+    row.querySelector('.tag').textContent = seated
+      ? SEATNAMES[w.seat] || 'seat ' + (w.seat + 1)
+      : 'watching';
+    list.append(row);
+  }
+
+  // The seats nobody has taken, so it is plain what starting now would mean.
+  for (const seat of bots) {
+    const row = document.createElement('div');
+    row.innerHTML = '<span class="dot"></span><span class="nm">a bot</span><span class="tag"></span>';
+    row.querySelector('.dot').style.background = SEATINK[seat % 4];
+    row.querySelector('.tag').textContent = SEATNAMES[seat] || 'seat ' + (seat + 1);
+    row.style.opacity = '0.6';
+    list.append(row);
+  }
+}
 
 function showSeats(answer) {
   const box = document.getElementById('seats');
@@ -728,22 +807,31 @@ function showSeats(answer) {
 
 // A field rather than a prompt. Somebody who has to guess that their own seat
 // can be long-pressed will never find out that it can.
-const nameField = document.getElementById('myname');
-if (nameField) {
-  nameField.value = myName;
-  let pending = null;
-  nameField.oninput = () => {
-    myName = nameField.value.trim().slice(0, 16);
+// The same field twice: once in the lobby, once in the bar during the game.
+// Kept in step rather than one being the real one, because either is where
+// somebody will reach for it.
+let namePending = null;
+function wireName(field) {
+  if (!field) return;
+  field.value = myName;
+  field.oninput = () => {
+    myName = field.value.trim().slice(0, 16);
     sessionStorage.setItem('name', myName);
+    for (const other of [document.getElementById('myname'), document.getElementById('lobby-name')]) {
+      if (other && other !== field) other.value = myName;
+    }
     // Sent when the typing stops, not on every letter -- otherwise "Sushant"
     // is seven requests and six of them show the others a half-typed name.
-    clearTimeout(pending);
-    pending = setTimeout(() => {
+    clearTimeout(namePending);
+    namePending = setTimeout(() => {
       seatWord = '';
+      lobbyWord = '';
       callSeats();
     }, 400);
   };
 }
+wireName(document.getElementById('myname'));
+wireName(document.getElementById('lobby-name'));
 
 async function sit(seat) {
   try {
@@ -755,7 +843,9 @@ async function sit(seat) {
       })
     ).json();
     seatWord = '';
+    lobbyWord = '';
     showSeats(answer);
+    showLobby(answer);
     say(answer.mine === null || answer.mine === undefined ? 'standing' : `you are ${SEATNAMES[answer.mine] || answer.mine + 1}`);
   } catch (e) {
     say('could not take that seat');
@@ -780,6 +870,7 @@ async function callSeats() {
       })
     ).json();
     showSeats(answer);
+  showLobby(answer);
   } catch (e) {
     /* next time */
   }
@@ -926,6 +1017,7 @@ async function callIn() {
 
   showHere(here);
   showSeats(answer);
+  showLobby(answer);
   say(here.length ? `talking to ${here.length}` : 'nobody else is here yet');
 }
 
@@ -939,6 +1031,10 @@ async function talk(on) {
     mine = null;
     micButton.classList.remove('on');
     micButton.textContent = '\u{1F3A4} talk';
+    if (lobbyMic) {
+      lobbyMic.classList.remove('on');
+      lobbyMic.textContent = '\u{1F3A4} talk';
+    }
     return;
   }
   if (!canTalk()) {
@@ -960,6 +1056,10 @@ async function talk(on) {
   talking = true;
   micButton.classList.add('on');
   micButton.textContent = '\u{1F3A4} talking';
+  if (lobbyMic) {
+    lobbyMic.classList.add('on');
+    lobbyMic.textContent = '\u{1F3A4} talking';
+  }
   // My own level too, so the meter shows something before anybody else joins
   // -- otherwise a working microphone and a broken one look the same until a
   // second person turns up.
@@ -975,6 +1075,12 @@ setInterval(callIn, 500);
 // If anything above this line throws at load, nothing below it runs -- and a
 // button with no handler is a button that does nothing at all, silently. So
 // this is wired up defensively and says so when it cannot be.
+// The microphone is offered in the lobby as well as in the game, because the
+// waiting is when people say hello.
+const lobbyMic = document.getElementById('lobby-mic');
+if (lobbyMic) {
+  lobbyMic.onclick = () => talk(!talking);
+}
 const micButton = document.getElementById('mic');
 if (micButton) {
   micButton.onclick = () => talk(!talking);

@@ -118,11 +118,31 @@
     <!-- Before the game starts: the house rules the drawing declares for
          itself. Built from `rules` on the wire, so nothing here knows what
          Ludo is -- any game gets this by writing `# rule: ...` on a row. -->
+    <!-- The lobby. Everything that happens before a game starts: who has
+         arrived, what to call yourself, turning your microphone on, and the
+         rules you will all be playing by.
+
+         It is one screen rather than a step-by-step because there is no order
+         to any of it -- somebody can name themselves after they sit down, or
+         talk before they do. -->
     <div id="setup" hidden>
       <div class="sheet">
-        <h2>house rules</h2>
-        <p>set these before you start &mdash; everybody in the room plays by them</p>
+        <h2 id="lobby-title">waiting for the others</h2>
+        <p id="lobby-note">send them the link &mdash; they will appear here</p>
+
+        <div class="lobby-row">
+          <label id="lobby-who"><span>you are</span>
+            <input id="lobby-name" maxlength="16" placeholder="your name" autocomplete="off">
+          </label>
+          <button id="lobby-mic" title="talk to the others">&#x1F3A4; talk</button>
+        </div>
+
+        <h3>in the room</h3>
+        <div id="lobby-list"></div>
+
+        <h3>house rules</h3>
         <div id="rules"></div>
+
         <button id="begin">start the game</button>
       </div>
     </div>

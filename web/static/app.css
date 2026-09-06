@@ -539,3 +539,97 @@ a.asbutton:hover { background: var(--lit); color: var(--ink); }
   font-size: 0.85rem;
   color: #94a1ae;
 }
+
+/* ---- the lobby ----------------------------------------------------------- */
+#setup h3 {
+  margin: 1.2rem 0 0.4rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #6b7987;
+}
+.lobby-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+#lobby-who {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.78rem;
+  color: #6b7987;
+}
+#lobby-name {
+  width: 9rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--edge);
+  border-radius: 0.35rem;
+  background: #0b1017;
+  color: #e3e9ef;
+  font: inherit;
+  font-size: 0.85rem;
+}
+#lobby-name:focus { outline: none; border-color: #4fbcd4; }
+#lobby-mic {
+  padding: 0.45rem 0.7rem;
+  border: 1px solid var(--edge);
+  border-radius: 0.35rem;
+  background: #121821;
+  color: #b9c4d0;
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+#lobby-mic.on { background: #6fcf97; border-color: #6fcf97; color: #08121a; }
+
+/* One line per person. The colour dot is their seat, the bar is their voice --
+   so somebody can see their microphone working before the game starts, which
+   is the one moment there is time to fix it. */
+#lobby-list > div {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid #1b2530;
+  font-size: 0.85rem;
+  color: #b9c4d0;
+}
+#lobby-list > div:last-child { border-bottom: 0; }
+#lobby-list .dot {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  border: 1px solid #46525e;
+  flex: 0 0 auto;
+}
+#lobby-list .nm { flex: 1 1 auto; }
+#lobby-list .tag {
+  font-size: 0.66rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.25rem;
+  background: #1b2530;
+  color: #94a1ae;
+}
+#lobby-list .lvl {
+  width: 3rem;
+  height: 0.3rem;
+  border-radius: 0.15rem;
+  background: #1b2530;
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+#lobby-list .lvl > i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: #6fcf97;
+  transition: width 0.06s linear;
+}
+#begin:disabled {
+  background: #1b2530;
+  color: #6b7987;
+  cursor: default;
+}

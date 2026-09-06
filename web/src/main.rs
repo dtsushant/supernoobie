@@ -647,6 +647,23 @@ async fn chat(State(s): State<Shared>, Json(chat): Json<Chat>) -> impl IntoRespo
         }
         body.push_str(&serde_json::to_string(who).unwrap_or_else(|_| "\"\"".into()));
     }
+    // Everybody in the room, seated or not. `seats` only ever carried the
+    // people who had chosen a colour, so somebody who had opened the link and
+    // was deciding did not appear anywhere -- and "who is here" is exactly the
+    // question a room full of people waiting to start is asking.
+    body.push_str("],\"who\":[");
+    for (k, id) in here.iter().enumerate() {
+        if k > 0 {
+            body.push(',');
+        }
+        let _ = write!(
+            body,
+            "{{\"id\":{},\"name\":{},\"seat\":{}}}",
+            serde_json::to_string(id).unwrap_or_default(),
+            serde_json::to_string(&studio.room.name_of(id)).unwrap_or_default(),
+            studio.room.seat_of(id).map_or("null".into(), |n| n.to_string())
+        );
+    }
     body.push_str("],\"seats\":[");
     for (k, (seat, who)) in seated.iter().enumerate() {
         if k > 0 {
