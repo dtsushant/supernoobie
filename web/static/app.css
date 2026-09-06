@@ -416,3 +416,85 @@ a.asbutton:hover { background: var(--lit); color: var(--ink); }
 
 /* The one link on the front page that starts a room. */
 .go .together { color: #6fcf97; }
+
+/* ---- on a telephone ------------------------------------------------------
+   Everything above pins controls to the corners, which is right on a desk and
+   wrong in a hand: the corners are where the notch, the home bar and the
+   thumbs are. Below a certain width the controls become one row along the top
+   that cannot be reached round, and every tap target grows to something a
+   thumb can actually hit.
+
+   44 pixels is Apple's figure and 48 is Google's; the larger is used because
+   a missed tap on the die is a turn nobody takes. */
+#mic,
+#seats,
+#room {
+  padding-top: env(safe-area-inset-top, 0);
+}
+
+@media (max-width: 720px), (pointer: coarse) {
+  #mic,
+  #seats button,
+  #room-copy {
+    min-height: 48px;
+    font-size: 0.95rem;
+  }
+
+  /* One row across the top, in reading order: who I am, then talking. Nothing
+     in a corner, because a corner on a phone belongs to the operating
+     system. */
+  #seats {
+    top: calc(0.5rem + env(safe-area-inset-top, 0px));
+    left: 0.5rem;
+    right: 0.5rem;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+  #seats button {
+    flex: 1 1 auto;
+    min-width: 4.5rem;
+  }
+
+  /* Under the seats rather than over them -- on a narrow screen the two
+     overlapped, and the thing that was hidden was the one you press. */
+  #mic {
+    top: auto;
+    bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));
+    right: 0.5rem;
+  }
+
+  #room {
+    bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));
+    left: 0.5rem;
+    right: auto;
+  }
+
+  #voices {
+    top: auto;
+    bottom: calc(4rem + env(safe-area-inset-bottom, 0px));
+    right: 0.5rem;
+  }
+
+  /* The setup sheet has to scroll on a short screen, and its button has to be
+     reachable without a keyboard appearing over it. */
+  #setup .sheet {
+    width: calc(100% - 1.5rem);
+    max-height: calc(100% - 2rem);
+  }
+  #setup label {
+    padding: 0.6rem 0;
+  }
+}
+
+/* Whose turn it is, said in words. Reading a colour off a board across a
+   table is fine; doing it from a name is what somebody on a telephone in
+   another city needs. */
+#seats button .name {
+  display: block;
+  font-size: 0.62rem;
+  opacity: 0.75;
+  line-height: 1.1;
+}
+#seats button.mine {
+  font-weight: 600;
+}

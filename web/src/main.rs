@@ -478,6 +478,12 @@ struct Chat {
     sit: Option<i64>,
     #[serde(default)]
     room: String,
+    /// What to be called. Absent leaves it as it was.
+    #[serde(default)]
+    name: Option<String>,
+    /// Begin the game, for everybody in the room.
+    #[serde(default)]
+    start: bool,
 }
 
 #[derive(serde::Deserialize)]
@@ -507,9 +513,20 @@ async fn chat(State(s): State<Shared>, Json(chat): Json<Chat>) -> impl IntoRespo
         }
         None => {}
     }
+    if let Some(name) = &chat.name {
+        studio.room.call_them(&chat.me, name);
+    }
+    if chat.start {
+        studio.room.begin();
+    }
     let mine = studio.room.call(&chat.me, now);
     let here = studio.room.here();
     let seated = studio.room.seated();
+    // Worked out before the loop, since `seated` borrows the room.
+    let name_by: std::collections::HashMap<usize, String> =
+        seated.iter().map(|(seat, who)| (*seat, studio.room.name_of(who))).collect();
+    let my_name = studio.room.name_of(&chat.me);
+    let begun = studio.room.begun();
     let my_seat = studio.room.seat_of(&chat.me);
     let seats = studio.board.sheet.script.seats(studio.board.clock).map_or(0, |(_, n)| n);
     let turn = studio.board.whose_turn();
@@ -541,13 +558,15 @@ async fn chat(State(s): State<Shared>, Json(chat): Json<Chat>) -> impl IntoRespo
         }
         let _ = write!(
             body,
-            "{{\"seat\":{seat},\"who\":{}}}",
-            serde_json::to_string(who).unwrap_or_default()
+            "{{\"seat\":{seat},\"who\":{},\"name\":{}}}",
+            serde_json::to_string(who).unwrap_or_default(),
+            serde_json::to_string(name_by.get(seat).map_or("", |s| s.as_str())).unwrap_or_default()
         );
     }
     let _ = write!(
         body,
-        "],\"howmany\":{seats},\"mine\":{},\"turn\":{}",
+        "],\"howmany\":{seats},\"begun\":{begun},\"myname\":{},\"mine\":{},\"turn\":{}",
+        serde_json::to_string(&my_name).unwrap_or_default(),
         my_seat.map_or("null".into(), |n| n.to_string()),
         turn.map_or("null".into(), |n| n.to_string())
     );

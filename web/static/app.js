@@ -169,6 +169,8 @@ function keep() {
 // and never again -- house rules are settled before the first throw, not
 // half way through somebody's turn.
 let started = false;
+// Whether anybody has started it. From the server, so all four browsers agree.
+let begun = false;
 
 function paint() {
   const r = size();
@@ -248,7 +250,10 @@ function show() {
   }
   document.getElementById('play').classList.toggle('on', scene.playing);
   setup();
-  document.getElementById('setup').hidden = started || !(scene.rules || []).length;
+  // `begun` is the ROOM's, not this browser's. The second person to open the
+  // link used to get their own "start the game" over a game already running --
+  // and pressing it set the house rules again underneath everybody.
+  document.getElementById('setup').hidden = started || begun || !(scene.rules || []).length;
 }
 
 function groupLine(g) {
@@ -532,6 +537,11 @@ function noises() {
 // create step and nothing to join.
 const room = new URLSearchParams(location.search).get('room') || '';
 
+// What to call yourself. Three other people have to tell whose turn it is, and
+// eight characters of peer id helps nobody -- so an unnamed player is "player 1"
+// after their seat, and this replaces it when they say otherwise.
+let myName = sessionStorage.getItem('name') || '';
+
 let me = sessionStorage.getItem('peer');
 if (!me) {
   me = Math.random().toString(36).slice(2, 10);
@@ -657,6 +667,7 @@ function showSeats(answer) {
   box.hidden = howMany === 0;
   if (!howMany) return;
   mySeat = answer.mine;
+  if (answer.begun) begun = true;
   const taken = new Map((answer.seats || []).map((s) => [s.seat, s.who]));
   const key = `${howMany}|${[...taken].join(',')}|${answer.mine}|${answer.turn}`;
   if (key === seatWord) return;
@@ -664,19 +675,51 @@ function showSeats(answer) {
   box.innerHTML = '';
   for (let k = 0; k < howMany; k++) {
     const b = document.createElement('button');
-    const who = taken.get(k);
+    const seat = (answer.seats || []).find((s) => s.seat === k);
+    const who = seat && seat.who;
     const mine = who && who === me;
-    b.textContent = SEATNAMES[k] || `seat ${k + 1}`;
+    // The colour on top, and underneath it WHO -- because "blue" tells you
+    // nothing across a telephone and "Ram" tells you everything.
+    const label = SEATNAMES[k] || `seat ${k + 1}`;
+    const under = mine ? 'you' : who ? seat.name || `player ${k + 1}` : 'free';
+    b.innerHTML = `${label}<span class="name"></span>`;
+    b.querySelector('.name').textContent = under;
     b.style.borderColor = SEATINK[k % 4];
     if (mine) b.style.background = SEATINK[k % 4];
     if (mine) b.style.color = '#08121a';
     b.classList.toggle('taken', !!who && !mine);
+    b.classList.toggle('mine', !!mine);
     b.classList.toggle('turn', answer.turn === k);
     b.disabled = !!who && !mine;
-    b.title = mine ? 'stand up' : who ? 'taken' : 'sit here';
+    b.title = mine ? 'tap to stand up, or hold to change your name' : who ? `${under} is here` : 'sit here';
     b.onclick = () => sit(mine ? -1 : k);
+    // Your own seat is where you change your name -- there is no other button
+    // it could belong to, and a whole field for it would sit there empty all
+    // game.
+    if (mine) {
+      b.oncontextmenu = (e) => {
+        e.preventDefault();
+        rename();
+      };
+      b.ondblclick = () => rename();
+    }
     box.append(b);
   }
+  // Whose turn, in words, for whoever is not looking at the board.
+  const now = (answer.seats || []).find((s) => s.seat === answer.turn);
+  if (now) {
+    const label = now.who === me ? 'your turn' : `${now.name || 'player ' + (answer.turn + 1)} to play`;
+    say(label);
+  }
+}
+
+function rename() {
+  const asked = prompt('what should the others call you?', myName || '');
+  if (asked === null) return;
+  myName = asked.trim().slice(0, 16);
+  sessionStorage.setItem('name', myName);
+  seatWord = '';
+  callSeats();
 }
 
 async function sit(seat) {
@@ -710,7 +753,7 @@ async function callSeats() {
       await fetch('/talk', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ me, post: [], room }),
+        body: JSON.stringify({ me, post: [], room, name: myName || null }),
       })
     ).json();
     showSeats(answer);
@@ -845,7 +888,7 @@ async function callIn() {
       await fetch('/talk', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ me, post, room }),
+        body: JSON.stringify({ me, post, room, name: myName || null }),
       })
     ).json();
   } catch (e) {
@@ -973,7 +1016,18 @@ document.getElementById('begin').onclick = async () => {
   listen();
   document.getElementById('setup').hidden = true;
   started = true;
+  begun = true;
   setFull(true);
+  // Tell the room, so nobody else is offered a game that has already begun.
+  try {
+    await fetch('/talk', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ me, post: [], room, start: true, name: myName || null }),
+    });
+  } catch (e) {
+    /* the next poll carries it */
+  }
   await ask({ do: 'Play', on: true });
 };
 // Putting the tools away and picking the pen up are the same act: a drawing

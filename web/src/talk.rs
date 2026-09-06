@@ -90,6 +90,20 @@ pub struct Room {
     seen: HashMap<String, f64>,
     /// Peer id to the notes waiting for it.
     post: HashMap<String, Vec<Note>>,
+    /// What each peer is called.
+    ///
+    /// Not a login and not an identity — a label, so three other people can
+    /// tell whose turn it is without counting colours round the board. Kept
+    /// beside the seats rather than in them because somebody may want a name
+    /// before they have decided which colour they are.
+    names: HashMap<String, String>,
+    /// Whether the game has begun.
+    ///
+    /// **On the room, not in each browser.** It was in the browser, and the
+    /// second person to open the link got their own "start the game" screen
+    /// over a game already in progress — and pressing it set the house rules
+    /// again underneath everybody.
+    begun: bool,
     /// Seat number to the peer sitting in it.
     ///
     /// Kept this way round because the question asked is nearly always "is
@@ -165,6 +179,48 @@ impl Room {
         true
     }
 
+    /// Call somebody something. Empty puts them back to being nobody in
+    /// particular.
+    pub fn call_them(&mut self, me: &str, name: &str) {
+        if me.is_empty() {
+            return;
+        }
+        // Trimmed, capped, and single-line: this goes on other people's
+        // screens, and a name with forty spaces in it is a name that pushes
+        // three seats off the edge.
+        let tidy: String = name.trim().chars().filter(|c| !c.is_control()).take(16).collect();
+        if tidy.is_empty() {
+            self.names.remove(me);
+        } else {
+            self.names.insert(me.to_string(), tidy);
+        }
+    }
+
+    /// What somebody is called, or what to call them if they have not said.
+    ///
+    /// A seated player with no name is *player 1* and not a peer id: the id is
+    /// eight characters of nothing and helps nobody work out whose turn it is.
+    pub fn name_of(&self, me: &str) -> String {
+        if let Some(name) = self.names.get(me) {
+            return name.clone();
+        }
+        match self.seat_of(me) {
+            Some(seat) => format!("player {}", seat + 1),
+            None => "watching".to_string(),
+        }
+    }
+
+    /// Has the game begun?
+    pub fn begun(&self) -> bool {
+        self.begun
+    }
+
+    /// Begin it, for everybody. There is no un-beginning: a game that could be
+    /// restarted by whoever pressed last is a game anybody can wipe.
+    pub fn begin(&mut self) {
+        self.begun = true;
+    }
+
     /// Which seat somebody is in, if any.
     pub fn seat_of(&self, me: &str) -> Option<usize> {
         self.chairs.iter().find(|(_, who)| *who == me).map(|(seat, _)| *seat)
@@ -193,6 +249,7 @@ impl Room {
         let here: Vec<String> = self.seen.keys().cloned().collect();
         self.post.retain(|who, _| here.contains(who));
         self.chairs.retain(|_, who| here.contains(who));
+        self.names.retain(|who, _| here.contains(who));
     }
 
     /// **Who calls whom.** Both peers must not offer at once, or each answers
@@ -431,6 +488,62 @@ mod tests {
         r.sit("ann", 3, 4);
         r.stand("ann");
         assert_eq!(r.seat_of("ann"), None);
+    }
+
+    /// ★ **Somebody with no name is "player 1", not eight characters of
+    /// nothing.** The peer id helps nobody work out whose turn it is.
+    #[test]
+    fn an_unnamed_player_is_called_by_their_seat() {
+        let mut r = Room::new();
+        r.call("a7f3k2p9", 0.0);
+        assert_eq!(r.name_of("a7f3k2p9"), "watching", "not seated yet");
+        r.sit("a7f3k2p9", 2, 4);
+        assert_eq!(r.name_of("a7f3k2p9"), "player 3");
+        r.call_them("a7f3k2p9", "Sushant");
+        assert_eq!(r.name_of("a7f3k2p9"), "Sushant");
+    }
+
+    /// A name goes on other people's screens, so it is trimmed, capped and
+    /// stripped of anything that is not a character.
+    #[test]
+    fn a_name_cannot_wreck_the_board() {
+        let mut r = Room::new();
+        r.call("ann", 0.0);
+        r.sit("ann", 0, 4);
+        r.call_them("ann", "   Ann   ");
+        assert_eq!(r.name_of("ann"), "Ann");
+        r.call_them("ann", &"x".repeat(400));
+        assert_eq!(r.name_of("ann").len(), 16);
+        r.call_them("ann", "a\nb\tc");
+        assert_eq!(r.name_of("ann"), "abc");
+        // And clearing it goes back to the seat.
+        r.call_them("ann", "  ");
+        assert_eq!(r.name_of("ann"), "player 1");
+    }
+
+    /// A name goes when its owner does.
+    #[test]
+    fn a_name_leaves_with_its_owner() {
+        let mut r = Room::new();
+        r.call("ann", 0.0);
+        r.call("bob", 0.0);
+        r.call_them("bob", "Bob");
+        r.call("ann", PATIENCE + 1.0);
+        assert_eq!(r.name_of("bob"), "watching", "bob has gone");
+    }
+
+    /// ★ **The game begins once, for the room.** It was per-browser, and the
+    /// second person to open the link got their own "start the game" over a
+    /// game already running — and pressing it set the house rules again
+    /// underneath everybody.
+    #[test]
+    fn a_game_begins_once_for_everybody() {
+        let mut r = Room::new();
+        r.call("ann", 0.0);
+        r.call("bob", 0.0);
+        assert!(!r.begun(), "nobody has started it");
+        r.begin();
+        assert!(r.begun(), "and now it has, for both of them");
     }
 
     /// ★ The advice a browser will not give you. On plain `http` over a

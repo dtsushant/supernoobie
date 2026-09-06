@@ -1,5 +1,11 @@
 <!doctype html>
 <meta charset="utf-8">
+<!-- Without this a phone lays the page out at about 980 pixels and scales the
+     result down, so anything pinned to an edge lands off the screen — which is
+     exactly what happened to the microphone button. `viewport-fit=cover` and
+     the safe-area insets in the stylesheet keep the controls clear of the
+     notch and the home bar. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>studio</title>
 <link rel="stylesheet" href="/app.css">
 
