@@ -92,21 +92,20 @@
       </span>
     </div>
 
-    <!-- OUTSIDE the toolbar, deliberately. The game view hides `#bar`, and a
-         child of a `display: none` parent cannot be brought back by any rule on
-         the child -- so a microphone button living in the toolbar simply did
-         not exist in the one view where people are playing together. -->
-    <button id="mic" title="talk to the others">&#x1F3A4; talk</button>
+    <!-- The players' bar. IN NORMAL FLOW, above the canvas, so it cannot
+         overlap the board -- it used to float over it, and on a small window
+         it sat on the squares. The canvas takes what is left, and the drawing
+         is fitted to that, so the board simply gets smaller instead.
 
-    <!-- Who is playing which colour. Outside the toolbar for the same reason
-         the microphone is: the game view hides the toolbar, and this is needed
-         most exactly there. -->
-    <div id="seats" hidden></div>
-
-    <!-- The room's name, and a button that copies the link to it. Shown only
-         when there is a room to share, because somebody drawing alone should
-         never be made to think about rooms. -->
-    <div id="room" hidden><span id="room-code"></span><button id="room-copy">copy link</button></div>
+         Outside `#bar` as well, because the game view hides that and these are
+         needed most exactly there. -->
+    <div id="hud" hidden>
+      <div id="seats"></div>
+      <label id="who"><span>you are</span><input id="myname" maxlength="16" placeholder="your name" autocomplete="off"></label>
+      <span id="hud-gap"></span>
+      <span id="room" hidden><span id="room-code"></span><button id="room-copy">copy link</button></span>
+      <button id="mic" title="talk to the others">&#x1F3A4; talk</button>
+    </div>
 
     <!-- Who is in the room, with a level bar each. So two tabs on one machine
          can be tested without headphones: you can SEE the other one hearing

@@ -210,6 +210,35 @@ impl Room {
         }
     }
 
+    /// Who decides when the game starts.
+    ///
+    /// **One person, or everybody gets a start button.** Four people each
+    /// offered "start the game" is four people setting the house rules
+    /// underneath one another, and whoever presses last wins an argument
+    /// nobody knew they were having.
+    ///
+    /// It is the lowest occupied seat — not the first to arrive, because
+    /// arriving is not a commitment and sitting down is. Somebody who takes
+    /// red is saying they are playing; somebody who opened the link may be
+    /// looking. If nobody has sat down at all, the first name in the room
+    /// holds it, so a game with one person in it is not waiting for a host who
+    /// does not exist.
+    pub fn host(&self) -> Option<String> {
+        if let Some((_, who)) = self.seated().first() {
+            return Some(who.clone());
+        }
+        self.here().first().cloned()
+    }
+
+    /// Which seats nobody is sitting in.
+    ///
+    /// What the bots take when the game begins. Worked out rather than stored,
+    /// so somebody standing up mid-game does not leave a seat that is neither
+    /// a person nor a bot.
+    pub fn empty_seats(&self, how_many: usize) -> Vec<usize> {
+        (0..how_many).filter(|seat| !self.chairs.contains_key(seat)).collect()
+    }
+
     /// Has the game begun?
     pub fn begun(&self) -> bool {
         self.begun
@@ -544,6 +573,44 @@ mod tests {
         assert!(!r.begun(), "nobody has started it");
         r.begin();
         assert!(r.begun(), "and now it has, for both of them");
+    }
+
+    /// ★ **One person decides when it starts.** Four start buttons is four
+    /// people setting the house rules underneath one another.
+    #[test]
+    fn the_lowest_seat_holds_the_start() {
+        let mut r = Room::new();
+        r.call("ann", 0.0);
+        r.call("bob", 0.0);
+        r.sit("bob", 2, 4);
+        assert_eq!(r.host(), Some("bob".into()), "bob sat down; ann only opened the link");
+        r.sit("ann", 1, 4);
+        assert_eq!(r.host(), Some("ann".into()), "and now ann is lower");
+    }
+
+    /// With nobody seated the first name holds it, so a game with one person
+    /// in it is not waiting for a host who does not exist.
+    #[test]
+    fn somebody_always_holds_the_start() {
+        let mut r = Room::new();
+        assert_eq!(r.host(), None, "an empty room has nobody");
+        r.call("zoe", 0.0);
+        assert_eq!(r.host(), Some("zoe".into()));
+    }
+
+    /// ★ Seats nobody took are what the bots get. Worked out rather than
+    /// stored, so standing up mid-game does not leave a seat that is neither a
+    /// person nor a bot.
+    #[test]
+    fn the_empty_seats_are_the_bots() {
+        let mut r = Room::new();
+        r.call("ann", 0.0);
+        r.call("bob", 0.0);
+        r.sit("ann", 0, 4);
+        r.sit("bob", 2, 4);
+        assert_eq!(r.empty_seats(4), vec![1, 3]);
+        r.stand("bob");
+        assert_eq!(r.empty_seats(4), vec![1, 2, 3], "his seat is a bot now");
     }
 
     /// ★ The advice a browser will not give you. On plain `http` over a

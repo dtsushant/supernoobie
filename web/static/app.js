@@ -171,6 +171,10 @@ function keep() {
 let started = false;
 // Whether anybody has started it. From the server, so all four browsers agree.
 let begun = false;
+// Whether the start is mine to press. One person decides, or four people set
+// the house rules underneath one another and whoever presses last wins an
+// argument nobody knew they were having.
+let amHost = false;
 
 function paint() {
   const r = size();
@@ -664,7 +668,12 @@ function showSeats(answer) {
   const box = document.getElementById('seats');
   if (!box) return;
   const howMany = answer.howmany || 0;
+  // The bar carries the seats, the name and the microphone, so it is up
+  // whenever any of those is worth having -- a sketch with no seats still
+  // wants the name and the talking.
+  document.getElementById('hud').hidden = !howMany && !room;
   box.hidden = howMany === 0;
+  amHost = !!answer.host;
   if (!howMany) return;
   mySeat = answer.mine;
   if (answer.begun) begun = true;
@@ -681,17 +690,22 @@ function showSeats(answer) {
     // The colour on top, and underneath it WHO -- because "blue" tells you
     // nothing across a telephone and "Ram" tells you everything.
     const label = SEATNAMES[k] || `seat ${k + 1}`;
-    const under = mine ? 'you' : who ? seat.name || `player ${k + 1}` : 'free';
+    const bot = !who && begun && (answer.bots || []).includes(k);
+    const under = mine ? 'you' : who ? seat.name || `player ${k + 1}` : bot ? 'bot' : 'free';
     b.innerHTML = `${label}<span class="name"></span>`;
     b.querySelector('.name').textContent = under;
     b.style.borderColor = SEATINK[k % 4];
     if (mine) b.style.background = SEATINK[k % 4];
     if (mine) b.style.color = '#08121a';
     b.classList.toggle('taken', !!who && !mine);
+    b.classList.toggle('bot', bot);
     b.classList.toggle('mine', !!mine);
     b.classList.toggle('turn', answer.turn === k);
+    // A bot's seat is still free to sit in -- somebody arriving late should be
+    // able to take over from one, which is the whole point of a bot standing
+    // in rather than the game refusing to start.
     b.disabled = !!who && !mine;
-    b.title = mine ? 'tap to stand up, or hold to change your name' : who ? `${under} is here` : 'sit here';
+    b.title = mine ? 'tap to stand up' : who ? `${under} is here` : bot ? 'a bot is playing this -- sit here to take over' : 'sit here';
     b.onclick = () => sit(mine ? -1 : k);
     // Your own seat is where you change your name -- there is no other button
     // it could belong to, and a whole field for it would sit there empty all
@@ -699,9 +713,8 @@ function showSeats(answer) {
     if (mine) {
       b.oncontextmenu = (e) => {
         e.preventDefault();
-        rename();
+        nameField.focus();
       };
-      b.ondblclick = () => rename();
     }
     box.append(b);
   }
@@ -713,13 +726,23 @@ function showSeats(answer) {
   }
 }
 
-function rename() {
-  const asked = prompt('what should the others call you?', myName || '');
-  if (asked === null) return;
-  myName = asked.trim().slice(0, 16);
-  sessionStorage.setItem('name', myName);
-  seatWord = '';
-  callSeats();
+// A field rather than a prompt. Somebody who has to guess that their own seat
+// can be long-pressed will never find out that it can.
+const nameField = document.getElementById('myname');
+if (nameField) {
+  nameField.value = myName;
+  let pending = null;
+  nameField.oninput = () => {
+    myName = nameField.value.trim().slice(0, 16);
+    sessionStorage.setItem('name', myName);
+    // Sent when the typing stops, not on every letter -- otherwise "Sushant"
+    // is seven requests and six of them show the others a half-typed name.
+    clearTimeout(pending);
+    pending = setTimeout(() => {
+      seatWord = '';
+      callSeats();
+    }, 400);
+  };
 }
 
 async function sit(seat) {
@@ -975,7 +998,7 @@ if (micButton) {
 let shownRules = '';
 function setup() {
   const rules = scene.rules || [];
-  const key = JSON.stringify(rules.map((r) => [r.name, r.label]));
+  const key = JSON.stringify([amHost, rules.map((r) => [r.name, r.label])]);
   if (key === shownRules) {
     // Only rebuild when the rules themselves change. Rebuilding every frame
     // would take the focus out of a box the moment anybody typed in it.
@@ -989,6 +1012,18 @@ function setup() {
     return;
   }
   shownRules = key;
+  // Only the host may change them; everybody else sees what they will be
+  // playing by, which is worth showing and not worth being able to edit.
+  document.getElementById('begin').hidden = !amHost;
+  let note = document.getElementById('waiting');
+  if (!note) {
+    note = document.createElement('div');
+    note.id = 'waiting';
+    note.className = 'waiting';
+    document.getElementById('begin').after(note);
+  }
+  note.hidden = amHost;
+  note.textContent = 'waiting for the first player to start';
   const box = document.getElementById('rules');
   box.innerHTML = '';
   for (const r of rules) {
@@ -1001,6 +1036,7 @@ function setup() {
     input.type = yesno ? 'checkbox' : 'number';
     if (yesno) input.checked = r.value > 0.5;
     else input.value = r.value;
+    input.disabled = !amHost;
     input.oninput = () => {
       const v = yesno ? (input.checked ? 1 : 0) : Number(input.value);
       if (Number.isFinite(v)) ask({ do: 'Dial', id: r.id, value: v });

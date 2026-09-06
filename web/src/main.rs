@@ -148,7 +148,7 @@ impl House {
             } else {
                 String::new()
             };
-            Studio { board, file: file.clone(), say, room: talk::Room::new(), began: std::time::Instant::now() }
+            Studio { board, file: file.clone(), say, room: talk::Room::new(), began: std::time::Instant::now(), last_bot: 0.0 }
         })
     }
 }
@@ -163,6 +163,8 @@ struct Studio {
     /// When the server started, so a peer's "last heard from" is a number
     /// rather than a clock reading.
     began: std::time::Instant,
+    /// The board clock when a bot last played, so they do not play instantly.
+    last_bot: f64,
     board: Board,
     file: String,
     say: String,
@@ -201,6 +203,7 @@ async fn main() {
         say,
         room: talk::Room::new(),
         began: std::time::Instant::now(),
+        last_bot: 0.0,
     });
     let shared: Shared = Arc::new(Mutex::new(house));
     let app = Router::new()
@@ -426,6 +429,97 @@ async fn new_room(State(s): State<Shared>) -> impl IntoResponse {
     )
 }
 
+/// How many seats this drawing has, or none if it is not that sort of drawing.
+fn seats_for_bots(studio: &Studio) -> usize {
+    studio.board.sheet.script.seats(studio.board.clock).map_or(0, |(_, n)| n)
+}
+
+/// How long a bot waits between moves, in game seconds.
+///
+/// Not for the bot's sake. A player who taps the die and sees three other
+/// turns happen in the same frame has not watched a game, they have been shown
+/// a result -- and the die takes about two and a half seconds to settle, so
+/// anything faster than that is playing before the number is known.
+pub const BOT_PAUSE: f64 = 1.1;
+
+/// Let a bot take one action, if it is a bot's turn and it has waited.
+///
+/// ## Deliberately witless
+///
+/// It knows nothing about Ludo, or about what any tap does. It tries each
+/// tappable figure in turn and keeps the first one that **changed something**
+/// -- and since the game's own rules already refuse every illegal move, the
+/// first tap that changes anything is by construction a legal one.
+///
+/// So the die gets thrown because tapping it changes `rolled`; nothing happens
+/// while the die is still rolling because every move is refused until it
+/// settles; and a token moves because moving it changes `at`. None of which is
+/// written here.
+///
+/// It plays *a* legal move rather than a good one -- the first that works,
+/// which on this board means the lowest-numbered token that can go. That is
+/// the whole brief for now. A better one would score the moves it found
+/// instead of taking the first, and it would need to know what the numbers
+/// mean, which is where the game would have to start telling it.
+fn bot_turn(studio: &mut Studio) {
+    if !studio.room.begun() {
+        return;
+    }
+    let Some((_, how_many)) = studio.board.sheet.script.seats(studio.board.clock) else { return };
+    let Some(turn) = studio.board.whose_turn() else { return };
+    if !studio.room.empty_seats(how_many).contains(&turn) {
+        return;
+    }
+    if studio.board.clock - studio.last_bot < BOT_PAUSE {
+        return;
+    }
+    studio.last_bot = studio.board.clock;
+
+    let mut groups: Vec<u32> = studio.board.sheet.marks.iter().map(|m| m.group).collect();
+    groups.sort_unstable();
+    groups.dedup();
+    groups.retain(|g| *g != 0);
+
+    let was_here = board_now(&studio.board);
+    let was_turn = studio.board.whose_turn();
+    for group in groups {
+        let before = studio.board.tally.values.clone();
+        studio.board.play_tap(group);
+        if board_now(&studio.board) != was_here || studio.board.whose_turn() != was_turn {
+            return;
+        }
+        // Nothing moved, so put back what the tap wrote. A refused move still
+        // sets its own working-out down -- `ok`, `was`, `cut` -- and leaving
+        // that behind would make the NEXT thing the bot tried look as though
+        // it had worked.
+        studio.board.tally.values = before;
+    }
+}
+
+/// Where everything on the board is, as numbers.
+///
+/// **The question a bot has to ask is "did anything move", not "did anything
+/// change".** A refused move still writes its own working-out to the tally, so
+/// comparing the tally says yes to every tap -- which it did, and the bot
+/// happily "played" by tapping the first token and moving nothing.
+///
+/// This is every mark's position, which is cheap: a mark is placed by two
+/// expressions and evaluating them is arithmetic, not drawing. It says nothing
+/// about what any of them mean, which is the point.
+fn board_now(board: &Board) -> Vec<(i64, i64)> {
+    let env = board.sheet.script.env(board.clock, &board.tally);
+    board
+        .sheet
+        .marks
+        .iter()
+        .map(|m| {
+            let at = m.pose_in(board.clock, &env).apply(plotkit::Cx::ZERO);
+            // To the hundredth, so a hair of floating-point drift is not a move.
+            ((at.re * 100.0).round() as i64, (at.im * 100.0).round() as i64)
+        })
+        .collect()
+}
+
 /// Why this person may not do this, if they may not.
 ///
 /// **The server never learns what a tap would have done.** It asks the drawing
@@ -527,8 +621,10 @@ async fn chat(State(s): State<Shared>, Json(chat): Json<Chat>) -> impl IntoRespo
         seated.iter().map(|(seat, who)| (*seat, studio.room.name_of(who))).collect();
     let my_name = studio.room.name_of(&chat.me);
     let begun = studio.room.begun();
+    let host = studio.room.host().is_some_and(|h| h == chat.me);
+    let bots = studio.room.empty_seats(seats_for_bots(studio));
     let my_seat = studio.room.seat_of(&chat.me);
-    let seats = studio.board.sheet.script.seats(studio.board.clock).map_or(0, |(_, n)| n);
+    let seats = seats_for_bots(studio);
     let turn = studio.board.whose_turn();
 
     // Who this peer should ring. Worked out HERE, with the tested rule, rather
@@ -565,7 +661,8 @@ async fn chat(State(s): State<Shared>, Json(chat): Json<Chat>) -> impl IntoRespo
     }
     let _ = write!(
         body,
-        "],\"howmany\":{seats},\"begun\":{begun},\"myname\":{},\"mine\":{},\"turn\":{}",
+        "],\"howmany\":{seats},\"begun\":{begun},\"host\":{host},\"bots\":{},\"myname\":{},\"mine\":{},\"turn\":{}",
+        serde_json::to_string(&bots).unwrap_or_else(|_| "[]".into()),
         serde_json::to_string(&my_name).unwrap_or_default(),
         my_seat.map_or("null".into(), |n| n.to_string()),
         turn.map_or("null".into(), |n| n.to_string())
@@ -756,7 +853,13 @@ fn apply(st: &mut Studio, ask: Ask) {
         // The clock is stepped by the client, because the client is what knows
         // when it drew last. A server ticking on its own would run at a rate
         // nobody was watching at.
-        Ask::Tick { seconds } => st.board.tick(seconds.clamp(0.0, 0.2)),
+        Ask::Tick { seconds } => {
+            st.board.tick(seconds.clamp(0.0, 0.2));
+            // Bots move on the clock, like everything else here -- so they
+            // pause between moves for the same reason the die takes time to
+            // settle, and a paused game has paused bots.
+            bot_turn(st);
+        }
     }
 }
 
@@ -797,7 +900,7 @@ mod tests {
     fn a_game() -> Studio {
         let mut board = Board::new();
         board.load("../samples/adding.easel").expect("the game opens");
-        Studio { board, file: String::new(), say: String::new(), room: talk::Room::new(), began: std::time::Instant::now() }
+        Studio { board, file: String::new(), say: String::new(), room: talk::Room::new(), began: std::time::Instant::now(), last_bot: 0.0 }
     }
 
     fn score(st: &Studio) -> f64 {
@@ -825,7 +928,7 @@ mod tests {
     fn ludo() -> Studio {
         let mut board = Board::new();
         board.load("../samples/ludogame.easel").expect("the game opens");
-        Studio { board, file: String::new(), say: String::new(), room: talk::Room::new(), began: std::time::Instant::now() }
+        Studio { board, file: String::new(), say: String::new(), room: talk::Room::new(), began: std::time::Instant::now(), last_bot: 0.0 }
     }
 
     /// Where the die is lying. The board throws it across the whole square, so
@@ -1019,6 +1122,75 @@ mod tests {
         assert!(refuse(&st, "bob", &lift).is_none(), "bob's turn now");
     }
 
+    /// ★ **A bot plays the seats nobody took**, and knows nothing about Ludo
+    /// to do it: it taps each figure until one changes something, and the
+    /// game's own rules refuse everything illegal, so the first tap that
+    /// changes anything is by construction a legal move.
+    #[test]
+    fn a_bot_plays_an_empty_seat() {
+        let mut st = ludo();
+        apply(&mut st, Ask::Play { on: true });
+        st.room.call("ann", 0.0);
+        st.room.sit("ann", 1, 4); // ann is green; seats 0, 2 and 3 are bots
+        st.room.begin();
+        assert_eq!(st.board.whose_turn(), Some(0), "a bot's turn");
+
+        let before = st.board.tally.values.clone();
+        for _ in 0..60 {
+            apply(&mut st, Ask::Tick { seconds: 0.1 });
+        }
+        assert_ne!(st.board.tally.values, before, "the bot did something");
+        let rolled = st.board.written().vars.iter().find(|(n, _)| n == "rolls").map(|(_, v)| v.re);
+        assert!(rolled.unwrap_or(0.0) >= 1.0, "and what it did was throw the die");
+    }
+
+    /// ★ It does not play a seat somebody is sitting in, however long it waits.
+    #[test]
+    fn a_bot_leaves_a_taken_seat_alone() {
+        let mut st = ludo();
+        apply(&mut st, Ask::Play { on: true });
+        st.room.call("ann", 0.0);
+        st.room.sit("ann", 0, 4); // ann has the seat that plays first
+        st.room.begin();
+        let before = st.board.tally.values.clone();
+        for _ in 0..60 {
+            apply(&mut st, Ask::Tick { seconds: 0.1 });
+        }
+        assert_eq!(st.board.tally.values, before, "it waited for her");
+    }
+
+    /// And nothing moves until somebody starts the game.
+    #[test]
+    fn no_bot_plays_before_the_game_begins() {
+        let mut st = ludo();
+        apply(&mut st, Ask::Play { on: true });
+        st.room.call("ann", 0.0);
+        st.room.sit("ann", 1, 4);
+        let before = st.board.tally.values.clone();
+        for _ in 0..40 {
+            apply(&mut st, Ask::Tick { seconds: 0.1 });
+        }
+        assert_eq!(st.board.tally.values, before, "nobody has pressed start");
+    }
+
+    /// ★ A bot pauses between moves. A player who taps the die and sees three
+    /// turns happen in the same frame has been shown a result rather than
+    /// having watched a game.
+    #[test]
+    fn a_bot_waits_between_moves() {
+        let mut st = ludo();
+        apply(&mut st, Ask::Play { on: true });
+        st.room.call("ann", 0.0);
+        st.room.sit("ann", 3, 4);
+        st.room.begin();
+        apply(&mut st, Ask::Tick { seconds: 0.1 });
+        let after_one = st.board.tally.values.clone();
+        // Well within the pause: nothing more should happen.
+        apply(&mut st, Ask::Tick { seconds: 0.1 });
+        apply(&mut st, Ask::Tick { seconds: 0.1 });
+        assert_eq!(st.board.tally.values, after_one, "it is still waiting");
+    }
+
     /// ★ A server that opens whatever path it is handed will one day be
     /// asked for something it should not have. That this one is meant for one
     /// person on one machine is not a reason to leave the door open -- it is a
@@ -1041,7 +1213,7 @@ mod tests {
     /// mistake: that is how you ask for one.
     #[test]
     fn a_name_that_is_not_there_yet_is_a_blank_page() {
-        let mut st = Studio { board: Board::new(), file: String::new(), say: String::new(), room: talk::Room::new(), began: std::time::Instant::now() };
+        let mut st = Studio { board: Board::new(), file: String::new(), say: String::new(), room: talk::Room::new(), began: std::time::Instant::now(), last_bot: 0.0 };
         apply(&mut st, Ask::OpenFile { name: "nothing-here-yet.easel".into() });
         assert!(st.board.sheet.is_empty());
         assert_eq!(st.file, "nothing-here-yet.easel", "and saving will go there");
@@ -1059,7 +1231,7 @@ mod tests {
         first.sheet.script.add("circle(0, 3)");
         first.save("web-test-open.easel").expect("wrote one");
 
-        let mut st = Studio { board: Board::new(), file: String::new(), say: String::new(), room: talk::Room::new(), began: std::time::Instant::now() };
+        let mut st = Studio { board: Board::new(), file: String::new(), say: String::new(), room: talk::Room::new(), began: std::time::Instant::now(), last_bot: 0.0 };
         st.board.sheet.script.add("ngon(0, 1, 5)");
         apply(&mut st, Ask::OpenFile { name: "web-test-open.easel".into() });
 

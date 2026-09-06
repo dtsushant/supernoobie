@@ -288,10 +288,6 @@ a.asbutton:hover { background: var(--lit); color: var(--ink); }
    this reason. The whole point is talking WHILE playing, and the game view
    hides the toolbar. */
 #mic {
-  position: absolute;
-  top: 0.7rem;
-  right: 0.7rem;
-  z-index: 30;
   padding: 0.4rem 0.7rem;
   border: 1px solid #22303c;
   border-radius: 0.4rem;
@@ -354,10 +350,6 @@ a.asbutton:hover { background: var(--lit); color: var(--ink); }
 
 /* ---- who is playing which colour ---------------------------------------- */
 #seats {
-  position: absolute;
-  top: 0.7rem;
-  left: 0.7rem;
-  z-index: 30;
   display: flex;
   gap: 0.3rem;
 }
@@ -382,10 +374,6 @@ a.asbutton:hover { background: var(--lit); color: var(--ink); }
 
 /* ---- which game this is -------------------------------------------------- */
 #room {
-  position: absolute;
-  bottom: 0.7rem;
-  right: 0.7rem;
-  z-index: 30;
   display: flex;
   align-items: center;
   gap: 0.45rem;
@@ -497,4 +485,57 @@ a.asbutton:hover { background: var(--lit); color: var(--ink); }
 }
 #seats button.mine {
   font-weight: 600;
+}
+
+/* ---- the players' bar ----------------------------------------------------
+   In normal flow above the canvas rather than floating over it. It used to
+   float, and on a small window it sat on the board -- and the canvas is
+   fitted to its own size, so giving the bar its own row simply makes the
+   board smaller, which is right. */
+#hud {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.5rem 0.7rem;
+  padding-top: calc(0.5rem + env(safe-area-inset-top, 0px));
+  background: var(--panel);
+  border-bottom: 1px solid var(--edge);
+}
+#hud-gap { flex: 1 1 auto; }
+#who {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  color: #6b7987;
+}
+#myname {
+  width: 8rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--edge);
+  border-radius: 0.35rem;
+  background: #0b1017;
+  color: #e3e9ef;
+  font: inherit;
+  font-size: 0.8rem;
+}
+#myname:focus { outline: none; border-color: #4fbcd4; }
+
+/* A seat a bot is sitting in. Plainly not a person, and plainly not free. */
+#seats button.bot {
+  opacity: 0.75;
+  border-style: dashed;
+}
+
+/* Waiting for somebody else to start. No button, because a button that does
+   nothing is worse than no button. */
+#setup .waiting {
+  margin-top: 1.1rem;
+  padding: 0.7rem;
+  border: 1px dashed var(--edge);
+  border-radius: 0.4rem;
+  text-align: center;
+  font-size: 0.85rem;
+  color: #94a1ae;
 }
