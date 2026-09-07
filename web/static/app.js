@@ -930,6 +930,27 @@ function showSeats(answer) {
   amHost = !!answer.host;
   if (!howMany) return;
   mySeat = answer.mine;
+
+  // **The game starting has to reach the people who did not start it.**
+  //
+  // This flag arrived correctly and nothing acted on it: the line that hides
+  // the lobby lives in `show`, which runs when a SCENE arrives -- and somebody
+  // sitting in the lobby with the game not yet running is asking for scenes
+  // rarely and pressing nothing. So the host began, everybody else was told,
+  // and everybody else went on looking at "waiting for the first player".
+  //
+  // The news arrives here, so it is acted on here.
+  if (answer.begun && !begun) {
+    begun = true;
+    if (!started) {
+      started = true;
+      document.getElementById('setup').hidden = true;
+      setFull(true);
+      // Their clock has to run too, or the board they are shown never moves.
+      ask({ do: 'Play', on: true });
+      say('the game has started');
+    }
+  }
   if (answer.begun) begun = true;
 
   // **Arriving is playing.** Somebody who opens a game link means to play it,
