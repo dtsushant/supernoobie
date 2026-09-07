@@ -24,7 +24,9 @@ tar --exclude=target --exclude=.git --exclude='*.png' -czf /tmp/ludo_src.tgz .
 echo "shipping to $HOST"
 scp -i "$KEY" -q /tmp/ludo_src.tgz "$HOST:/tmp/ludo_src.tgz"
 
-echo "building and restarting"
+# The build takes a few minutes -- it compiles the workspace on the server --
+# so anything wrapping this needs a longer patience than a shell's default.
+echo "building and restarting (a few minutes)"
 "${SSH[@]}" "$HOST" "set -e
   mkdir -p ~/$DIR && cd ~/$DIR
   tar -xzf /tmp/ludo_src.tgz && rm -f /tmp/ludo_src.tgz
