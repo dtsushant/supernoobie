@@ -557,7 +557,19 @@ if (!me) {
 
 let mine = null; // my microphone
 const links = new Map(); // peer id -> RTCPeerConnection
-let talking = false;
+
+// **Two things, not one.** `talking` used to mean both "I am in the audio
+// mesh" and "my microphone is live", so the only way to HEAR anybody was to be
+// broadcasting -- and turning yourself off disconnected you from everyone. That
+// is why the sound came and went.
+//
+// `joined` is being in the mesh: connections exist and other people are
+// audible. `muted` is whether my own track is enabled. Muting keeps every
+// connection up, which is what every conferencing application does and what
+// anybody pressing a microphone button expects.
+let joined = false;
+let muted = false;
+// `joined` therefore means "my microphone is in", not "I am connected".
 
 // Only the public STUN servers. STUN is cheap -- it answers one question,
 // "what address did this packet come from" -- so running one costs nothing and
@@ -1008,6 +1020,9 @@ function wireName(field) {
       seatWord = '';
       lobbyWord = '';
       callSeats();
+// And start signalling at once if this is a room, so people can hear each
+// other before anybody has thought about microphones.
+if (room) callIn();
     }, 400);
   };
 }
@@ -1041,7 +1056,7 @@ async function sit(seat) {
 // moving the controls. Sending somebody the link should not make you leave the
 // room you just made.
 setInterval(() => {
-  if (!talking) callSeats();
+  if (!room) callSeats();
 }, 1500);
 
 // And call in the instant we come back, rather than waiting for the next tick.
@@ -1111,7 +1126,7 @@ let shownHere = '';
 function showHere(here) {
   const box = document.getElementById('voices');
   if (!box) return;
-  box.hidden = !talking;
+  box.hidden = !joined;
   const key = here.join(',');
   if (key === shownHere) return;
   shownHere = key;
@@ -1152,14 +1167,52 @@ function link(who) {
       drop(who);
     }
   };
+
+  // **The bug that made it work once and then never again.** A connection
+  // opened before this browser had a microphone carried no audio, and adding
+  // the track later changes nothing on its own -- the far side has already
+  // agreed what this connection contains. Somebody has to offer again.
+  //
+  // `negotiationneeded` fires exactly when that is true. Only the caller
+  // re-offers, by the same rule that decides who calls: two sides re-offering
+  // at once is the glare condition again, and the answer to it has not changed.
+  pc.onnegotiationneeded = async () => {
+    if (!ringers.has(who) || pc.signalingState !== 'stable') return;
+    try {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      outbox.push({ to: who, kind: 'offer', body: JSON.stringify(offer) });
+    } catch (e) {
+      /* the next poll will try again */
+    }
+  };
+
   if (mine) for (const t of mine.getTracks()) pc.addTrack(t, mine);
   return pc;
+}
+
+// Who this browser is supposed to be calling, as the server last said. Kept so
+// `negotiationneeded` knows whether re-offering is its job.
+const ringers = new Set();
+
+// Put my microphone on every connection that has not got it, which makes
+// `negotiationneeded` fire and the offer go out again.
+function shareMicrophone() {
+  if (!mine) return;
+  for (const [who, pc] of links) {
+    const already = pc.getSenders().some((sn) => sn.track && sn.track.kind === 'audio');
+    if (!already) {
+      for (const t of mine.getTracks()) pc.addTrack(t, mine);
+    }
+    void who;
+  }
 }
 
 function drop(who) {
   const pc = links.get(who);
   if (pc) pc.close();
   links.delete(who);
+  ringers.delete(who);
   const ear = ears.get(who);
   if (ear) {
     try {
@@ -1214,7 +1267,13 @@ async function ring(who) {
 
 // One call: say I am here, hand over the post, collect mine.
 async function callIn() {
-  if (!talking) return;
+  // **In a room is in the mesh.** Connections form whether or not this browser
+  // has a microphone, so somebody who never presses the button still HEARS
+  // everybody -- which they could not before, because the connections were only
+  // made when the microphone was.
+  //
+  // A connection with no local track is perfectly ordinary; it receives.
+  if (!room) return;
   const post = outbox;
   outbox = [];
   let answer;
@@ -1233,7 +1292,10 @@ async function callIn() {
   for (const note of answer.post || []) await gotNote(note);
 
   const here = (answer.here || []).filter((w) => w !== me);
-  for (const who of answer.ring || []) if (!links.has(who)) await ring(who);
+  for (const who of answer.ring || []) {
+    ringers.add(who);
+    if (!links.has(who)) await ring(who);
+  }
   for (const who of [...links.keys()]) if (!here.includes(who)) drop(who);
 
   showHere(here);
@@ -1242,9 +1304,38 @@ async function callIn() {
   say(here.length ? `talking to ${here.length}` : 'nobody else is here yet');
 }
 
+// The microphone button. **Mute, once you are in** -- not "leave", which is
+// what it used to be, and which took your ears with it.
+async function micPressed() {
+  if (!joined) {
+    await talk(true);
+    return;
+  }
+  muted = !muted;
+  if (mine) for (const t of mine.getAudioTracks()) t.enabled = !muted;
+  showMic();
+}
+
+// What the two microphone buttons say. One place, because there are two of
+// them and they must never disagree.
+function showMic() {
+  const label = !joined ? '\u{1F3A4} talk' : muted ? '\u{1F507} unmute' : '\u{1F3A4} mute';
+  for (const b of [document.getElementById('mic'), document.getElementById('lobby-mic')]) {
+    if (!b) continue;
+    b.textContent = label;
+    b.classList.toggle('on', joined && !muted);
+    b.classList.toggle('muted', joined && muted);
+    b.title = !joined
+      ? 'join the talking'
+      : muted
+        ? 'your microphone is off -- you can still hear the others'
+        : 'turn your microphone off';
+  }
+}
+
 async function talk(on) {
   if (!on) {
-    talking = false;
+    joined = false;
     document.getElementById('vol').hidden = true;
     document.getElementById('speaker').hidden = true;
     showHere([]);
@@ -1252,12 +1343,7 @@ async function talk(on) {
     for (const who of [...links.keys()]) drop(who);
     if (mine) for (const t of mine.getTracks()) t.stop();
     mine = null;
-    micButton.classList.remove('on');
-    micButton.textContent = '\u{1F3A4} talk';
-    if (lobbyMic) {
-      lobbyMic.classList.remove('on');
-      lobbyMic.textContent = '\u{1F3A4} talk';
-    }
+    showMic();
     return;
   }
   if (!canTalk()) {
@@ -1276,15 +1362,13 @@ async function talk(on) {
     say(`no microphone: ${e.name}`);
     return;
   }
-  talking = true;
+  joined = true;
+  muted = false;
   document.getElementById('vol').hidden = false;
   document.getElementById('speaker').hidden = false;
-  micButton.classList.add('on');
-  micButton.textContent = '\u{1F3A4} talking';
-  if (lobbyMic) {
-    lobbyMic.classList.add('on');
-    lobbyMic.textContent = '\u{1F3A4} talking';
-  }
+  showMic();
+  // Any connection opened before the microphone existed carries no audio yet.
+  shareMicrophone();
   // My own level too, so the meter shows something before anybody else joins
   // -- otherwise a working microphone and a broken one look the same until a
   // second person turns up.
@@ -1304,7 +1388,7 @@ setInterval(callIn, 500);
 // waiting is when people say hello.
 const lobbyMic = document.getElementById('lobby-mic');
 if (lobbyMic) {
-  lobbyMic.onclick = () => talk(!talking);
+  lobbyMic.onclick = () => micPressed();
 }
 const volumeBar = document.getElementById('volume');
 if (volumeBar) {
@@ -1330,7 +1414,7 @@ if (speakerButton) {
 
 const micButton = document.getElementById('mic');
 if (micButton) {
-  micButton.onclick = () => talk(!talking);
+  micButton.onclick = () => micPressed();
   if (!canTalk()) {
     micButton.title = whyNot();
     micButton.classList.add('cannot');

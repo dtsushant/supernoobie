@@ -415,14 +415,23 @@ async fn act(State(s): State<Shared>, Query(w): Query<Where>, Json(ask): Json<As
 /// The **server** names it, because the server is the one that knows which
 /// names are taken. A page that made up its own would sooner or later drop two
 /// sets of friends into one game.
-async fn new_room(State(s): State<Shared>) -> impl IntoResponse {
+async fn new_room(State(s): State<Shared>, body: Option<Json<Chat>>) -> impl IntoResponse {
     let mut house = s.lock().expect("the drawing");
     let now = house.now();
     let name = house.rooms.make(now);
     // Made here and now, so the name is genuinely taken by the time the page
     // is told it -- otherwise two people pressing together could be handed the
     // same one.
-    house.room(&name);
+    let studio = house.room(&name);
+    // **Whoever pressed the button holds the controls**, said here rather than
+    // left to whichever browser calls in first. The page has not even loaded
+    // yet, and without this the host is decided by a race between the person
+    // who made the room and the first guest to open the link.
+    if let Some(Json(chat)) = body {
+        if !chat.me.is_empty() {
+            studio.room.call(&chat.me, now);
+        }
+    }
     (
         [(header::CONTENT_TYPE, "application/json")],
         format!("{{\"room\":{}}}", serde_json::to_string(&name).unwrap_or_default()),

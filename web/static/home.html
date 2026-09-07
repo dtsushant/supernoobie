@@ -27,6 +27,33 @@
     </div>
   </section>
 
+  <!-- Playing together. Its own section, because "start a room" and "join a
+       room" are the two things somebody arriving to play is looking for, and
+       neither of them was anywhere on this page: a room could only be made
+       from a link buried on one card, and joining meant being sent a URL. -->
+  <section>
+    <h2>play together</h2>
+    <div class="together-box">
+      <div class="together-half">
+        <h3>start a room</h3>
+        <p>You hold the controls, and you can hand them on. Send the code to
+           the others — any seat nobody takes is played by a bot.</p>
+        <button id="make-room">start a room</button>
+      </div>
+      <div class="together-half">
+        <h3>join a room</h3>
+        <p>The four characters the host reads out. Case and dashes do not
+           matter.</p>
+        <form id="join-room">
+          <input id="room-code" maxlength="9" placeholder="e.g. PEAR" autocomplete="off"
+                 autocapitalize="characters" spellcheck="false">
+          <button type="submit">join</button>
+        </form>
+        <p class="wrong" id="join-wrong" hidden></p>
+      </div>
+    </div>
+  </section>
+
   <section>
     <h2>open one</h2>
     <div class="cards" id="list">loading…</div>
@@ -49,6 +76,63 @@
 // itself with a `seats(...)` row; this list is only which cards offer the
 // button, and the server is what actually knows.
 const SHARED = ['samples/ludogame.easel'];
+
+// The game a room plays. One for now; when there are two, this is a choice on
+// the "start a room" side rather than a constant.
+const ROOM_GAME = 'samples/ludogame.easel';
+
+// The same name this browser uses in the studio, made here if it does not
+// exist yet -- so whoever presses "start a room" is the one the server marks
+// as holding the controls, rather than whichever browser happens to call in
+// first afterwards.
+function meHere() {
+  let id = sessionStorage.getItem('peer');
+  if (!id) {
+    id = Math.random().toString(36).slice(2, 10);
+    sessionStorage.setItem('peer', id);
+  }
+  return id;
+}
+
+function intoRoom(code) {
+  location.href =
+    `/studio?file=${encodeURIComponent(ROOM_GAME)}&play=1&room=${encodeURIComponent(code)}`;
+}
+
+document.getElementById('make-room').onclick = async (e) => {
+  const button = e.currentTarget;
+  button.disabled = true;
+  button.textContent = 'making a room\u2026';
+  try {
+    const r = await (
+      await fetch('/room', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ me: meHere() }),
+      })
+    ).json();
+    intoRoom(r.room);
+  } catch (err) {
+    button.disabled = false;
+    button.textContent = 'start a room';
+  }
+};
+
+document.getElementById('join-room').onsubmit = (e) => {
+  e.preventDefault();
+  const field = document.getElementById('room-code');
+  const wrong = document.getElementById('join-wrong');
+  // Read as generously as the server reads it: upper case, and only the
+  // letters the alphabet has. Somebody typing a code off a screen should not
+  // be defeated by a shift key.
+  const code = field.value.toUpperCase().replace(/[^A-HJ-NP-Z2-9]/g, '');
+  if (!code) {
+    wrong.hidden = false;
+    wrong.textContent = 'type the code the host read out';
+    return;
+  }
+  intoRoom(code);
+};
 
 const ABOUT = {
   'samples/ludogame.easel': ['LUDO, four players', 'one screen, or one each — press play, or start a room and send the link'],

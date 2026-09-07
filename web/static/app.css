@@ -278,6 +278,14 @@ a.asbutton:hover { background: var(--lit); color: var(--ink); }
   border-color: #6fcf97;
   color: #08121a;
 }
+/* Muted is not "off": the connections are up and the others are still
+   audible. Amber rather than grey, so it reads as a state rather than as a
+   thing that has stopped. */
+#mic.muted, #lobby-mic.muted {
+  background: #e0a44a;
+  border-color: #e0a44a;
+  color: #08121a;
+}
 /* No microphone to be had -- plain http over a network. Says why on hover
    rather than looking broken. */
 #mic.cannot {
@@ -676,3 +684,58 @@ a.asbutton:hover { background: var(--lit); color: var(--ink); }
   cursor: pointer;
 }
 #speaker.on { background: #6fcf97; border-color: #6fcf97; color: #08121a; }
+
+/* ---- starting and joining a room ----------------------------------------- */
+.together-box {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.together-half {
+  flex: 1 1 16rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+  background: var(--panel);
+}
+.together-half h3 {
+  margin: 0 0 0.35rem;
+  font-size: 0.95rem;
+  color: #e3e9ef;
+}
+.together-half p {
+  margin: 0 0 0.8rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: #94a1ae;
+}
+.together-half button {
+  padding: 0.55rem 0.9rem;
+  border: 0;
+  border-radius: 0.4rem;
+  background: #4fbcd4;
+  color: #08121a;
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.together-half button:hover { background: #6fd0e4; }
+.together-half button:disabled { background: #1b2530; color: #6b7987; cursor: default; }
+#join-room { display: flex; gap: 0.5rem; }
+#room-code {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  background: #0b1017;
+  color: #e3e9ef;
+  font: inherit;
+  font-family: ui-monospace, monospace;
+  font-size: 1rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+#room-code:focus { outline: none; border-color: #4fbcd4; }
+.wrong { color: #e0704a !important; margin-top: 0.5rem !important; }
