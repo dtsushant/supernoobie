@@ -148,7 +148,7 @@ impl House {
             } else {
                 String::new()
             };
-            Studio { board, file: file.clone(), say, room: talk::Room::new(), began: std::time::Instant::now(), last_bot: 0.0 }
+            Studio { board, file: file.clone(), say, room: talk::Room::new(), began: std::time::Instant::now(), last_bot: 0.0, ticked: std::time::Instant::now() }
         })
     }
 }
@@ -165,6 +165,14 @@ struct Studio {
     began: std::time::Instant,
     /// The board clock when a bot last played, so they do not play instantly.
     last_bot: f64,
+    /// When the clock was last moved on.
+    ///
+    /// **The room owns its clock.** Every browser used to send its own tick to
+    /// the same board, so two players ran the game at twice real time and four
+    /// at four times -- and each tick cost a whole scene. The server advances
+    /// it once by however long has really passed, however many people are
+    /// watching.
+    ticked: std::time::Instant,
     board: Board,
     file: String,
     say: String,
@@ -204,6 +212,7 @@ async fn main() {
         room: talk::Room::new(),
         began: std::time::Instant::now(),
         last_bot: 0.0,
+        ticked: std::time::Instant::now(),
     });
     let shared: Shared = Arc::new(Mutex::new(house));
     let app = Router::new()
@@ -353,6 +362,7 @@ impl From<&Where> for Look {
 async fn scene(State(s): State<Shared>, Query(w): Query<Where>) -> impl IntoResponse {
     let mut house = s.lock().expect("the drawing");
     let studio = house.room(&w.room);
+    advance(studio);
     (
         [(header::CONTENT_TYPE, "application/json")],
         easel::wire::since(&studio.board, (&w).into(), "", w.have),
@@ -402,6 +412,7 @@ enum Ask {
 async fn act(State(s): State<Shared>, Query(w): Query<Where>, Json(ask): Json<Ask>) -> impl IntoResponse {
     let mut house = s.lock().expect("the drawing");
     let studio = house.room(&w.room);
+    advance(studio);
     match refuse(studio, &w.me, &ask) {
         Some(why) => studio.say = why,
         None => apply(studio, ask),
@@ -441,6 +452,39 @@ async fn new_room(State(s): State<Shared>, body: Option<Json<Chat>>) -> impl Int
 /// How many seats this drawing has, or none if it is not that sort of drawing.
 fn seats_for_bots(studio: &Studio) -> usize {
     studio.board.sheet.script.seats(studio.board.clock).map_or(0, |(_, n)| n)
+}
+
+/// Move the clock on by however long has really passed, and let the bots play.
+///
+/// Called once per request rather than once per client, which is the whole
+/// point: the clock belongs to the room. A board being watched by four people
+/// runs at the same speed as one being watched by nobody.
+///
+/// Clamped, so a room nobody has looked at for an hour does not leap an hour
+/// forward the moment somebody opens it -- and a paused board does not move at
+/// all, which is what pausing means.
+///
+/// The clamp has to be generous, though, and 0.25 was not: whatever it discards
+/// is time the clock never gets back, so a gap between requests left the board
+/// running behind real time and the die settling late. Two seconds covers any
+/// plausible gap between frames and still refuses to replay an idle afternoon.
+fn advance(studio: &mut Studio) {
+    let gone = studio.ticked.elapsed().as_secs_f64();
+    studio.ticked = std::time::Instant::now();
+    advance_by(studio, gone);
+}
+
+/// The same, by a said amount — so a test can move a clock without waiting.
+///
+/// Split out because the whole point of the other one is that it reads the
+/// real clock, and a test that had to sleep for a second to watch a die settle
+/// would be a test nobody runs.
+fn advance_by(studio: &mut Studio, seconds: f64) {
+    if !studio.board.playing {
+        return;
+    }
+    studio.board.tick(seconds.clamp(0.0, 2.0));
+    bot_turn(studio);
 }
 
 /// How long a bot waits between moves, in game seconds.
@@ -898,13 +942,11 @@ fn apply(st: &mut Studio, ask: Ask) {
         // The clock is stepped by the client, because the client is what knows
         // when it drew last. A server ticking on its own would run at a rate
         // nobody was watching at.
-        Ask::Tick { seconds } => {
-            st.board.tick(seconds.clamp(0.0, 0.2));
-            // Bots move on the clock, like everything else here -- so they
-            // pause between moves for the same reason the die takes time to
-            // settle, and a paused game has paused bots.
-            bot_turn(st);
-        }
+        // Kept so an older page does not break, and deliberately doing
+        // nothing: the clock is the room's, moved on by `advance`. A browser
+        // that could push the clock along is a browser that could push it four
+        // times as fast by being four browsers.
+        Ask::Tick { seconds: _ } => {}
     }
 }
 
@@ -945,7 +987,7 @@ mod tests {
     fn a_game() -> Studio {
         let mut board = Board::new();
         board.load("../samples/adding.easel").expect("the game opens");
-        Studio { board, file: String::new(), say: String::new(), room: talk::Room::new(), began: std::time::Instant::now(), last_bot: 0.0 }
+        Studio { board, file: String::new(), say: String::new(), room: talk::Room::new(), began: std::time::Instant::now(), last_bot: 0.0, ticked: std::time::Instant::now() }
     }
 
     fn score(st: &Studio) -> f64 {
@@ -973,7 +1015,7 @@ mod tests {
     fn ludo() -> Studio {
         let mut board = Board::new();
         board.load("../samples/ludogame.easel").expect("the game opens");
-        Studio { board, file: String::new(), say: String::new(), room: talk::Room::new(), began: std::time::Instant::now(), last_bot: 0.0 }
+        Studio { board, file: String::new(), say: String::new(), room: talk::Room::new(), began: std::time::Instant::now(), last_bot: 0.0, ticked: std::time::Instant::now() }
     }
 
     /// Where the die is lying. The board throws it across the whole square, so
@@ -1023,7 +1065,7 @@ mod tests {
         // moves this test with it instead of breaking it.
         let ticks = (plotkit::dice::OVER / 0.05).ceil() as usize + 2;
         for _ in 0..ticks {
-            apply(&mut st, Ask::Tick { seconds: 0.05 });
+            advance_by(&mut st, 0.05);
         }
         assert_eq!(var(&st, "settled"), 1.0, "and now it has stopped");
         let face = var(&st, "die");
@@ -1182,7 +1224,7 @@ mod tests {
 
         let before = st.board.tally.values.clone();
         for _ in 0..60 {
-            apply(&mut st, Ask::Tick { seconds: 0.1 });
+            advance_by(&mut st, 0.1);
         }
         assert_ne!(st.board.tally.values, before, "the bot did something");
         let rolled = st.board.written().vars.iter().find(|(n, _)| n == "rolls").map(|(_, v)| v.re);
@@ -1199,7 +1241,7 @@ mod tests {
         st.room.begin(4);
         let before = st.board.tally.values.clone();
         for _ in 0..60 {
-            apply(&mut st, Ask::Tick { seconds: 0.1 });
+            advance_by(&mut st, 0.1);
         }
         assert_eq!(st.board.tally.values, before, "it waited for her");
     }
@@ -1213,7 +1255,7 @@ mod tests {
         st.room.sit("ann", 1, 4);
         let before = st.board.tally.values.clone();
         for _ in 0..40 {
-            apply(&mut st, Ask::Tick { seconds: 0.1 });
+            advance_by(&mut st, 0.1);
         }
         assert_eq!(st.board.tally.values, before, "nobody has pressed start");
     }
@@ -1228,11 +1270,11 @@ mod tests {
         st.room.call("ann", 0.0);
         st.room.sit("ann", 3, 4);
         st.room.begin(4);
-        apply(&mut st, Ask::Tick { seconds: 0.1 });
+        advance_by(&mut st, 0.1);
         let after_one = st.board.tally.values.clone();
         // Well within the pause: nothing more should happen.
-        apply(&mut st, Ask::Tick { seconds: 0.1 });
-        apply(&mut st, Ask::Tick { seconds: 0.1 });
+        advance_by(&mut st, 0.1);
+        advance_by(&mut st, 0.1);
         assert_eq!(st.board.tally.values, after_one, "it is still waiting");
     }
 
@@ -1258,7 +1300,7 @@ mod tests {
     /// mistake: that is how you ask for one.
     #[test]
     fn a_name_that_is_not_there_yet_is_a_blank_page() {
-        let mut st = Studio { board: Board::new(), file: String::new(), say: String::new(), room: talk::Room::new(), began: std::time::Instant::now(), last_bot: 0.0 };
+        let mut st = Studio { board: Board::new(), file: String::new(), say: String::new(), room: talk::Room::new(), began: std::time::Instant::now(), last_bot: 0.0, ticked: std::time::Instant::now() };
         apply(&mut st, Ask::OpenFile { name: "nothing-here-yet.easel".into() });
         assert!(st.board.sheet.is_empty());
         assert_eq!(st.file, "nothing-here-yet.easel", "and saving will go there");
@@ -1276,7 +1318,7 @@ mod tests {
         first.sheet.script.add("circle(0, 3)");
         first.save("web-test-open.easel").expect("wrote one");
 
-        let mut st = Studio { board: Board::new(), file: String::new(), say: String::new(), room: talk::Room::new(), began: std::time::Instant::now(), last_bot: 0.0 };
+        let mut st = Studio { board: Board::new(), file: String::new(), say: String::new(), room: talk::Room::new(), began: std::time::Instant::now(), last_bot: 0.0, ticked: std::time::Instant::now() };
         st.board.sheet.script.add("ngon(0, 1, 5)");
         apply(&mut st, Ask::OpenFile { name: "web-test-open.easel".into() });
 

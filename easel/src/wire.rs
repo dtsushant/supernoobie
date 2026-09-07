@@ -339,6 +339,7 @@ fn piece(
         if (hi.re - lo.re).max(hi.im - lo.im) * scale < 1.0 {
             continue;
         }
+        let run = thin(&run, 0.5 / scale);
         if !*first {
             out.push(',');
         }
@@ -366,6 +367,59 @@ fn points(out: &mut String, run: &[Cx]) {
         whole(out, z.im);
     }
     out.push(']');
+}
+
+/// Drop the points nobody could see.
+///
+/// **A curve is sampled for the worst case and sent for the actual one.** A
+/// `param` row is drawn at 321 points whatever it turns out to be, which is
+/// right for a spiral filling the window and absurd for a ring forty pixels
+/// across -- and the ring is what a board game is made of. Sixteen of them was
+/// most of a hundred and fifty kilobytes, thirty times a second, per player.
+///
+/// So: keep a point only if dropping it would move the line by as much as half
+/// a pixel. This is the Ramer–Douglas–Peucker idea done in one pass rather
+/// than recursively -- Urs Ramer, 1972, and David Douglas with Thomas Peucker,
+/// 1973, who arrived at it independently for generalising coastlines on maps,
+/// which is the same problem: a shape drawn at a size where most of its detail
+/// cannot be resolved.
+///
+/// One pass and not the recursive split, because the recursion is O(n log n)
+/// with a worst case of O(n²) and this runs on every shape of every frame. A
+/// single pass keeps a point whenever the running error would exceed the
+/// tolerance, which can keep a few more points than the true minimum and never
+/// keeps a visible error.
+///
+/// Ends are always kept: a curve that lost its last point would not close.
+fn thin(run: &[Cx], tolerance: f64) -> Vec<Cx> {
+    if run.len() < 3 || tolerance <= 0.0 {
+        return run.to_vec();
+    }
+    let mut out = Vec::with_capacity(run.len());
+    out.push(run[0]);
+    let mut anchor = run[0];
+    for k in 1..run.len() - 1 {
+        // How far the point stands off the line from the last kept point to
+        // the next one. If that is under half a pixel, the line drawn without
+        // it is the same line.
+        let (a, p, b) = (anchor, run[k], run[k + 1]);
+        let span = b - a;
+        let len = span.abs();
+        let off = if len < 1e-12 {
+            (p - a).abs()
+        } else {
+            // The perpendicular distance is the cross product over the length,
+            // which in complex numbers is the imaginary part of one times the
+            // conjugate of the other.
+            ((p - a).re * span.im - (p - a).im * span.re).abs() / len
+        };
+        if off > tolerance {
+            out.push(p);
+            anchor = p;
+        }
+    }
+    out.push(run[run.len() - 1]);
+    out
 }
 
 /// One coordinate, in hundredths, written a digit at a time.

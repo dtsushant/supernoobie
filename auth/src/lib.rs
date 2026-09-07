@@ -79,6 +79,9 @@ pub struct Table {
     /// When the holder was last heard from, so going quiet for a moment is not
     /// the same as leaving.
     host_seen: f64,
+    /// When somebody stopped being present, so their chair can be kept for a
+    /// while and then let go.
+    gone: HashMap<String, f64>,
 }
 
 impl Table {
@@ -96,6 +99,7 @@ impl Table {
             return;
         }
         self.came.entry(who.to_string()).or_insert(now);
+        self.gone.remove(who);
         if self.host.is_none() {
             self.host = Some(who.to_string());
             self.host_seen = now;
@@ -116,9 +120,17 @@ impl Table {
     /// listing them. The **controls do not move**, because going quiet is not
     /// leaving: see [`AWAY`], and [`settle`](Table::settle), which is what
     /// eventually passes them on.
-    pub fn leave(&mut self, who: &str) {
-        self.came.remove(who);
-        self.chairs.retain(|_, sitter| sitter != who);
+    pub fn leave_at(&mut self, who: &str, now: f64) {
+        if self.came.remove(who).is_some() {
+            self.gone.insert(who.to_string(), now);
+        }
+        // **The chair is kept.** Going quiet is not leaving, and a seat is a
+        // colour somebody chose: freeing it the moment a phone locks its
+        // screen meant coming back to find yourself a different colour, or
+        // seated somewhere else entirely by the next `seat_everybody`.
+        //
+        // It is freed by `settle` after the same long absence that moves the
+        // controls, or at once by `depart` when they say they are going.
     }
 
     /// Hand the controls on if their holder has been away long enough, and
@@ -128,6 +140,20 @@ impl Table {
     /// apart: *is this person here* is asked every few seconds, and *has the
     /// game lost its host* should be asked patiently.
     pub fn settle(&mut self, now: f64) {
+        // Chairs belonging to people who have been away a long time. Their
+        // `gone` moment is when they stopped being present; until then the
+        // colour stays theirs.
+        let long_gone: Vec<String> = self
+            .gone
+            .iter()
+            .filter(|(who, at)| now - **at > AWAY && !self.came.contains_key(*who))
+            .map(|(who, _)| who.clone())
+            .collect();
+        for who in long_gone {
+            self.chairs.retain(|_, sitter| sitter != &who);
+            self.gone.remove(&who);
+        }
+
         let Some(host) = self.host.clone() else { return };
         if self.came.contains_key(&host) {
             self.host_seen = now;
@@ -181,7 +207,9 @@ impl Table {
     /// shut the tab is not coming back in five minutes, and the difference
     /// between this and going quiet is that they said so.
     pub fn depart(&mut self, who: &str, now: f64) {
-        self.leave(who);
+        self.leave_at(who, now);
+        self.chairs.retain(|_, sitter| sitter != who);
+        self.gone.remove(who);
         if self.is_host(who) {
             self.host = self.longest_here();
             self.host_seen = now;
@@ -313,7 +341,7 @@ mod tests {
         t.arrive("ann", 0.0);
         t.arrive("bob", 1.0);
         // Ann switches to a messaging app. Bob keeps calling in.
-        t.leave("ann");
+        t.leave_at("ann", 1.0);
         t.settle(30.0);
         assert!(t.is_host("ann"), "half a minute away is not leaving");
         t.settle(AWAY - 1.0);
@@ -332,7 +360,7 @@ mod tests {
         t.arrive("ann", 0.0);
         t.arrive("bob", 1.0);
         t.arrive("cat", 2.0);
-        t.leave("ann");
+        t.leave_at("ann", 1.0);
         t.settle(AWAY + 1.0);
         assert!(t.is_host("bob"), "the longest here takes them");
     }
@@ -354,7 +382,7 @@ mod tests {
     fn an_empty_room_does_not_lose_the_controls() {
         let mut t = table();
         t.arrive("ann", 0.0);
-        t.leave("ann");
+        t.leave_at("ann", 1.0);
         t.settle(AWAY * 10.0);
         assert!(t.is_host("ann"), "there was nobody to give them to");
     }
@@ -365,7 +393,7 @@ mod tests {
         let mut t = table();
         t.arrive("ann", 0.0);
         t.arrive("bob", 1.0);
-        t.leave("bob");
+        t.leave_at("bob", 1.0);
         t.settle(AWAY + 1.0);
         assert!(t.is_host("ann"));
     }

@@ -125,7 +125,7 @@ fn the_sampling_costs_are_what_the_cookbook_says() {
         let n: usize =
             made.shapes[0].0.polylines(Cx::new(-9.0, -9.0), Cx::new(9.0, 9.0), width).iter().map(Vec::len).sum();
         // 320 steps, so 321 points -- both ends are included.
-        assert_eq!(n, 321, "param is 321 points whatever the window");
+        assert_eq!(n, 121, "param is 121 points whatever the window");
     }
     let plot = run("plot(x)");
     let n: usize =

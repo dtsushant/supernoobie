@@ -72,7 +72,18 @@ use crate::rule::{self, Rule, Tally};
 pub const PALETTE: [u32; 6] = [0x4FBCD4, 0xE0A44A, 0xE585AC, 0x6FCF97, 0x9B7BD4, 0xE0704A];
 
 /// How many samples a written curve gets.
-const SAMPLES: usize = 320;
+///
+/// **Every one of these is an expression evaluated**, so this number is the
+/// price of a `param` row, paid once per curve per frame. Three hundred and
+/// twenty was chosen for a curve filling the window; a board game is made of
+/// rings forty pixels across, and sixteen of those was most of the cost of a
+/// scene and most of its size.
+///
+/// A hundred and twenty is smooth well past any size these are drawn at -- a
+/// circle three hundred pixels round has a point every two and a half pixels
+/// -- and what is still too fine for the screen is dropped again on the way
+/// out, by `wire::thin`.
+const SAMPLES: usize = 120;
 
 /// One line of the script.
 #[derive(Clone, Debug, PartialEq)]

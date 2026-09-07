@@ -319,7 +319,7 @@ impl Room {
         self.post.retain(|who, _| here.contains(who));
         self.names.retain(|who, _| here.contains(who));
         for who in gone {
-            self.table.leave(&who);
+            self.table.leave_at(&who, now);
         }
     }
 
@@ -539,17 +539,50 @@ mod tests {
         assert!(!r.sit("", 0, 4), "and nobody cannot sit");
     }
 
-    /// ★ **A closed laptop gives up its seat.** Otherwise a game of three is
-    /// three people waiting for a fourth who is not coming.
+    /// ★ **A colour is kept through a lapse.** A phone that locks its screen
+    /// stops calling in, and freeing the seat at once meant coming back a
+    /// different colour -- or being put somewhere else entirely by the next
+    /// seating. Green, then blue, without anybody touching anything.
     #[test]
-    fn going_quiet_frees_a_seat() {
+    fn a_seat_survives_going_quiet() {
         let mut r = Room::new();
         r.call("ann", 0.0);
         r.call("bob", 0.0);
         r.sit("bob", 1, 4);
+        // Bob's phone sleeps. Ann keeps playing.
         r.call("ann", PATIENCE + 1.0);
-        assert_eq!(r.seat_of("bob"), None, "bob has gone, and his chair with him");
-        assert!(r.seated().is_empty());
+        assert_eq!(r.seat_of("bob"), Some(1), "green is still his");
+        // And he comes back to the same colour.
+        r.call("bob", PATIENCE + 2.0);
+        assert_eq!(r.seat_of("bob"), Some(1));
+    }
+
+    /// ★ But a chair is not held for ever. Away as long as it takes to lose
+    /// the controls, and it goes.
+    #[test]
+    fn a_seat_is_let_go_after_a_long_absence() {
+        let mut r = Room::new();
+        r.call("ann", 0.0);
+        r.call("bob", 0.0);
+        r.sit("bob", 1, 4);
+        // Noticed gone after PATIENCE, and the chair kept for AWAY after THAT
+        // -- the absence is timed from when it was noticed, since that is the
+        // last moment anybody knows he was there.
+        r.call("ann", PATIENCE + 1.0);
+        assert_eq!(r.seat_of("bob"), Some(1), "noticed, but the colour is kept");
+        r.call("ann", PATIENCE + auth::AWAY + 2.0);
+        assert_eq!(r.seat_of("bob"), None, "he really has gone");
+    }
+
+    /// And closing the page gives it up at once.
+    #[test]
+    fn closing_the_page_gives_up_the_seat() {
+        let mut r = Room::new();
+        r.call("ann", 0.0);
+        r.call("bob", 0.0);
+        r.sit("bob", 1, 4);
+        r.depart("bob", 1.0);
+        assert_eq!(r.seat_of("bob"), None);
     }
 
     /// And standing up is standing up.

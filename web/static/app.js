@@ -1548,13 +1548,20 @@ function frame(now) {
   // an instruction -- it is an amount. A skipped one is CARRIED rather than
   // dropped, so a slow answer makes the animation stutter and never makes it
   // run slow, which would look like the physics being wrong.
-  // A command outranks the clock, and the time it waits is carried rather than
-  // lost -- so a tap goes out at once and the animation catches up on the next
-  // frame instead of running slow.
-  if (scene.playing && !waiting && !pending && owed > 0) {
-    const dt = owed;
+  // **The clock is the room's, not this browser's.** Every page used to send
+  // its own tick to the same board, so two players ran the game at twice real
+  // time and four at four times -- and every tick cost a whole scene, which is
+  // most of why it felt slow.
+  //
+  // So this only ASKS for the picture. The server moves the clock on by
+  // however long has really passed, once, however many people are watching.
+  //
+  // Twenty a second rather than sixty: a board game is not a shooter, and each
+  // frame is a drawing over a network. The die tumbles perfectly well at
+  // twenty, and the machine does a third of the work.
+  if (scene.playing && !waiting && !pending && owed > 0.05) {
     owed = 0;
-    ask({ do: 'Tick', seconds: dt });
+    refresh();
   }
   requestAnimationFrame(frame);
 }
