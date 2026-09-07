@@ -148,7 +148,7 @@ impl House {
             } else {
                 String::new()
             };
-            Studio { board, file: file.clone(), say, room: talk::Room::new(), began: std::time::Instant::now(), last_bot: 0.0, ticked: std::time::Instant::now() }
+            Studio { board, file: file.clone(), say, room: talk::Room::new(), began: std::time::Instant::now(), last_bot: 0.0, ticked: std::time::Instant::now(), last_scene: None }
         })
     }
 }
@@ -165,6 +165,12 @@ struct Studio {
     began: std::time::Instant,
     /// The board clock when a bot last played, so they do not play instantly.
     last_bot: f64,
+    /// The last scene built, and what it was built from.
+    ///
+    /// Four people in a room are watching one board. With the clock landing on
+    /// a frame grid, their requests fall into the same instant — so the second,
+    /// third and fourth get the answer the first one paid for.
+    last_scene: Option<(u64, u64, u64, String)>,
     /// When the clock was last moved on.
     ///
     /// **The room owns its clock.** Every browser used to send its own tick to
@@ -213,6 +219,7 @@ async fn main() {
         began: std::time::Instant::now(),
         last_bot: 0.0,
         ticked: std::time::Instant::now(),
+        last_scene: None,
     });
     let shared: Shared = Arc::new(Mutex::new(house));
     let app = Router::new()
@@ -365,7 +372,7 @@ async fn scene(State(s): State<Shared>, Query(w): Query<Where>) -> impl IntoResp
     advance(studio);
     (
         [(header::CONTENT_TYPE, "application/json")],
-        easel::wire::since(&studio.board, (&w).into(), "", w.have),
+        scene_for(studio, (&w).into(), "", w.have),
     )
 }
 
@@ -418,7 +425,7 @@ async fn act(State(s): State<Shared>, Query(w): Query<Where>, Json(ask): Json<As
         None => apply(studio, ask),
     }
     let word = std::mem::take(&mut studio.say);
-    ([(header::CONTENT_TYPE, "application/json")], easel::wire::since(&studio.board, (&w).into(), &word, w.have))
+    ([(header::CONTENT_TYPE, "application/json")], scene_for(studio, (&w).into(), &word, w.have))
 }
 
 /// Make a room nobody is using, and say what it is called.
@@ -484,7 +491,48 @@ fn advance_by(studio: &mut Studio, seconds: f64) {
         return;
     }
     studio.board.tick(seconds.clamp(0.0, 2.0));
+    // **On to a frame grid.** Not for the animation -- a thirtieth of a second
+    // is finer than anybody sees -- but so that four people watching one board
+    // ask about the same instant. Land the clock anywhere and every request is
+    // a different drawing; land it on a grid and the second, third and fourth
+    // get the answer the first one paid for.
+    studio.board.clock = (studio.board.clock * FRAMES).round() / FRAMES;
     bot_turn(studio);
+}
+
+/// Frames a second the clock lands on.
+const FRAMES: f64 = 30.0;
+
+/// The scene, built once per room per frame however many people ask.
+fn scene_for(studio: &mut Studio, look: easel::Look, word: &str, have: u64) -> String {
+    let mark = easel::wire::still_mark(&studio.board, look);
+    // What the answer depends on: the instant, the drawing, and the window it
+    // is drawn for. Nothing else goes into it.
+    let when = studio.board.clock.to_bits();
+    let window = {
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for v in [look.lo.re, look.lo.im, look.hi.re, look.hi.im, look.px as f64, have as f64] {
+            for b in v.to_bits().to_le_bytes() {
+                h ^= b as u64;
+                h = h.wrapping_mul(0x100_0000_01b3);
+            }
+        }
+        h
+    };
+    // A word for the page is said once to one person, so a scene carrying one
+    // is never shared.
+    if word.is_empty() {
+        if let Some((w, m, k, body)) = &studio.last_scene {
+            if *w == when && *m == mark && *k == window {
+                return body.clone();
+            }
+        }
+    }
+    let body = easel::wire::since(&studio.board, look, word, have);
+    if word.is_empty() {
+        studio.last_scene = Some((when, mark, window, body.clone()));
+    }
+    body
 }
 
 /// How long a bot waits between moves, in game seconds.
@@ -987,7 +1035,7 @@ mod tests {
     fn a_game() -> Studio {
         let mut board = Board::new();
         board.load("../samples/adding.easel").expect("the game opens");
-        Studio { board, file: String::new(), say: String::new(), room: talk::Room::new(), began: std::time::Instant::now(), last_bot: 0.0, ticked: std::time::Instant::now() }
+        Studio { board, file: String::new(), say: String::new(), room: talk::Room::new(), began: std::time::Instant::now(), last_bot: 0.0, ticked: std::time::Instant::now(), last_scene: None }
     }
 
     fn score(st: &Studio) -> f64 {
@@ -1015,7 +1063,7 @@ mod tests {
     fn ludo() -> Studio {
         let mut board = Board::new();
         board.load("../samples/ludogame.easel").expect("the game opens");
-        Studio { board, file: String::new(), say: String::new(), room: talk::Room::new(), began: std::time::Instant::now(), last_bot: 0.0, ticked: std::time::Instant::now() }
+        Studio { board, file: String::new(), say: String::new(), room: talk::Room::new(), began: std::time::Instant::now(), last_bot: 0.0, ticked: std::time::Instant::now(), last_scene: None }
     }
 
     /// Where the die is lying. The board throws it across the whole square, so
@@ -1300,7 +1348,7 @@ mod tests {
     /// mistake: that is how you ask for one.
     #[test]
     fn a_name_that_is_not_there_yet_is_a_blank_page() {
-        let mut st = Studio { board: Board::new(), file: String::new(), say: String::new(), room: talk::Room::new(), began: std::time::Instant::now(), last_bot: 0.0, ticked: std::time::Instant::now() };
+        let mut st = Studio { board: Board::new(), file: String::new(), say: String::new(), room: talk::Room::new(), began: std::time::Instant::now(), last_bot: 0.0, ticked: std::time::Instant::now(), last_scene: None };
         apply(&mut st, Ask::OpenFile { name: "nothing-here-yet.easel".into() });
         assert!(st.board.sheet.is_empty());
         assert_eq!(st.file, "nothing-here-yet.easel", "and saving will go there");
@@ -1318,7 +1366,7 @@ mod tests {
         first.sheet.script.add("circle(0, 3)");
         first.save("web-test-open.easel").expect("wrote one");
 
-        let mut st = Studio { board: Board::new(), file: String::new(), say: String::new(), room: talk::Room::new(), began: std::time::Instant::now(), last_bot: 0.0, ticked: std::time::Instant::now() };
+        let mut st = Studio { board: Board::new(), file: String::new(), say: String::new(), room: talk::Room::new(), began: std::time::Instant::now(), last_bot: 0.0, ticked: std::time::Instant::now(), last_scene: None };
         st.board.sheet.script.add("ngon(0, 1, 5)");
         apply(&mut st, Ask::OpenFile { name: "web-test-open.easel".into() });
 

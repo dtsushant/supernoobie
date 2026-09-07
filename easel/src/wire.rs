@@ -123,22 +123,99 @@ pub fn still_mark(board: &Board, look: Look) -> u64 {
 /// The scene, leaving out the still half if the page says it already has
 /// `have`.
 pub fn since(board: &Board, look: Look, word: &str, have: u64) -> String {
-    let (still, moving) = board.frames();
     let mark = still_mark(board, look);
     let mut out = String::new();
     let _ = write!(out, "{{\"stillv\":{mark}");
     if have != mark {
+        // The half that never moves, and — once — the SHAPE of every piece
+        // that does, drawn about its own middle. See `movers`.
+        let (still, _) = board.frames();
         out.push_str(",\"still\":[");
         let mut first = true;
         for (shape, style) in still.parts() {
             piece(&mut out, shape, style, look, &mut first);
         }
         out.push(']');
+        out.push_str(",\"cast\":[");
+        let mut first = true;
+        for (k, m) in board.sheet.marks.iter().enumerate() {
+            if !m.moves() {
+                continue;
+            }
+            if !first {
+                out.push(',');
+            }
+            first = false;
+            let _ = write!(
+                out,
+                "{{\"i\":{k},\"c\":\"#{:06X}\",\"w\":2,\"fill\":{},\"p\":",
+                m.colour & 0xFF_FFFF,
+                m.filled
+            );
+            // In its OWN coordinates, about its anchor: this is the piece, not
+            // where the piece is. Sent once and moved about thereafter.
+            let here = m.anchor();
+            let local = m.shape().map(move |z| z - here);
+            let runs = local.polylines(Cx::new(-1e4, -1e4), Cx::new(1e4, 1e4), look.px);
+            out.push('[');
+            for (n, run) in runs.iter().enumerate() {
+                if n > 0 {
+                    out.push(',');
+                }
+                points(&mut out, &thin(run, 0.5 / scale_of(look)));
+            }
+            out.push(']');
+            out.push('}');
+        }
+        out.push(']');
     }
-    out.push_str(",\"pieces\":[");
+
+    // **Where each piece is, and nothing else.**
+    //
+    // Sixteen tokens are one shape sixteen times. Re-drawing them as fresh
+    // polylines every frame sent the same rings over and over, differing only
+    // in where they were — which is four numbers each.
+    out.push_str(",\"at\":[");
+    let env = board.sheet.script.env(board.clock, &board.tally);
     let mut first = true;
-    for (shape, style) in moving.parts() {
-        piece(&mut out, shape, style, look, &mut first);
+    for (k, m) in board.sheet.marks.iter().enumerate() {
+        if !m.moves() {
+            continue;
+        }
+        if !first {
+            out.push(',');
+        }
+        first = false;
+        let pose = m.pose_in(board.clock, &env);
+        let at = pose.apply(Cx::ZERO) + m.anchor();
+        // `a` is the multiplier: length and angle in one complex number, which
+        // is exactly what a canvas transform wants.
+        let _ = write!(out, "{{\"i\":{k},\"x\":");
+        whole(&mut out, at.re);
+        out.push_str(",\"y\":");
+        whole(&mut out, at.im);
+        let _ = write!(out, ",\"ar\":{:.5},\"ai\":{:.5}}}", pose.a.re, pose.a.im);
+    }
+    out.push_str("],\"pieces\":[");
+    // What is left: the shapes the SCRIPT draws that change — the die's face,
+    // the rings round a movable token, the counters. Few, and small, and they
+    // genuinely differ from frame to frame rather than merely moving.
+    let mut first = true;
+    let made = board.written();
+    for (k, (shape, colour)) in made.shapes.iter().enumerate() {
+        if made.still.get(k).copied().unwrap_or(false) {
+            continue;
+        }
+        piece(&mut out, shape, &line_style(*colour), look, &mut first);
+    }
+    for (k, (shape, colour)) in made.solid.iter().enumerate() {
+        if made.still_solid.get(k).copied().unwrap_or(false) {
+            continue;
+        }
+        piece(&mut out, shape, &fill_style(*colour), look, &mut first);
+    }
+    if let Some(wet) = board.drawing() {
+        piece(&mut out, &wet.shape(), &fill_style(wet.colour), look, &mut first);
     }
     out.push_str("],\"rings\":[");
     for (k, ring) in board.selection().into_iter().enumerate() {
@@ -210,8 +287,22 @@ pub fn since(board: &Board, look: Look, word: &str, have: u64) -> String {
     out.push(']');
     out.push_str(",\"say\":");
     text(&mut out, word);
-    out.push_str(",\"tree\":");
-    tree(&mut out, board);
+    // **The list of rows, and only when it has changed.**
+    //
+    // This is the whole script as text -- four hundred rows of a game of Ludo,
+    // seventy-odd kilobytes -- and it was sent on EVERY frame. It was ninety
+    // per cent of a scene, and none of it changes while anybody is playing:
+    // the tree is the editor's panel, and the editor is not open.
+    //
+    // Gated on the same mark as the still half, which is a hash of the rows and
+    // the marks -- so it goes again the moment a row is edited or a dial moved,
+    // and never in between. Finding this took measuring the response by key
+    // rather than reasoning about the drawing, which is where I had been
+    // looking.
+    if have != mark {
+        out.push_str(",\"tree\":");
+        tree(&mut out, board);
+    }
     out.push('}');
     out
 }
@@ -318,9 +409,7 @@ fn piece(
     look: Look,
     first: &mut bool,
 ) {
-    // How many pixels a world unit is worth, for throwing away what cannot be
-    // seen.
-    let scale = look.px as f64 / (look.hi.re - look.lo.re).abs().max(1e-9);
+    let scale = scale_of(look);
     for run in shape.polylines(look.lo, look.hi, look.px) {
         if run.len() < 2 && !style.filled {
             continue;
@@ -367,6 +456,21 @@ fn points(out: &mut String, run: &[Cx]) {
         whole(out, z.im);
     }
     out.push(']');
+}
+
+/// A style for a shape the script drew, which carries only a colour.
+fn line_style(colour: u32) -> plotkit::frame::Style {
+    plotkit::frame::Style { colour, width: 2, filled: false, ..Default::default() }
+}
+
+fn fill_style(colour: u32) -> plotkit::frame::Style {
+    plotkit::frame::Style { colour, width: 2, filled: true, ..Default::default() }
+}
+
+/// How many pixels a world unit is worth, for throwing away what cannot be
+/// seen.
+fn scale_of(look: Look) -> f64 {
+    look.px as f64 / (look.hi.re - look.lo.re).abs().max(1e-9)
 }
 
 /// Drop the points nobody could see.

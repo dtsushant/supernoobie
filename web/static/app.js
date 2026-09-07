@@ -21,6 +21,10 @@ let scene = { pieces: [], rings: [], tree: [], clock: 0, playing: false };
 // which is most frames.
 let still = [];
 let held = 0;
+// The row list, kept between frames. It arrives with the still half and only
+// when the drawing has changed -- it is the whole script as text, and sending
+// it every frame was ninety per cent of a scene.
+let tree = [];
 let waiting = false;
 
 // ---- the view ------------------------------------------------------------
@@ -153,9 +157,16 @@ function fit() {
   view.scale = Math.min(r.width / ((hix - lox) * pad), r.height / ((hiy - loy) * pad));
 }
 
+// The pieces that move, drawn once about their own middles. Sixteen tokens are
+// one shape sixteen times; keeping the shape and moving it is the whole of the
+// change.
+let cast = [];
+
 function keep() {
   if (scene.still) {
     still = scene.still;
+    cast = scene.cast || [];
+    if (scene.tree) tree = scene.tree;
     held = scene.stillv;
     fit();
   } else if (scene.stillv !== undefined && scene.stillv !== held) {
@@ -187,7 +198,43 @@ function paint() {
   // `wire::GRAIN`. Formatting thirty thousand floats as decimal text was
   // taking 84ms a scene, which is what made every tap feel slow.
   const G = 0.01;
-  for (const piece of still.concat(scene.pieces)) {
+
+  // Everything that does not move, then every piece that does -- each drawn
+  // from the shape we already hold, put where the server says it is. What
+  // arrives per frame is four numbers a piece rather than a fresh outline.
+  const shapes = still.concat(scene.pieces || []);
+  const where = new Map((scene.at || []).map((a) => [a.i, a]));
+  for (const part of cast) {
+    const a = where.get(part.i);
+    if (!a) continue;
+    ctx.beginPath();
+    const p = part.p;
+    for (const run of p) {
+      if (run.length < 4) continue;
+      // z -> a*z + at, in complex numbers: the multiplier carries the size and
+      // the angle together, which is why there is no matrix here.
+      const put = (k) => {
+        const x = run[k] * G;
+        const y = run[k + 1] * G;
+        return toScreen([a.ar * x - a.ai * y + a.x * G, a.ar * y + a.ai * x + a.y * G]);
+      };
+      ctx.moveTo(...put(0));
+      for (let k = 2; k < run.length; k += 2) ctx.lineTo(...put(k));
+      if (part.fill) ctx.closePath();
+    }
+    if (part.fill) {
+      ctx.fillStyle = part.c;
+      ctx.fill('evenodd');
+    } else {
+      ctx.strokeStyle = part.c;
+      ctx.lineWidth = part.w;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.stroke();
+    }
+  }
+
+  for (const piece of shapes) {
     const p = piece.p;
     if (p.length < 4) continue;
     ctx.beginPath();
@@ -241,7 +288,7 @@ function show() {
   shapes.textContent = '';
   rows.textContent = '';
 
-  for (const line of scene.tree) {
+  for (const line of tree) {
     if (line.kind === 'title') continue;
     if (line.kind === 'group') shapes.append(groupLine(line));
     if (line.kind === 'mark') shapes.append(markLine(line));
