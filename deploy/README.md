@@ -1,54 +1,64 @@
-# The studio on the test server
+# Running the studio on a server
 
-    https://studio.example/
+    docker build -t ludo:latest .
+    docker compose -p ludo -f deploy/docker-compose.yml up -d
 
-Public, real certificate, and therefore microphones work.
+Then point a reverse proxy at `ludo-app:8088` under a name whose certificate you
+already hold.
 
-## Where it runs
+## Why there is a proxy at all
 
-The same host as the Loop the other application stack — another application and the
-network operator behind one Caddy on 443. **Nothing of theirs was taken down**
-to put this here, which was the original plan and turned out to be a bad one.
+The game would be perfectly happy on a bare port. **A browser will not give a
+page a microphone unless the page is a secure context** — `https`, or
+`localhost` — and on plain `http` `getUserMedia` is not refused, it is
+*absent*, so the failure is a `TypeError` about `undefined` rather than
+anything a person could act on.
 
-    ludo-app        this, on the host's existing service's docker network, no public port
-    the proxy      theirs, fronts both
+So the proxy is not for the game. It is for the four people talking to each
+other.
 
-## The two changes on the server
+## If the host already runs something else
 
-1. `~/ludo/` — the source, and `docker compose -p ludo -f deploy/docker-compose.yml up -d`
-2. One block appended to `the proxy config`, routing `studio.example`
-   to `ludo-app:8088`.
+Two rules, learned from a host that did:
 
-`billing` was chosen because it is a name that already resolves publicly and
-reaches the box while **nothing serves it** — Caddy answered it `200` with an
-empty body, because the operator console moved to `the fourth host` and the DNS
-record was left behind. So it displaces nothing.
+**Do not take anything down to make room.** Add a name beside what is there.
+A proxy already terminating TLS will serve another host for the cost of one
+block, and rolling that back is deleting the block.
 
-## Taking it away
+**Validate before reloading.** A proxy config that will not parse takes down
+everything it was already serving, not just the thing being added:
 
-```bash
-# the app
-docker compose -p ludo -f ~/ludo/deploy/docker-compose.yml down
-docker rmi ludo:latest                 # ~1 GB back; the host runs at 81%
+    caddy validate --config /etc/caddy/Caddyfile     # first
+    caddy reload   --config /etc/caddy/Caddyfile     # only then
 
-# the route
-cd the other application's directory
-cp Caddyfile.before-ludo Caddyfile
-docker exec -w /etc/caddy the proxy caddy validate --config /etc/caddy/Caddyfile
-docker exec -w /etc/caddy the proxy caddy reload   --config /etc/caddy/Caddyfile
-```
+Keep a copy of the config as it was, so a rollback is a file and not a memory.
+And check the *other* hosts after reloading, not just the new one — the failure
+worth catching is the one you did not mean to cause.
 
-It also removes itself: `ship.sh` ships the Caddyfile from the other application's repo, so
-the next the other application deploy overwrites the block. Convenient, and worth knowing —
-a play test can end because somebody else deployed.
+## Building
+
+Built on the server rather than shipped as a binary, because the machine this
+was written on is aarch64 and servers commonly are not, and a cross toolchain
+is a great deal of setup to avoid one `docker build`.
+
+Two stages, so what runs is about 90 MB rather than a Rust toolchain. Only
+`samples/*.easel` travel — the HTML, JavaScript and CSS are `include_str!`d
+into the binary, which also means the container has nothing to read but the
+drawings.
 
 ## Before letting anybody in
 
 **There is no authentication.** Anyone with the URL can open the studio, join
 any room, and edit any drawing in it. That is fine for an afternoon with four
-friends and is not fine indefinitely — and this one is on a public hostname,
-not behind the VPN.
+friends and is not fine indefinitely.
 
 What contains it: a read-only root filesystem, a non-root user, no privilege
 escalation, nothing in the image but the sample drawings, and no published
 port. What does not contain it: anything at all about who is asking.
+
+## Taking it away
+
+    docker compose -p ludo -f deploy/docker-compose.yml down
+    docker rmi ludo:latest
+
+and remove the block from the proxy config.

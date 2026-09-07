@@ -104,12 +104,14 @@ pub struct Room {
     /// over a game already in progress — and pressing it set the house rules
     /// again underneath everybody.
     begun: bool,
-    /// Seat number to the peer sitting in it.
+    /// Who is at the table, who is sitting where, and who holds the controls.
     ///
-    /// Kept this way round because the question asked is nearly always "is
-    /// this seat free", and because it makes two people in one seat
-    /// impossible to represent rather than merely unlikely.
-    chairs: HashMap<usize, String>,
+    /// In [`auth`] rather than here, because "who may do what" turned out to
+    /// be the thing this file kept getting wrong — the host was *worked out*
+    /// from the lowest occupied seat, so it moved whenever anybody sat down,
+    /// and a player watched the start button appear and disappear as the
+    /// others chose their colours.
+    table: auth::Table,
 }
 
 impl Room {
@@ -126,6 +128,7 @@ impl Room {
             return Vec::new();
         }
         self.seen.insert(me.to_string(), now);
+        self.table.arrive(me, now);
         self.forget(now);
         self.post.remove(me).unwrap_or_default()
     }
@@ -167,16 +170,7 @@ impl Room {
     /// Returns whether the seat is now theirs — including when it already was,
     /// since a client that repeats itself should not be told no.
     pub fn sit(&mut self, me: &str, seat: usize, how_many: usize) -> bool {
-        if me.is_empty() || seat >= how_many {
-            return false;
-        }
-        match self.chairs.get(&seat) {
-            Some(who) if who != me => return false,
-            _ => {}
-        }
-        self.chairs.retain(|_, who| who != me);
-        self.chairs.insert(seat, me.to_string());
-        true
+        self.table.sit(me, seat, how_many)
     }
 
     /// Call somebody something. Empty puts them back to being nobody in
@@ -223,20 +217,13 @@ impl Room {
     /// looking. If nobody has sat down at all, the first name in the room
     /// holds it, so a game with one person in it is not waiting for a host who
     /// does not exist.
-    pub fn host(&self) -> Option<String> {
-        if let Some((_, who)) = self.seated().first() {
-            return Some(who.clone());
-        }
-        self.here().first().cloned()
-    }
-
     /// Which seats nobody is sitting in.
     ///
     /// What the bots take when the game begins. Worked out rather than stored,
     /// so somebody standing up mid-game does not leave a seat that is neither
     /// a person nor a bot.
     pub fn empty_seats(&self, how_many: usize) -> Vec<usize> {
-        (0..how_many).filter(|seat| !self.chairs.contains_key(seat)).collect()
+        self.table.empty_seats(how_many)
     }
 
     /// Has the game begun?
@@ -259,31 +246,41 @@ impl Room {
     /// is seated the same way twice.
     pub fn begin(&mut self, how_many: usize) {
         self.begun = true;
-        let mut waiting: Vec<String> =
-            self.here().into_iter().filter(|who| self.seat_of(who).is_none()).collect();
-        waiting.sort();
-        for who in waiting {
-            let Some(seat) = self.empty_seats(how_many).first().copied() else { break };
-            self.sit(&who, seat, how_many);
-        }
+        self.table.seat_everybody(how_many);
     }
 
     /// Which seat somebody is in, if any.
     pub fn seat_of(&self, me: &str) -> Option<usize> {
-        self.chairs.iter().find(|(_, who)| *who == me).map(|(seat, _)| *seat)
+        self.table.seat_of(me)
+    }
+
+    /// Who holds the controls, and whether that is me.
+    pub fn host(&self) -> Option<String> {
+        self.table.host().map(str::to_string)
+    }
+
+    pub fn is_host(&self, me: &str) -> bool {
+        self.table.is_host(me)
+    }
+
+    /// Give the controls away. Only the holder may, and only to somebody here.
+    pub fn hand_over(&mut self, from: &str, to: &str) -> bool {
+        self.table.hand_over(from, to)
+    }
+
+    /// May this person do this? See [`auth::Deed`].
+    pub fn may(&self, who: &str, deed: auth::Deed, turn: Option<usize>) -> bool {
+        self.table.may(who, deed, turn)
     }
 
     /// Who is in which seat, lowest first.
     pub fn seated(&self) -> Vec<(usize, String)> {
-        let mut all: Vec<(usize, String)> =
-            self.chairs.iter().map(|(k, v)| (*k, v.clone())).collect();
-        all.sort();
-        all
+        self.table.seated()
     }
 
     /// Stand up, so somebody else may sit down.
     pub fn stand(&mut self, me: &str) {
-        self.chairs.retain(|_, who| who != me);
+        self.table.stand(me);
     }
 
     /// Drop anybody who has gone quiet, and their post — and their seat — with
@@ -292,11 +289,19 @@ impl Room {
     /// A seat held by somebody who has closed their laptop is a game of three
     /// people waiting for a fourth who is not coming.
     fn forget(&mut self, now: f64) {
+        let gone: Vec<String> = self
+            .seen
+            .iter()
+            .filter(|(_, at)| now - **at >= PATIENCE)
+            .map(|(who, _)| who.clone())
+            .collect();
         self.seen.retain(|_, at| now - *at < PATIENCE);
         let here: Vec<String> = self.seen.keys().cloned().collect();
         self.post.retain(|who, _| here.contains(who));
-        self.chairs.retain(|_, who| here.contains(who));
         self.names.retain(|who, _| here.contains(who));
+        for who in gone {
+            self.table.leave(&who);
+        }
     }
 
     /// **Who calls whom.** Both peers must not offer at once, or each answers
@@ -489,8 +494,9 @@ mod tests {
         assert!(r.sit("ann", 2, 4));
         assert_eq!(r.seat_of("ann"), Some(2));
         assert_eq!(r.seated(), vec![(2, "ann".to_string())], "and only the new one");
-        let mut b = Room::new();
-        b.call("bob", 0.0);
+        // Bob has to be in THIS room to sit in it -- the test used to call him
+        // into a different one and pass, because sitting did not check.
+        r.call("bob", 0.0);
         assert!(r.sit("bob", 0, 4), "seat 0 is free again");
     }
 
@@ -632,27 +638,43 @@ mod tests {
         assert!(r.empty_seats(4).is_empty(), "no bots needed");
     }
 
-    /// ★ **One person decides when it starts.** Four start buttons is four
-    /// people setting the house rules underneath one another.
+    /// ★ **Hostship does not move when people sit down.** It used to be
+    /// worked out from the lowest occupied seat, so it changed every time
+    /// anybody took a colour -- and a player watched the start button appear
+    /// and disappear as the others chose. It is held now; see [`auth`], which
+    /// is where the rule and the rest of its tests live.
     #[test]
-    fn the_lowest_seat_holds_the_start() {
+    fn the_controls_stay_with_whoever_has_them() {
         let mut r = Room::new();
         r.call("ann", 0.0);
-        r.call("bob", 0.0);
-        r.sit("bob", 2, 4);
-        assert_eq!(r.host(), Some("bob".into()), "bob sat down; ann only opened the link");
-        r.sit("ann", 1, 4);
-        assert_eq!(r.host(), Some("ann".into()), "and now ann is lower");
+        r.call("bob", 1.0);
+        assert_eq!(r.host(), Some("ann".into()), "she was here first");
+        r.sit("bob", 0, 4);
+        assert_eq!(r.host(), Some("ann".into()), "and taking the lowest seat does not take them");
+        r.sit("ann", 3, 4);
+        assert_eq!(r.host(), Some("ann".into()));
     }
 
-    /// With nobody seated the first name holds it, so a game with one person
-    /// in it is not waiting for a host who does not exist.
+    /// A room always has somebody holding them, so a game with one person in
+    /// it is not waiting for a host who does not exist.
     #[test]
     fn somebody_always_holds_the_start() {
         let mut r = Room::new();
         assert_eq!(r.host(), None, "an empty room has nobody");
         r.call("zoe", 0.0);
         assert_eq!(r.host(), Some("zoe".into()));
+    }
+
+    /// ★ And they pass on when their holder goes quiet, or three people wait
+    /// for somebody who has closed their laptop.
+    #[test]
+    fn the_controls_pass_on_when_the_holder_goes_quiet() {
+        let mut r = Room::new();
+        r.call("ann", 0.0);
+        r.call("bob", 1.0);
+        assert_eq!(r.host(), Some("ann".into()));
+        r.call("bob", PATIENCE + 2.0);
+        assert_eq!(r.host(), Some("bob".into()), "ann has gone");
     }
 
     /// ★ Seats nobody took are what the bots get. Worked out rather than
@@ -675,8 +697,8 @@ mod tests {
     /// fails with a `TypeError` about `undefined`.
     #[test]
     fn it_says_why_the_microphone_is_missing() {
-        assert!(Room::advice(false, "192.0.2.10:8088").is_some());
-        assert!(Room::advice(true, "192.0.2.10:8088").is_none(), "https is fine");
+        assert!(Room::advice(false, "192.0.2.20:8088").is_some());
+        assert!(Room::advice(true, "192.0.2.20:8088").is_none(), "https is fine");
         assert!(Room::advice(false, "localhost:8088").is_none(), "and so is localhost");
         assert!(Room::advice(false, "127.0.0.1:8088").is_none());
     }

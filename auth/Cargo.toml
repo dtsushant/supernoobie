@@ -1,0 +1,9 @@
+[package]
+name = "auth"
+version = "0.1.0"
+edition = "2021"
+
+# Nothing. Who may do what is a question about people and deeds, not about
+# drawings, sound, or the wire -- and a crate with no dependencies is one that
+# cannot be made to care about any of them by accident.
+[dependencies]

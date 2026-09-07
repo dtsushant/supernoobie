@@ -102,7 +102,13 @@
     <div id="hud" hidden>
       <div id="seats"></div>
       <label id="who"><span>you are</span><input id="myname" maxlength="16" placeholder="your name" autocomplete="off"></label>
+      <!-- One sentence that is always true about the game. It used to come
+           from three places that disagreed, which is most of why the controls
+           seemed to move about. -->
+      <span id="state" hidden></span>
       <span id="hud-gap"></span>
+      <label id="vol" hidden><span>volume</span><input id="volume" type="range" min="0" max="150" value="100"></label>
+      <button id="speaker" hidden title="play through the loudspeaker">&#x1F50A;</button>
       <span id="room" hidden><span id="room-code"></span><button id="room-copy">copy link</button></span>
       <button id="mic" title="talk to the others">&#x1F3A4; talk</button>
     </div>

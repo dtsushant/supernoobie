@@ -633,3 +633,46 @@ a.asbutton:hover { background: var(--lit); color: var(--ink); }
   color: #6b7987;
   cursor: default;
 }
+
+/* ---- the one true sentence ---------------------------------------------- */
+#state {
+  padding: 0.3rem 0.6rem;
+  border-radius: 0.35rem;
+  background: #1b2530;
+  font-size: 0.8rem;
+  color: #b9c4d0;
+}
+#state.my-turn { background: #6fcf97; color: #08121a; font-weight: 600; }
+#state.waiting-state { color: #94a1ae; }
+
+/* Who holds the controls, and giving them away. */
+#lobby-list .tag.host { background: #4fbcd4; color: #08121a; }
+#lobby-list .give {
+  padding: 0.2rem 0.45rem;
+  border: 1px solid var(--edge);
+  border-radius: 0.3rem;
+  background: #121821;
+  color: #94a1ae;
+  font: inherit;
+  font-size: 0.66rem;
+  cursor: pointer;
+}
+#lobby-list .give:hover { color: #e3e9ef; border-color: #46525e; }
+
+/* ---- hearing the others ---------------------------------------------------
+   A telephone earpiece is the default route for a call, and a browser treats
+   WebRTC audio as a call. On a handset that means the sound comes out of the
+   little speaker you hold to your ear, which is useless with the thing lying
+   on a table between four people. */
+#vol { display: flex; align-items: center; gap: 0.4rem; font-size: 0.72rem; color: #6b7987; }
+#volume { width: 5.5rem; }
+#speaker {
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--edge);
+  border-radius: 0.35rem;
+  background: #121821;
+  color: #b9c4d0;
+  font: inherit;
+  cursor: pointer;
+}
+#speaker.on { background: #6fcf97; border-color: #6fcf97; color: #08121a; }

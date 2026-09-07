@@ -544,8 +544,10 @@ fn refuse(studio: &Studio, me: &str, ask: &Ask) -> Option<String> {
         return None;
     }
     let turn = studio.board.whose_turn()?;
+    if studio.room.may(me, auth::Deed::Play(turn), Some(turn)) {
+        return None;
+    }
     match studio.room.seat_of(me) {
-        Some(mine) if mine == turn => None,
         Some(mine) => Some(format!("seat {} to play, and you are seat {}", turn + 1, mine + 1)),
         None => Some(format!(
             "take one of the {how_many} seats before playing -- seat {} is to move",
@@ -578,6 +580,9 @@ struct Chat {
     /// Begin the game, for everybody in the room.
     #[serde(default)]
     start: bool,
+    /// Give the controls to somebody else. Only the holder may.
+    #[serde(default)]
+    give: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -610,7 +615,12 @@ async fn chat(State(s): State<Shared>, Json(chat): Json<Chat>) -> impl IntoRespo
     if let Some(name) = &chat.name {
         studio.room.call_them(&chat.me, name);
     }
-    if chat.start {
+    if let Some(to) = &chat.give {
+        // Refused rather than ignored if it is not theirs to give -- see
+        // `auth::Table::hand_over`.
+        studio.room.hand_over(&chat.me, to);
+    }
+    if chat.start && studio.room.may(&chat.me, auth::Deed::Start, None) {
         let how_many = seats_for_bots(studio);
         studio.room.begin(how_many);
     }
@@ -679,7 +689,8 @@ async fn chat(State(s): State<Shared>, Json(chat): Json<Chat>) -> impl IntoRespo
     }
     let _ = write!(
         body,
-        "],\"howmany\":{seats},\"begun\":{begun},\"host\":{host},\"bots\":{},\"myname\":{},\"mine\":{},\"turn\":{}",
+        "],\"howmany\":{seats},\"begun\":{begun},\"host\":{host},\"hostid\":{},\"bots\":{},\"myname\":{},\"mine\":{},\"turn\":{}",
+        serde_json::to_string(&studio.room.host()).unwrap_or_else(|_| "null".into()),
         serde_json::to_string(&bots).unwrap_or_else(|_| "[]".into()),
         serde_json::to_string(&my_name).unwrap_or_default(),
         my_seat.map_or("null".into(), |n| n.to_string()),

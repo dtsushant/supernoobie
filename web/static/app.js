@@ -581,15 +581,105 @@ function whyNot() {
 // Somewhere to put the far end. An <audio> element per peer, off screen: the
 // browser mixes them, and the operating system has done the echo cancellation
 // before we ever see the samples.
+// ---- hearing the others ---------------------------------------------------
+//
+// ## Why a phone plays it out of the earpiece
+//
+// A browser treats WebRTC audio as a CALL, and the default route for a call is
+// the earpiece -- the little speaker you hold against your head. That is right
+// for a telephone call and useless for a game with the handset lying on a
+// table, which is what you get and why it sounded far away and could not be
+// turned up.
+//
+// There is no single switch for this, and it is worth being plain about why:
+//
+//  - `setSinkId` chooses an output device and is the correct answer. Chrome on
+//    Android has it. Safari does not, on any iPhone.
+//  - On iOS the route is decided by the audio SESSION, which a page does not
+//    control -- except that playing through Web Audio rather than an <audio>
+//    element tends to be treated as media rather than as a call, and media
+//    goes to the loudspeaker.
+//
+// So: `setSinkId` where it exists, Web Audio otherwise, and neither is
+// promised. Which is why there is a button rather than a guess -- if it does
+// not work, the operating system's own speaker control still does.
+//
+// Volume is separate and always works, because it is a gain node on our side
+// of everything the platform decides.
+let loud = false;
+let volume = 1;
+const ears = new Map();
+
 function speaker(who) {
   let el = document.getElementById(`ear-${who}`);
   if (!el) {
     el = document.createElement('audio');
     el.id = `ear-${who}`;
     el.autoplay = true;
+    // iOS refuses to play audio inline without this and offers a full-screen
+    // player instead, which is not a thing anybody wants mid-game.
+    el.setAttribute('playsinline', '');
     document.body.append(el);
   }
   return el;
+}
+
+// Route a peer's audio through Web Audio, so its level is ours to set and --
+// on a handset -- so the platform reads it as media rather than as a call.
+function route(who, stream) {
+  const c = listen();
+  if (!c) return;
+  const old = ears.get(who);
+  if (old) {
+    try {
+      old.src.disconnect();
+    } catch (e) {
+      /* already gone */
+    }
+  }
+  const src = c.createMediaStreamSource(stream);
+  const gain = c.createGain();
+  gain.gain.value = volume;
+  src.connect(gain).connect(c.destination);
+  ears.set(who, { src, gain });
+}
+
+function setVolume(v) {
+  volume = v;
+  for (const { gain } of ears.values()) gain.gain.value = v;
+  // The elements too, for whichever path is actually making the sound.
+  for (const el of document.querySelectorAll('audio[id^="ear-"]')) {
+    el.volume = Math.min(1, v);
+  }
+}
+
+// Try to move the sound to the loudspeaker. Says whether it could.
+async function useLoudspeaker(on) {
+  loud = on;
+  let moved = false;
+  for (const el of document.querySelectorAll('audio[id^="ear-"]')) {
+    // The correct way, where it exists.
+    if (typeof el.setSinkId === 'function') {
+      try {
+        const outs = await navigator.mediaDevices.enumerateDevices();
+        const out = outs.find(
+          (d) => d.kind === 'audiooutput' && /speaker|loud/i.test(d.label)
+        );
+        await el.setSinkId(on && out ? out.deviceId : 'default');
+        moved = true;
+      } catch (e) {
+        /* fall through to the other way */
+      }
+    }
+    // The other way: silence the element and let Web Audio carry it, which a
+    // handset is more likely to treat as media than as a call.
+    el.muted = on;
+  }
+  for (const [who, ear] of ears) {
+    ear.gain.gain.value = volume;
+    void who;
+  }
+  return moved;
 }
 
 // ---- watching a voice rather than hearing it ------------------------------
@@ -689,6 +779,59 @@ const SEATINK = ['#E0704A', '#6FCF97', '#4FBCD4', '#E0A44A'];
 // something about it.
 let lobbyWord = '';
 
+// One line that is always true about the game, wherever you are looking.
+//
+// The old status came from three places -- the seat strip, the lobby note and
+// whatever `say` had last been handed -- and they disagreed, which is why the
+// controls seemed to move about. There is one sentence now and it is built
+// from what the server said this instant.
+function showState(answer) {
+  const bar = document.getElementById('state');
+  if (!bar) return;
+  const who = answer.who || [];
+  const holder = who.find((w) => w.id === answer.hostid);
+  const holderName = holder ? (holder.id === me ? 'you' : holder.name) : 'nobody';
+
+  if (!answer.howmany) {
+    bar.hidden = true;
+    return;
+  }
+  bar.hidden = false;
+
+  if (!answer.begun) {
+    bar.textContent = `waiting to start \u00b7 ${holderName} ${holder && holder.id === me ? 'have' : 'has'} the controls`;
+    bar.className = 'waiting-state';
+    return;
+  }
+  const turnSeat = (answer.seats || []).find((s) => s.seat === answer.turn);
+  const mine = answer.mine === answer.turn && answer.mine !== null && answer.mine !== undefined;
+  const bot = (answer.bots || []).includes(answer.turn);
+  bar.className = mine ? 'my-turn' : '';
+  bar.textContent = mine
+    ? 'your turn'
+    : bot
+      ? `a bot is playing ${SEATNAMES[answer.turn] || 'seat ' + (answer.turn + 1)}`
+      : `${turnSeat ? turnSeat.name : 'seat ' + (answer.turn + 1)} to play`;
+}
+
+async function handOver(to) {
+  try {
+    const answer = await (
+      await fetch('/talk', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ me, post: [], room, give: to }),
+      })
+    ).json();
+    lobbyWord = '';
+    seatWord = '';
+    showSeats(answer);
+    showLobby(answer);
+  } catch (e) {
+    say('could not hand the controls over');
+  }
+}
+
 function lowestSeat(seats) {
   return seats.length ? Math.min(...seats.map((s) => s.seat)) : -1;
 }
@@ -709,10 +852,11 @@ function showLobby(answer) {
       ? 'start when everybody is ready \u2014 any empty seat is played by a bot'
       : 'send them the link \u2014 they will appear here, and empty seats are played by bots';
   } else {
-    const low = lowestSeat(seats);
-    const hostSeat = seats.find((s) => s.seat === low);
+    // Named from `hostid`, which the server holds -- it used to be guessed
+    // from the lowest seat, and the guess changed whenever anybody sat down.
+    const holder = who.find((w) => w.id === answer.hostid);
     title.textContent = (others + 1) + ' in the room';
-    note.textContent = (hostSeat ? hostSeat.name : 'the first player') + ' starts the game when everybody is ready';
+    note.textContent = (holder ? holder.name : 'the first player') + ' starts the game when everybody is ready';
   }
 
   const key = JSON.stringify([who.map((w) => [w.id, w.name, w.seat]), bots, amHost]);
@@ -724,6 +868,7 @@ function showLobby(answer) {
     const row = document.createElement('div');
     row.dataset.who = w.id;
     const seated = w.seat !== null && w.seat !== undefined;
+    const theirs = w.id === answer.hostid;
     row.innerHTML =
       '<span class="dot"></span><span class="nm"></span>' +
       '<span class="tag"></span><span class="lvl"><i></i></span>';
@@ -732,6 +877,21 @@ function showLobby(answer) {
     row.querySelector('.tag').textContent = seated
       ? SEATNAMES[w.seat] || 'seat ' + (w.seat + 1)
       : 'watching';
+    // Who is in charge, said on the row rather than left to be inferred from
+    // who happens to have a button.
+    if (theirs) {
+      const crown = document.createElement('span');
+      crown.className = 'tag host';
+      crown.textContent = 'has the controls';
+      row.insertBefore(crown, row.querySelector('.lvl'));
+    } else if (amHost) {
+      // Only the holder is offered the giving-away.
+      const give = document.createElement('button');
+      give.className = 'give';
+      give.textContent = 'give controls';
+      give.onclick = () => handOver(w.id);
+      row.insertBefore(give, row.querySelector('.lvl'));
+    }
     list.append(row);
   }
 
@@ -821,12 +981,9 @@ function showSeats(answer) {
     }
     box.append(b);
   }
-  // Whose turn, in words, for whoever is not looking at the board.
-  const now = (answer.seats || []).find((s) => s.seat === answer.turn);
-  if (now) {
-    const label = now.who === me ? 'your turn' : `${now.name || 'player ' + (answer.turn + 1)} to play`;
-    say(label);
-  }
+  // Whose turn it is belongs to the status line, which is built in one place
+  // from one answer. Saying it here as well is how two parts of a page come to
+  // disagree about the same fact.
 }
 
 // A field rather than a prompt. Somebody who has to guess that their own seat
@@ -895,6 +1052,7 @@ async function callSeats() {
     ).json();
     showSeats(answer);
   showLobby(answer);
+  showState(answer);
   } catch (e) {
     /* next time */
   }
@@ -956,7 +1114,11 @@ function link(who) {
     if (e.candidate) outbox.push({ to: who, kind: 'ice', body: JSON.stringify(e.candidate) });
   };
   pc.ontrack = (e) => {
-    speaker(who).srcObject = e.streams[0];
+    const el = speaker(who);
+    el.srcObject = e.streams[0];
+    el.volume = Math.min(1, volume);
+    el.muted = loud;
+    route(who, e.streams[0]);
     watch(who, e.streams[0]);
   };
   pc.onconnectionstatechange = () => {
@@ -972,6 +1134,15 @@ function drop(who) {
   const pc = links.get(who);
   if (pc) pc.close();
   links.delete(who);
+  const ear = ears.get(who);
+  if (ear) {
+    try {
+      ear.src.disconnect();
+    } catch (e) {
+      /* already gone */
+    }
+    ears.delete(who);
+  }
   meters.delete(who);
   shownHere = '';
   const el = document.getElementById(`ear-${who}`);
@@ -1048,6 +1219,8 @@ async function callIn() {
 async function talk(on) {
   if (!on) {
     talking = false;
+    document.getElementById('vol').hidden = true;
+    document.getElementById('speaker').hidden = true;
     showHere([]);
     document.getElementById('voices').hidden = true;
     for (const who of [...links.keys()]) drop(who);
@@ -1078,6 +1251,8 @@ async function talk(on) {
     return;
   }
   talking = true;
+  document.getElementById('vol').hidden = false;
+  document.getElementById('speaker').hidden = false;
   micButton.classList.add('on');
   micButton.textContent = '\u{1F3A4} talking';
   if (lobbyMic) {
@@ -1105,6 +1280,28 @@ const lobbyMic = document.getElementById('lobby-mic');
 if (lobbyMic) {
   lobbyMic.onclick = () => talk(!talking);
 }
+const volumeBar = document.getElementById('volume');
+if (volumeBar) {
+  // Up to 150%, because "not loud enough" is the complaint and a slider that
+  // stops at what the platform already gives you cannot answer it.
+  volumeBar.oninput = () => setVolume(Number(volumeBar.value) / 100);
+}
+const speakerButton = document.getElementById('speaker');
+if (speakerButton) {
+  speakerButton.onclick = async () => {
+    const on = !speakerButton.classList.contains('on');
+    speakerButton.classList.toggle('on', on);
+    const moved = await useLoudspeaker(on);
+    say(
+      on
+        ? moved
+          ? 'playing through the loudspeaker'
+          : 'trying the loudspeaker -- if it is still quiet, use the phone’s own speaker button'
+        : 'back to the earpiece'
+    );
+  };
+}
+
 const micButton = document.getElementById('mic');
 if (micButton) {
   micButton.onclick = () => talk(!talking);

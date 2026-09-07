@@ -3,43 +3,20 @@
 #     docker compose -p ludo -f deploy/docker-compose.yml up -d
 #     docker compose -p ludo -f deploy/docker-compose.yml down     # and it is gone
 #
-# ## What this shares with the host's existing service, and what it does not
+# ## Sharing a host with something else
 #
-# The same host runs Loop: another application and the network operator
-# behind one Caddy on 443, over a database under its own data. Its own
-# `docs/its own deploy notes` opens by saying that server has been taken down twice
-# by the same class of mistake, so the line is worth drawing precisely.
-#
-# Shared: the **network**, so that Caddy can reach this container by name.
-# That is all. No volume of theirs, no port of theirs, no compose file of
-# theirs, and a project name of its own so there is no wrong file to run.
+# This has its own project name, its own network membership and no volume,
+# port or config file belonging to anything else. If the host already runs
+# something, add a name beside it rather than taking anything down -- and
+# validate the proxy config before reloading, because one that will not parse
+# takes down everything it was already serving.
 #
 # ## Why there is no proxy in here
 #
-# There was, on 8443, until it turned out `studio.example` is a name
-# that resolves **publicly** and reaches this box while nothing serves it — the
-# operator console moved to `the fourth host` and the record was left behind. A
-# second Caddy could only have offered 8443, which the edge in front does not
-# forward, so nobody outside could have reached it.
-#
-# So the existing proxy fronts this instead, by one additive block appended to
-# `the proxy config`:
-#
-# ```
-# studio.example {
-#     tls /certs/bundle.crt /certs/private.key
-#     encode gzip
-#     reverse_proxy ludo-app:8088
-# }
-# ```
-#
-# Validated with `caddy validate` before reloading, because a bad config there
-# is four hosts down. `the proxy config.before-ludo` is the copy to restore.
-#
-# **It removes itself.** `ship.sh` ships the Caddyfile from the other application's repo,
-# so the next the other application deploy overwrites this block and the studio goes back to
-# being unreachable. That is the right default for something temporary; it also
-# means a play test can end by somebody else's deploy.
+# Whatever already terminates TLS on the host should front this, under a name
+# whose certificate it already holds. A proxy of our own could only offer some
+# other port, which the edge in front of a typical host does not forward -- so
+# nobody outside could reach it, which is the whole point.
 #
 # ## Why HTTPS is the whole point
 #
@@ -54,7 +31,7 @@ services:
     container_name: ludo-app
     restart: unless-stopped
     # No `ports:`. Nothing outside the docker network can reach the game
-    # directly -- the existing proxy is the only way in, which is also what
+    # directly -- the lending Caddy is the only way in, which is also what
     # gives it TLS.
     expose:
       - "8088"
@@ -71,8 +48,8 @@ services:
       - loop
 
 networks:
-  # Caddy's network, already existing. Declared external so nothing here can
-  # create, alter or remove it.
+  # The proxy's network, already existing. Declared external so nothing here
+  # can create, alter or remove it. Set `LUDO_NET` to whatever it is called.
   loop:
     external: true
-    name: the proxy network
+    name: ${LUDO_NET:-web}

@@ -1,0 +1,375 @@
+//! # auth — who may do what
+//!
+//! Not logins. **Who holds the controls**, which is a different and smaller
+//! question, and the only one a game round a table actually asks.
+//!
+//! ## Why this is a crate and not four lines in the room
+//!
+//! It was four lines in the room, and they were wrong. The host was worked out
+//! as *the lowest occupied seat* — derived, not held — so it moved every time
+//! anybody sat down, stood up, or arrived. One player watched the start button
+//! appear and disappear as other people took their colours, which is not a
+//! flicker in the drawing: it is two people believing they are in charge.
+//!
+//! **Control is held, not derived.** Somebody has it; it changes only when
+//! they hand it over or they leave. That single sentence is the whole of this
+//! crate, and it is a crate because the next game will want to say something
+//! more than *"one of you is in charge"* — teams, spectators, a referee,
+//! somebody who may set the rules but not start — and all of those are more
+//! [`Deed`]s and a different [`Table::may`], not a rewrite of a room.
+//!
+//! ## The two failure modes it exists to prevent
+//!
+//! **Two hosts.** Anything derived from a set that changes underneath you can
+//! be true for two people at once, briefly, and briefly is enough for both to
+//! press start.
+//!
+//! **No host.** The one holding the controls closes their laptop, and a room
+//! of four people waits for somebody who is not coming. So hostship is passed
+//! on when its holder leaves — to whoever has been here longest, because that
+//! is the least arbitrary rule that always has an answer.
+
+use std::collections::HashMap;
+
+/// Something somebody might be allowed to do.
+///
+/// Deliberately about *the game* rather than about the machinery: a deed is a
+/// thing a person at a table would recognise. Adding one is how this grows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Deed {
+    /// Begin the game.
+    Start,
+    /// Change the house rules everybody will play by.
+    SetRules,
+    /// Give the controls to somebody else.
+    HandOver,
+    /// Take a turn as a given seat.
+    Play(usize),
+}
+
+/// Who is at the table and who is holding the controls.
+#[derive(Debug, Default, Clone)]
+pub struct Table {
+    /// Who holds the controls. **Held, not worked out.**
+    host: Option<String>,
+    /// Everybody present, and when they first arrived — for passing the
+    /// controls on when the holder leaves.
+    came: HashMap<String, f64>,
+    /// Seat to person.
+    chairs: HashMap<usize, String>,
+}
+
+impl Table {
+    pub fn new() -> Table {
+        Table::default()
+    }
+
+    /// Somebody is here.
+    ///
+    /// The first to arrive takes the controls, so a room is never without a
+    /// host — including a room of one, who would otherwise be waiting for
+    /// themselves.
+    pub fn arrive(&mut self, who: &str, now: f64) {
+        if who.is_empty() {
+            return;
+        }
+        self.came.entry(who.to_string()).or_insert(now);
+        if self.host.is_none() {
+            self.host = Some(who.to_string());
+        }
+    }
+
+    /// Somebody has gone.
+    ///
+    /// If they were holding the controls, they pass to whoever has been here
+    /// longest — the least arbitrary rule that always has an answer, and one
+    /// both sides can work out without asking.
+    pub fn leave(&mut self, who: &str) {
+        self.came.remove(who);
+        self.chairs.retain(|_, sitter| sitter != who);
+        if self.host.as_deref() == Some(who) {
+            self.host = self.longest_here();
+        }
+    }
+
+    /// Whoever has been here longest, with the name as a tie-break so two
+    /// people who arrived in the same millisecond do not disagree.
+    fn longest_here(&self) -> Option<String> {
+        let mut all: Vec<(&String, &f64)> = self.came.iter().collect();
+        all.sort_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal).then(a.0.cmp(b.0)));
+        all.first().map(|(who, _)| (*who).clone())
+    }
+
+    /// Who holds the controls.
+    pub fn host(&self) -> Option<&str> {
+        self.host.as_deref()
+    }
+
+    pub fn is_host(&self, who: &str) -> bool {
+        self.host.as_deref() == Some(who)
+    }
+
+    /// Hand the controls to somebody else.
+    ///
+    /// Only the holder may, and only to somebody who is here — handing them to
+    /// a person who has gone is how a room ends up with no host at all, which
+    /// is the failure this crate exists to prevent.
+    pub fn hand_over(&mut self, from: &str, to: &str) -> bool {
+        if !self.is_host(from) || !self.came.contains_key(to) || from == to {
+            return false;
+        }
+        self.host = Some(to.to_string());
+        true
+    }
+
+    /// Take a seat, if it is free. One each: taking a second gives up the
+    /// first.
+    pub fn sit(&mut self, who: &str, seat: usize, seats: usize) -> bool {
+        if who.is_empty() || seat >= seats || !self.came.contains_key(who) {
+            return false;
+        }
+        if self.chairs.get(&seat).is_some_and(|sitter| sitter != who) {
+            return false;
+        }
+        self.chairs.retain(|_, sitter| sitter != who);
+        self.chairs.insert(seat, who.to_string());
+        true
+    }
+
+    pub fn stand(&mut self, who: &str) {
+        self.chairs.retain(|_, sitter| sitter != who);
+    }
+
+    pub fn seat_of(&self, who: &str) -> Option<usize> {
+        self.chairs.iter().find(|(_, sitter)| *sitter == who).map(|(seat, _)| *seat)
+    }
+
+    /// Who is in which seat, lowest first.
+    pub fn seated(&self) -> Vec<(usize, String)> {
+        let mut all: Vec<(usize, String)> = self.chairs.iter().map(|(k, v)| (*k, v.clone())).collect();
+        all.sort();
+        all
+    }
+
+    /// Everybody here, longest-present first — the order the controls would
+    /// pass in.
+    pub fn here(&self) -> Vec<String> {
+        let mut all: Vec<(&String, &f64)> = self.came.iter().collect();
+        all.sort_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal).then(a.0.cmp(b.0)));
+        all.into_iter().map(|(who, _)| who.clone()).collect()
+    }
+
+    /// Seats nobody is sitting in.
+    pub fn empty_seats(&self, seats: usize) -> Vec<usize> {
+        (0..seats).filter(|seat| !self.chairs.contains_key(seat)).collect()
+    }
+
+    /// Sit down everybody who has not, lowest free seat first.
+    pub fn seat_everybody(&mut self, seats: usize) {
+        for who in self.here() {
+            if self.seat_of(&who).is_some() {
+                continue;
+            }
+            let Some(seat) = self.empty_seats(seats).first().copied() else { break };
+            self.sit(&who, seat, seats);
+        }
+    }
+
+    /// **May this person do this?**
+    ///
+    /// The one question worth asking, and the one place to change when the
+    /// answer should be more interesting than it is now.
+    pub fn may(&self, who: &str, deed: Deed, turn: Option<usize>) -> bool {
+        match deed {
+            // The controls. One person, and they know who they are.
+            Deed::Start | Deed::SetRules | Deed::HandOver => self.is_host(who),
+            // A turn belongs to whoever is sitting in that seat, host or not.
+            // Being in charge of the game is not being better at it.
+            Deed::Play(seat) => {
+                self.seat_of(who) == Some(seat) && turn.is_none_or(|whose| whose == seat)
+            }
+        }
+    }
+}
+
+// ===========================================================================
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn table() -> Table {
+        Table::new()
+    }
+
+    /// ★ **Control is held, not derived.** It was worked out from the lowest
+    /// occupied seat, so it moved every time anybody sat down — and one player
+    /// watched the start button appear and disappear as the others took their
+    /// colours.
+    #[test]
+    fn the_controls_do_not_move_when_people_sit_down() {
+        let mut t = table();
+        t.arrive("ann", 0.0);
+        t.arrive("bob", 1.0);
+        assert!(t.is_host("ann"), "she was here first");
+
+        // Bob takes the lowest seat -- which used to make him the host.
+        t.sit("bob", 0, 4);
+        assert!(t.is_host("ann"), "and she still holds them");
+        t.sit("ann", 3, 4);
+        assert!(t.is_host("ann"));
+        t.stand("ann");
+        assert!(t.is_host("ann"), "even standing up entirely");
+    }
+
+    /// ★ There is always exactly one host, and never two.
+    #[test]
+    fn there_is_exactly_one_host() {
+        let mut t = table();
+        assert_eq!(t.host(), None, "an empty room has nobody");
+        for (k, who) in ["ann", "bob", "cat", "dan"].iter().enumerate() {
+            t.arrive(who, k as f64);
+        }
+        let hosts: Vec<&str> = ["ann", "bob", "cat", "dan"].into_iter().filter(|w| t.is_host(w)).collect();
+        assert_eq!(hosts, vec!["ann"]);
+    }
+
+    /// ★ **A room is never left without one.** The holder closes their laptop
+    /// and three people wait for somebody who is not coming.
+    #[test]
+    fn the_controls_pass_on_when_the_holder_leaves() {
+        let mut t = table();
+        t.arrive("ann", 0.0);
+        t.arrive("bob", 1.0);
+        t.arrive("cat", 2.0);
+        t.leave("ann");
+        assert!(t.is_host("bob"), "the longest here takes them");
+        t.leave("bob");
+        assert!(t.is_host("cat"));
+        t.leave("cat");
+        assert_eq!(t.host(), None, "and an empty room has nobody again");
+    }
+
+    /// Somebody else leaving does not disturb them.
+    #[test]
+    fn somebody_else_leaving_changes_nothing() {
+        let mut t = table();
+        t.arrive("ann", 0.0);
+        t.arrive("bob", 1.0);
+        t.leave("bob");
+        assert!(t.is_host("ann"));
+    }
+
+    /// ★ The controls can be given away, which is the point of knowing who has
+    /// them.
+    #[test]
+    fn the_controls_can_be_handed_over() {
+        let mut t = table();
+        t.arrive("ann", 0.0);
+        t.arrive("bob", 1.0);
+        assert!(t.hand_over("ann", "bob"));
+        assert!(t.is_host("bob"));
+        assert!(!t.is_host("ann"));
+    }
+
+    /// ★ And only by the person holding them. Otherwise "who is in charge" is
+    /// decided by whoever asks last.
+    #[test]
+    fn only_the_holder_may_hand_them_over() {
+        let mut t = table();
+        t.arrive("ann", 0.0);
+        t.arrive("bob", 1.0);
+        t.arrive("cat", 2.0);
+        assert!(!t.hand_over("bob", "cat"), "bob does not have them to give");
+        assert!(t.is_host("ann"));
+        assert!(!t.hand_over("ann", "zoe"), "and zoe is not here");
+        assert!(!t.hand_over("ann", "ann"), "nor to oneself, which would be a no-op that looked like a change");
+    }
+
+    /// ★ Being in charge of the game is not being better at it: a turn belongs
+    /// to whoever is sitting in that seat.
+    #[test]
+    fn a_turn_belongs_to_the_seat_and_not_to_the_host() {
+        let mut t = table();
+        t.arrive("ann", 0.0);
+        t.arrive("bob", 1.0);
+        t.sit("ann", 0, 4);
+        t.sit("bob", 1, 4);
+        assert!(t.is_host("ann"));
+        assert!(t.may("bob", Deed::Play(1), Some(1)), "bob's seat, bob's turn");
+        assert!(!t.may("ann", Deed::Play(1), Some(1)), "not hers to take");
+        assert!(!t.may("bob", Deed::Play(1), Some(0)), "and not when it is not his turn");
+    }
+
+    /// The controls are the controls, whoever is sitting where.
+    #[test]
+    fn only_the_host_starts_or_sets_rules() {
+        let mut t = table();
+        t.arrive("ann", 0.0);
+        t.arrive("bob", 1.0);
+        t.sit("bob", 0, 4);
+        for deed in [Deed::Start, Deed::SetRules, Deed::HandOver] {
+            assert!(t.may("ann", deed, None), "{deed:?} is hers");
+            assert!(!t.may("bob", deed, None), "{deed:?} is not his");
+        }
+    }
+
+    /// ★ Sitting everybody down leaves the ones who chose where they were.
+    #[test]
+    fn seating_everybody_respects_a_choice() {
+        let mut t = table();
+        t.arrive("ann", 0.0);
+        t.arrive("bob", 1.0);
+        t.arrive("cat", 2.0);
+        t.sit("cat", 0, 4);
+        t.seat_everybody(4);
+        assert_eq!(t.seat_of("cat"), Some(0), "she wanted red");
+        assert_eq!(t.seat_of("ann"), Some(1));
+        assert_eq!(t.seat_of("bob"), Some(2));
+        assert_eq!(t.empty_seats(4), vec![3]);
+    }
+
+    /// More people than seats: the ones who fit sit, and nobody is shoved out.
+    #[test]
+    fn more_people_than_seats_is_not_a_crash() {
+        let mut t = table();
+        for (k, who) in ["a", "b", "c", "d", "e", "f"].iter().enumerate() {
+            t.arrive(who, k as f64);
+        }
+        t.seat_everybody(4);
+        assert_eq!(t.seated().len(), 4);
+        assert!(t.empty_seats(4).is_empty());
+    }
+
+    /// A seat is taken once, and taking a second gives up the first.
+    #[test]
+    fn one_seat_each() {
+        let mut t = table();
+        t.arrive("ann", 0.0);
+        t.arrive("bob", 1.0);
+        assert!(t.sit("ann", 0, 4));
+        assert!(!t.sit("bob", 0, 4));
+        assert!(t.sit("ann", 2, 4));
+        assert!(t.sit("bob", 0, 4), "hers to give up, and she did");
+        assert_eq!(t.seated(), vec![(0, "bob".into()), (2, "ann".into())]);
+    }
+
+    /// Somebody who is not here cannot sit down. A seat held by a name nobody
+    /// has heard of is a seat nobody can take.
+    #[test]
+    fn a_stranger_cannot_sit() {
+        let mut t = table();
+        assert!(!t.sit("ghost", 0, 4));
+        assert!(t.seated().is_empty());
+    }
+
+    /// Arriving twice is arriving once — a client that repeats itself must not
+    /// look like a second person.
+    #[test]
+    fn arriving_twice_is_arriving_once() {
+        let mut t = table();
+        t.arrive("ann", 0.0);
+        t.arrive("ann", 5.0);
+        assert_eq!(t.here(), vec!["ann"]);
+        assert!(t.is_host("ann"));
+    }
+}
