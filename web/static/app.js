@@ -1033,11 +1033,37 @@ async function sit(seat) {
   }
 }
 
-// The seat rides with every request that changes the drawing, so the server
-// knows whose tap it is.
+// Calling in, so the room knows we are still here.
+//
+// A backgrounded tab has its timers throttled to roughly once a minute, and a
+// handset suspends them altogether -- which is why the server waits ninety
+// seconds before calling anybody gone, and waits much longer than that before
+// moving the controls. Sending somebody the link should not make you leave the
+// room you just made.
 setInterval(() => {
   if (!talking) callSeats();
 }, 1500);
+
+// And call in the instant we come back, rather than waiting for the next tick.
+// Coming back from another app is exactly when the room most needs to hear
+// from us.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) callSeats();
+});
+
+// Leaving on purpose is said out loud. A beacon is the only request a browser
+// promises to send while a page is going away -- an ordinary fetch is
+// abandoned with the page, which is why this is the one place not using `ask`.
+window.addEventListener('pagehide', () => {
+  try {
+    navigator.sendBeacon(
+      '/talk',
+      new Blob([JSON.stringify({ me, post: [], room, gone: true })], { type: 'application/json' })
+    );
+  } catch (e) {
+    /* going anyway */
+  }
+});
 
 // Even without the microphone on, a player needs to see the seats -- talking
 // and playing are separate things and somebody may want only one of them.

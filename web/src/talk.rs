@@ -65,10 +65,15 @@ use std::collections::HashMap;
 
 /// How long a peer may go quiet before it is assumed gone, in seconds.
 ///
-/// Long enough to survive a slow frame or a tab being backgrounded, short
-/// enough that somebody closing a laptop lid stops being in the room before
-/// anybody wonders why they are so silent.
-pub const PATIENCE: f64 = 12.0;
+/// **Ninety, and it was twelve, and twelve was wrong.** A browser throttles a
+/// backgrounded tab's timers to about once a minute, and a handset suspends
+/// them entirely — so twelve seconds meant that switching to a messaging app
+/// to send somebody the link made you leave the room you had just made.
+///
+/// Ninety survives the throttle. It does not survive a suspended handset, which
+/// is why leaving is also announced outright when a page is closed, and why the
+/// controls have a much longer grace of their own — see [`auth::AWAY`].
+pub const PATIENCE: f64 = 90.0;
 
 /// One note from one peer to another, waiting to be collected.
 #[derive(Clone, Debug, PartialEq)]
@@ -130,6 +135,9 @@ impl Room {
         self.seen.insert(me.to_string(), now);
         self.table.arrive(me, now);
         self.forget(now);
+        // Whether the game has lost its host is a patient question, asked here
+        // rather than every time somebody goes quiet.
+        self.table.settle(now);
         self.post.remove(me).unwrap_or_default()
     }
 
@@ -224,6 +232,17 @@ impl Room {
     /// a person nor a bot.
     pub fn empty_seats(&self, how_many: usize) -> Vec<usize> {
         self.table.empty_seats(how_many)
+    }
+
+    /// Somebody has closed the page and said so.
+    ///
+    /// Believed at once, unlike going quiet: the difference is that they told
+    /// us.
+    pub fn depart(&mut self, me: &str, now: f64) {
+        self.seen.remove(me);
+        self.post.remove(me);
+        self.names.remove(me);
+        self.table.depart(me, now);
     }
 
     /// Has the game begun?
@@ -665,16 +684,41 @@ mod tests {
         assert_eq!(r.host(), Some("zoe".into()));
     }
 
-    /// ★ And they pass on when their holder goes quiet, or three people wait
-    /// for somebody who has closed their laptop.
+    /// ★ **Going quiet does not hand them over.** Sending somebody the link
+    /// backgrounds the page, and a backgrounded page stops calling in — which
+    /// is how the person who made the room lost it to their own guest.
     #[test]
-    fn the_controls_pass_on_when_the_holder_goes_quiet() {
+    fn going_quiet_does_not_hand_the_controls_over() {
         let mut r = Room::new();
         r.call("ann", 0.0);
         r.call("bob", 1.0);
         assert_eq!(r.host(), Some("ann".into()));
+        // Ann is off in a messaging app for a good while. Bob keeps calling.
         r.call("bob", PATIENCE + 2.0);
-        assert_eq!(r.host(), Some("bob".into()), "ann has gone");
+        assert_eq!(r.host(), Some("ann".into()), "she is quiet, not gone");
+        r.call("bob", auth::AWAY - 1.0);
+        assert_eq!(r.host(), Some("ann".into()), "still hers");
+    }
+
+    /// ★ But away long enough and they pass, or the room waits for somebody
+    /// who is not coming.
+    #[test]
+    fn the_controls_pass_on_after_a_long_absence() {
+        let mut r = Room::new();
+        r.call("ann", 0.0);
+        r.call("bob", 1.0);
+        r.call("bob", auth::AWAY + PATIENCE + 2.0);
+        assert_eq!(r.host(), Some("bob".into()), "ann really has gone");
+    }
+
+    /// ★ And closing the page is believed at once, because they said so.
+    #[test]
+    fn closing_the_page_hands_them_over_at_once() {
+        let mut r = Room::new();
+        r.call("ann", 0.0);
+        r.call("bob", 1.0);
+        r.depart("ann", 2.0);
+        assert_eq!(r.host(), Some("bob".into()));
     }
 
     /// ★ Seats nobody took are what the bots get. Worked out rather than

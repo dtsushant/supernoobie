@@ -31,6 +31,25 @@
 
 use std::collections::HashMap;
 
+/// How long somebody may be away before the controls pass on.
+///
+/// **Much longer than presence, and deliberately.** Going quiet is not the same
+/// as leaving, and the commonest reason to go quiet is *sending somebody the
+/// link*: switching to a messaging app puts the page in the background, where a
+/// browser throttles its timers to about once a minute and a handset suspends
+/// it altogether.
+///
+/// So the person who made the room, invited everybody, and is still sitting
+/// there looking at it stops calling in for as long as it takes to paste a URL
+/// — and the only person still in the foreground is whoever just arrived. That
+/// is exactly how the host who had not left, and had started the game, lost the
+/// controls to their own guest.
+///
+/// Five minutes: longer than any plausible detour to another app, short enough
+/// that a genuinely abandoned room is not held for ever by somebody who has
+/// gone to lunch.
+pub const AWAY: f64 = 5.0 * 60.0;
+
 /// Something somebody might be allowed to do.
 ///
 /// Deliberately about *the game* rather than about the machinery: a deed is a
@@ -57,6 +76,9 @@ pub struct Table {
     came: HashMap<String, f64>,
     /// Seat to person.
     chairs: HashMap<usize, String>,
+    /// When the holder was last heard from, so going quiet for a moment is not
+    /// the same as leaving.
+    host_seen: f64,
 }
 
 impl Table {
@@ -76,6 +98,10 @@ impl Table {
         self.came.entry(who.to_string()).or_insert(now);
         if self.host.is_none() {
             self.host = Some(who.to_string());
+            self.host_seen = now;
+        }
+        if self.is_host(who) {
+            self.host_seen = now;
         }
     }
 
@@ -84,11 +110,37 @@ impl Table {
     /// If they were holding the controls, they pass to whoever has been here
     /// longest — the least arbitrary rule that always has an answer, and one
     /// both sides can work out without asking.
+    /// Somebody has gone quiet.
+    ///
+    /// They stop being *present* at once — their seat frees, and the room stops
+    /// listing them. The **controls do not move**, because going quiet is not
+    /// leaving: see [`AWAY`], and [`settle`](Table::settle), which is what
+    /// eventually passes them on.
     pub fn leave(&mut self, who: &str) {
         self.came.remove(who);
         self.chairs.retain(|_, sitter| sitter != who);
-        if self.host.as_deref() == Some(who) {
-            self.host = self.longest_here();
+    }
+
+    /// Hand the controls on if their holder has been away long enough, and
+    /// there is somebody to hand them to.
+    ///
+    /// Separate from [`leave`](Table::leave) so that the two questions stay
+    /// apart: *is this person here* is asked every few seconds, and *has the
+    /// game lost its host* should be asked patiently.
+    pub fn settle(&mut self, now: f64) {
+        let Some(host) = self.host.clone() else { return };
+        if self.came.contains_key(&host) {
+            self.host_seen = now;
+            return;
+        }
+        if now - self.host_seen < AWAY {
+            return;
+        }
+        // Away too long. Somebody who is actually here takes them; if the room
+        // is empty there is nobody to give them to and they wait.
+        if let Some(next) = self.longest_here() {
+            self.host = Some(next);
+            self.host_seen = now;
         }
     }
 
@@ -119,7 +171,21 @@ impl Table {
             return false;
         }
         self.host = Some(to.to_string());
+        self.host_seen = f64::MAX;
         true
+    }
+
+    /// Give the controls up on purpose, on closing the page.
+    ///
+    /// The one case where leaving should be believed at once: somebody who has
+    /// shut the tab is not coming back in five minutes, and the difference
+    /// between this and going quiet is that they said so.
+    pub fn depart(&mut self, who: &str, now: f64) {
+        self.leave(who);
+        if self.is_host(who) {
+            self.host = self.longest_here();
+            self.host_seen = now;
+        }
     }
 
     /// Take a seat, if it is free. One each: taking a second gives up the
@@ -233,20 +299,64 @@ mod tests {
         assert_eq!(hosts, vec!["ann"]);
     }
 
-    /// ★ **A room is never left without one.** The holder closes their laptop
-    /// and three people wait for somebody who is not coming.
+    /// ★ **Going quiet is not leaving.** The commonest reason to go quiet is
+    /// sending somebody the link: switching to a messaging app backgrounds the
+    /// page, where timers are throttled to about once a minute and a handset
+    /// suspends them altogether.
+    ///
+    /// So the host who made the room, invited everybody and is sitting there
+    /// looking at it stops calling in for as long as it takes to paste a URL —
+    /// and used to lose the controls to the guest who had just arrived.
     #[test]
-    fn the_controls_pass_on_when_the_holder_leaves() {
+    fn going_quiet_does_not_hand_the_controls_over() {
+        let mut t = table();
+        t.arrive("ann", 0.0);
+        t.arrive("bob", 1.0);
+        // Ann switches to a messaging app. Bob keeps calling in.
+        t.leave("ann");
+        t.settle(30.0);
+        assert!(t.is_host("ann"), "half a minute away is not leaving");
+        t.settle(AWAY - 1.0);
+        assert!(t.is_host("ann"), "nor is four minutes");
+        // And she comes back.
+        t.arrive("ann", AWAY - 1.0);
+        t.settle(AWAY + 60.0);
+        assert!(t.is_host("ann"), "she never went anywhere");
+    }
+
+    /// ★ **But a room is never left without one.** Away long enough and the
+    /// controls pass, or three people wait for somebody who is not coming.
+    #[test]
+    fn the_controls_pass_on_when_the_holder_is_really_gone() {
         let mut t = table();
         t.arrive("ann", 0.0);
         t.arrive("bob", 1.0);
         t.arrive("cat", 2.0);
         t.leave("ann");
+        t.settle(AWAY + 1.0);
         assert!(t.is_host("bob"), "the longest here takes them");
-        t.leave("bob");
-        assert!(t.is_host("cat"));
-        t.leave("cat");
-        assert_eq!(t.host(), None, "and an empty room has nobody again");
+    }
+
+    /// ★ Shutting the tab is believed at once. The difference between this and
+    /// going quiet is that they said so.
+    #[test]
+    fn closing_the_page_hands_them_over_immediately() {
+        let mut t = table();
+        t.arrive("ann", 0.0);
+        t.arrive("bob", 1.0);
+        t.depart("ann", 2.0);
+        assert!(t.is_host("bob"), "she closed it on purpose");
+    }
+
+    /// An empty room keeps them for whoever comes back, rather than handing
+    /// them to nobody.
+    #[test]
+    fn an_empty_room_does_not_lose_the_controls() {
+        let mut t = table();
+        t.arrive("ann", 0.0);
+        t.leave("ann");
+        t.settle(AWAY * 10.0);
+        assert!(t.is_host("ann"), "there was nobody to give them to");
     }
 
     /// Somebody else leaving does not disturb them.
@@ -256,6 +366,7 @@ mod tests {
         t.arrive("ann", 0.0);
         t.arrive("bob", 1.0);
         t.leave("bob");
+        t.settle(AWAY + 1.0);
         assert!(t.is_host("ann"));
     }
 

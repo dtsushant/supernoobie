@@ -583,6 +583,10 @@ struct Chat {
     /// Give the controls to somebody else. Only the holder may.
     #[serde(default)]
     give: Option<String>,
+    /// The page is closing. Sent by a beacon on the way out, so a real
+    /// departure is prompt where merely going quiet is not.
+    #[serde(default)]
+    gone: bool,
 }
 
 #[derive(serde::Deserialize)]
@@ -614,6 +618,9 @@ async fn chat(State(s): State<Shared>, Json(chat): Json<Chat>) -> impl IntoRespo
     }
     if let Some(name) = &chat.name {
         studio.room.call_them(&chat.me, name);
+    }
+    if chat.gone {
+        studio.room.depart(&chat.me, now);
     }
     if let Some(to) = &chat.give {
         // Refused rather than ignored if it is not theirs to give -- see
