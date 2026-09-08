@@ -56,6 +56,23 @@ What contains it: a read-only root filesystem, a non-root user, no privilege
 escalation, nothing in the image but the sample drawings, and no published
 port. What does not contain it: anything at all about who is asking.
 
+## When the route disappears
+
+If the hostname starts answering **200 with an empty body**, the app is fine and
+the route is gone: the proxy belongs to something else, and that something
+else ships its own config on every deploy. An empty 200 is the proxy saying
+*"nothing here"*, which looks alarmingly like the application being broken.
+
+    DEPLOY_HOST=user@host DEPLOY_KEY=~/.ssh/id     ROUTE_HOST=studio.example CADDY=/path/to/Caddyfile CONTAINER=proxy     bash deploy/route.sh
+
+Idempotent, validates before reloading, and checks every host that proxy serves
+rather than only ours.
+
+**A more permanent answer, if this gets tiresome:** put the block in the other
+application's own repository, so its deploys carry it rather than removing it.
+That trades a recurring chore for a line in somebody else's project, which is
+worth doing only once it is clear the studio is staying.
+
 ## Taking it away
 
     docker compose -p ludo -f deploy/docker-compose.yml down
