@@ -35,6 +35,14 @@ echo "building and restarting (a few minutes)"
   sleep 3
   docker ps --filter name=ludo-app --format '  {{.Names}}  {{.Status}}'"
 
-# The exit code is the answer, not the log. A build that half-failed and left
-# the old container running looks exactly like a deploy that worked.
+# **The exit code is the answer, and so is the served page.** Not the log.
+#
+# Twice this was believed to have deployed when it had not: the scp failed, the
+# script stopped, and a `grep` for "shipped" in a log file found the line from
+# the PREVIOUS run -- because the redirection had not truncated the file yet
+# when the check ran. Two rounds of fixes were tested against a build from two
+# days earlier and reported as not working.
+#
+# So: check something the new build serves, rather than something a script
+# said about itself.
 echo "shipped"

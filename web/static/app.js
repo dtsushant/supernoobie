@@ -891,6 +891,48 @@ async function handOver(to) {
   }
 }
 
+// What to say about one person's sound, and what the reader can do about it.
+//
+// Ordered by what it is worth telling somebody: their microphone before their
+// connection, because "he has not turned his on" is the answer nine times in
+// ten and reads as a fault otherwise.
+function soundOf(who) {
+  if (who === me) {
+    if (!joined) return ['your microphone is off', 'press talk to be heard'];
+    if (muted) return ['muted', 'press unmute to be heard'];
+    return ['talking', ''];
+  }
+  const how = state.get(who);
+  if (!how || how === 'new' || how === 'connecting') return ['connecting', ''];
+  if (how === 'failed' || how === 'disconnected') {
+    return ['no connection', 'you two cannot reach each other directly'];
+  }
+  if (!hearing.get(who)) {
+    return ['listening only', 'they have not pressed talk yet'];
+  }
+  return ['talking', ''];
+}
+
+// The game beginning, for everybody who did not begin it.
+//
+// The flag arrives on the room poll and the lobby is closed by the scene poll,
+// and somebody sitting in a lobby is asking for scenes rarely -- so the news
+// came in through one door and was only read at another. It is read here, where
+// it arrives, and nothing else is allowed to come before it.
+function enterGame(answer) {
+  if (!answer.begun || begun) return;
+  begun = true;
+  if (started) return;
+  started = true;
+  const sheet = document.getElementById('setup');
+  if (sheet) sheet.hidden = true;
+  setFull(true);
+  // Their clock has to run too, or they are shown a board that never moves --
+  // which is a worse bug wearing the same clothes.
+  ask({ do: 'Play', on: true });
+  say('the game has started');
+}
+
 function lowestSeat(seats) {
   return seats.length ? Math.min(...seats.map((s) => s.seat)) : -1;
 }
@@ -936,6 +978,12 @@ function showLobby(answer) {
     row.querySelector('.tag').textContent = seated
       ? SEATNAMES[w.seat] || 'seat ' + (w.seat + 1)
       : 'watching';
+    const [how, todo] = soundOf(w.id);
+    const sound = document.createElement('span');
+    sound.className = `tag sound ${how.replace(/ /g, '-')}`;
+    sound.textContent = how;
+    if (todo) sound.title = todo;
+    row.insertBefore(sound, row.querySelector('.lvl'));
     // Who is in charge, said on the row rather than left to be inferred from
     // who happens to have a button.
     if (theirs) {
@@ -952,6 +1000,29 @@ function showLobby(answer) {
       row.insertBefore(give, row.querySelector('.lvl'));
     }
     list.append(row);
+  }
+
+  // One line of advice, for whoever is reading it. Somebody who cannot be heard
+  // should be told so on their own screen rather than by the others noticing.
+  const advice = document.getElementById('lobby-sound');
+  if (advice) {
+    const mineNow = soundOf(me);
+    const quiet = who.filter((w) => w.id !== me && soundOf(w.id)[0] === 'listening only');
+    let line = '';
+    if (!joined) {
+      line = 'nobody can hear you — press talk. You can hear them already.';
+    } else if (muted) {
+      line = 'you are muted — press unmute.';
+    } else if (quiet.length === 1) {
+      line = `${quiet[0].name} has not pressed talk, so they cannot be heard.`;
+    } else if (quiet.length > 1) {
+      line = `${quiet.length} of them have not pressed talk yet.`;
+    } else if (who.some((w) => w.id !== me && soundOf(w.id)[0] === 'no connection')) {
+      line = 'somebody could not be reached directly — a strict network in the way.';
+    }
+    advice.hidden = !line;
+    advice.textContent = line;
+    void mineNow;
   }
 
   // The seats nobody has taken, so it is plain what starting now would mean.
@@ -975,6 +1046,12 @@ function showSeats(answer) {
   document.getElementById('hud').hidden = !howMany && !room;
   box.hidden = howMany === 0;
   amHost = !!answer.host;
+
+  // **Before any early return.** This used to sit below `if (!howMany) return`,
+  // so a drawing that momentarily reported no seats swallowed the one message
+  // that has to arrive. The game beginning is not a detail of the seat strip.
+  enterGame(answer);
+
   if (!howMany) return;
   mySeat = answer.mine;
 
@@ -987,18 +1064,7 @@ function showSeats(answer) {
   // and everybody else went on looking at "waiting for the first player".
   //
   // The news arrives here, so it is acted on here.
-  if (answer.begun && !begun) {
-    begun = true;
-    if (!started) {
-      started = true;
-      document.getElementById('setup').hidden = true;
-      setFull(true);
-      // Their clock has to run too, or the board they are shown never moves.
-      ask({ do: 'Play', on: true });
-      say('the game has started');
-    }
-  }
-  if (answer.begun) begun = true;
+
 
   // **Arriving is playing.** Somebody who opens a game link means to play it,
   // and leaving them unseated until they notice a row of coloured buttons is
@@ -1229,8 +1295,14 @@ function link(who) {
     el.muted = loud;
     route(who, e.streams[0]);
     watch(who, e.streams[0]);
+    hearing.set(who, true);
   };
   pc.onconnectionstatechange = () => {
+    // **Written down rather than guessed at.** "It worked once and then never
+    // again" is not something anybody can debug from the outside, and it is
+    // not something the person it is happening to should have to describe. The
+    // page knows; it should say.
+    state.set(who, pc.connectionState);
     if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
       drop(who);
     }
@@ -1263,6 +1335,14 @@ function link(who) {
 // `negotiationneeded` knows whether re-offering is its job.
 const ringers = new Set();
 
+// What each connection is doing, and whether any sound is arriving on it. Two
+// different questions: a connection can be perfectly healthy and carry silence,
+// because the far side has not turned a microphone on -- which is the commonest
+// reason for "I can talk but they cannot hear me", and used to look identical
+// to a broken connection.
+const state = new Map();
+const hearing = new Map();
+
 // Put my microphone on every connection that has not got it, which makes
 // `negotiationneeded` fire and the offer go out again.
 function shareMicrophone() {
@@ -1281,6 +1361,8 @@ function drop(who) {
   if (pc) pc.close();
   links.delete(who);
   ringers.delete(who);
+  state.delete(who);
+  hearing.delete(who);
   const ear = ears.get(who);
   if (ear) {
     try {
@@ -1369,6 +1451,7 @@ async function callIn() {
   showHere(here);
   showSeats(answer);
   showLobby(answer);
+  showState(answer);
   say(here.length ? `talking to ${here.length}` : 'nobody else is here yet');
 }
 

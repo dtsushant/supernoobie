@@ -284,12 +284,53 @@ async fn main() {
     axum::serve(listener, app).await.expect("the server stopped");
 }
 
-async fn home() -> Html<&'static str> {
-    Html(include_str!("../static/home.html"))
+/// A number that changes whenever the page's own code does.
+///
+/// **Because "hard-reload it" is not a fix.** Three times running, a change was
+/// deployed, tested, and reported as not working -- and the browser was serving
+/// a copy of `app.js` from before the change. That is not the user's mistake: a
+/// page that ships new behaviour under an old URL is asking to be cached.
+///
+/// So the assets are fetched as `/app.js?v=<this>`, a different URL the moment
+/// their contents differ, which the browser fetches because it has never seen
+/// it. The HTML is never cached, since it carries the number.
+///
+/// FNV over the two files, worked out once. Same trick and same reasoning about
+/// non-cryptographic hashes as `easel::wire::still_mark`.
+fn assets_version() -> u64 {
+    use std::sync::OnceLock;
+    static V: OnceLock<u64> = OnceLock::new();
+    *V.get_or_init(|| {
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for part in [include_str!("../static/app.js"), include_str!("../static/app.css")] {
+            for b in part.as_bytes() {
+                h ^= *b as u64;
+                h = h.wrapping_mul(0x100_0000_01b3);
+            }
+        }
+        h
+    })
 }
 
-async fn page() -> Html<&'static str> {
-    Html(include_str!("../static/index.html"))
+/// Stamp the asset version into a page, and refuse to let the page be cached.
+fn served(html: &'static str) -> impl IntoResponse {
+    let v = assets_version();
+    (
+        [
+            (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        html.replace("/app.js", &format!("/app.js?v={v}"))
+            .replace("/app.css", &format!("/app.css?v={v}")),
+    )
+}
+
+async fn home() -> impl IntoResponse {
+    served(include_str!("../static/home.html"))
+}
+
+async fn page() -> impl IntoResponse {
+    served(include_str!("../static/index.html"))
 }
 
 /// The drawings this server will open.
@@ -332,11 +373,25 @@ fn allowed(name: &str) -> bool {
 }
 
 async fn js() -> impl IntoResponse {
-    ([(header::CONTENT_TYPE, "text/javascript")], include_str!("../static/app.js"))
+    (
+        [
+            (header::CONTENT_TYPE, "text/javascript"),
+            // Cached hard, because the URL carries the version: a changed file
+            // is a changed URL and is fetched.
+            (header::CACHE_CONTROL, "public, max-age=31536000, immutable"),
+        ],
+        include_str!("../static/app.js"),
+    )
 }
 
 async fn css() -> impl IntoResponse {
-    ([(header::CONTENT_TYPE, "text/css")], include_str!("../static/app.css"))
+    (
+        [
+            (header::CONTENT_TYPE, "text/css"),
+            (header::CACHE_CONTROL, "public, max-age=31536000, immutable"),
+        ],
+        include_str!("../static/app.css"),
+    )
 }
 
 /// Where the client is looking, so curves sampled against the window are

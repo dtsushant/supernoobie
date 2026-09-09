@@ -739,3 +739,21 @@ a.asbutton:hover { background: var(--lit); color: var(--ink); }
 }
 #room-code:focus { outline: none; border-color: #4fbcd4; }
 .wrong { color: #e0704a !important; margin-top: 0.5rem !important; }
+
+/* ---- what each voice is doing ------------------------------------------- */
+#lobby-list .sound { font-size: 0.62rem; }
+#lobby-list .sound.talking { background: #6fcf97; color: #08121a; }
+#lobby-list .sound.muted { background: #e0a44a; color: #08121a; }
+#lobby-list .sound.listening-only { background: #2a3644; color: #94a1ae; }
+#lobby-list .sound.connecting { background: #2a3644; color: #6b7987; }
+#lobby-list .sound.no-connection { background: #e0704a; color: #08121a; }
+#lobby-list .sound.your-microphone-is-off { background: #e0704a; color: #08121a; }
+
+.sound-note {
+  margin: 0.7rem 0 0 !important;
+  padding: 0.55rem 0.7rem;
+  border-radius: 0.4rem;
+  background: #1b2530;
+  font-size: 0.8rem !important;
+  color: #b9c4d0 !important;
+}
