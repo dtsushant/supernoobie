@@ -590,6 +590,13 @@ fn scene_for(studio: &mut Studio, look: easel::Look, word: &str, have: u64) -> S
     body
 }
 
+/// How long an empty chair is left before its turn passes.
+///
+/// Short, because nothing is happening and nobody is watching a seat think.
+/// Not nothing, because a turn that vanishes in the same frame it arrived
+/// makes the game look as though it skipped somebody.
+pub const EMPTY_PAUSE: f64 = 0.4;
+
 /// How long a bot waits between moves, in game seconds.
 ///
 /// Not for the bot's sake. A player who taps the die and sees three other
@@ -624,6 +631,18 @@ fn bot_turn(studio: &mut Studio) {
     let Some((_, how_many)) = studio.board.sheet.script.seats(studio.board.clock) else { return };
     let Some(turn) = studio.board.whose_turn() else { return };
     if !studio.room.empty_seats(how_many).contains(&turn) {
+        return;
+    }
+    // **A table of two, playing a game of two.** With bots off an empty chair
+    // is not a player at all, and its turn is simply passed -- otherwise two
+    // people in seats one and three would wait for seats two and four for
+    // ever, which is what "no bots" would otherwise mean.
+    if !studio.room.bots_play() {
+        if studio.board.clock - studio.last_bot < EMPTY_PAUSE {
+            return;
+        }
+        studio.last_bot = studio.board.clock;
+        studio.board.pass_turn();
         return;
     }
     if studio.board.clock - studio.last_bot < BOT_PAUSE {
@@ -743,6 +762,13 @@ struct Chat {
     /// departure is prompt where merely going quiet is not.
     #[serde(default)]
     gone: bool,
+    /// Which game the room is playing. The holder of the controls chooses.
+    #[serde(default)]
+    game: Option<String>,
+    /// Whether empty seats are played by bots. A table of two who want a game
+    /// of two should get one.
+    #[serde(default)]
+    bots: Option<bool>,
 }
 
 #[derive(serde::Deserialize)]
@@ -783,6 +809,30 @@ async fn chat(State(s): State<Shared>, Json(chat): Json<Chat>) -> impl IntoRespo
         // `auth::Table::hand_over`.
         studio.room.hand_over(&chat.me, to);
     }
+    // Both belong to whoever holds the controls, for the same reason the house
+    // rules do: four people choosing a game is three people having theirs
+    // chosen for them by whoever clicked last.
+    if let Some(on) = chat.bots {
+        if studio.room.may(&chat.me, auth::Deed::SetRules, None) {
+            studio.room.set_bots(on);
+        }
+    }
+    if let Some(file) = &chat.game {
+        if studio.room.may(&chat.me, auth::Deed::SetRules, None)
+            && !studio.room.begun()
+            && allowed(file)
+        {
+            // Loaded rather than merely remembered: the room IS its board, and
+            // a name kept beside one is a second thing to keep in step.
+            let mut board = Board::new();
+            if board.load(file).is_ok() {
+                studio.board = board;
+                studio.file = file.clone();
+                studio.last_scene = None;
+                studio.say = String::new();
+            }
+        }
+    }
     if chat.start && studio.room.may(&chat.me, auth::Deed::Start, None) {
         let how_many = seats_for_bots(studio);
         studio.room.begin(how_many);
@@ -795,6 +845,8 @@ async fn chat(State(s): State<Shared>, Json(chat): Json<Chat>) -> impl IntoRespo
         seated.iter().map(|(seat, who)| (*seat, studio.room.name_of(who))).collect();
     let my_name = studio.room.name_of(&chat.me);
     let begun = studio.room.begun();
+    let playing_file = studio.file.clone();
+    let bots_on = studio.room.bots_play();
     let host = studio.room.host().is_some_and(|h| h == chat.me);
     let bots = studio.room.empty_seats(seats_for_bots(studio));
     let my_seat = studio.room.seat_of(&chat.me);
@@ -852,7 +904,8 @@ async fn chat(State(s): State<Shared>, Json(chat): Json<Chat>) -> impl IntoRespo
     }
     let _ = write!(
         body,
-        "],\"howmany\":{seats},\"begun\":{begun},\"host\":{host},\"hostid\":{},\"bots\":{},\"myname\":{},\"mine\":{},\"turn\":{}",
+        "],\"howmany\":{seats},\"begun\":{begun},\"host\":{host},\"botsOn\":{bots_on},\"game\":{},\"hostid\":{},\"bots\":{},\"myname\":{},\"mine\":{},\"turn\":{}",
+        serde_json::to_string(&playing_file).unwrap_or_default(),
         serde_json::to_string(&studio.room.host()).unwrap_or_else(|_| "null".into()),
         serde_json::to_string(&bots).unwrap_or_else(|_| "[]".into()),
         serde_json::to_string(&my_name).unwrap_or_default(),
@@ -1379,6 +1432,89 @@ mod tests {
         advance_by(&mut st, 0.1);
         advance_by(&mut st, 0.1);
         assert_eq!(st.board.tally.values, after_one, "it is still waiting");
+    }
+
+    /// ★ **A table of two, playing a game of two.** With bots off an empty
+    /// chair is not a player, and its turn is passed -- otherwise two people
+    /// in seats one and three would wait for seats two and four for ever,
+    /// which is what "no bots" would otherwise mean.
+    #[test]
+    fn an_empty_chair_is_skipped_when_bots_are_off() {
+        let mut st = ludo();
+        apply(&mut st, Ask::Play { on: true });
+        st.room.call("ann", 0.0);
+        st.room.call("bob", 0.0);
+        st.room.sit("ann", 0, 4);
+        st.room.sit("bob", 2, 4);
+        st.room.set_bots(false);
+        st.room.begin(4);
+
+        // Ann has seat 0 and it is her turn; nothing should move.
+        assert_eq!(st.board.whose_turn(), Some(0));
+        for _ in 0..20 {
+            advance_by(&mut st, 0.1);
+        }
+        assert_eq!(st.board.whose_turn(), Some(0), "it is a person's turn, so it waits");
+
+        // Now it is seat 1's turn, and nobody is in it.
+        st.board.tally.values.insert("turn".into(), 1.0);
+        for _ in 0..20 {
+            advance_by(&mut st, 0.1);
+        }
+        assert_eq!(st.board.whose_turn(), Some(2), "passed to bob rather than played");
+    }
+
+    /// And with bots on, the same chair is played rather than skipped.
+    #[test]
+    fn the_same_chair_is_played_when_bots_are_on() {
+        let mut st = ludo();
+        apply(&mut st, Ask::Play { on: true });
+        st.room.call("ann", 0.0);
+        st.room.sit("ann", 1, 4);
+        st.room.begin(4);
+        let before = st.board.tally.values.clone();
+        for _ in 0..20 {
+            advance_by(&mut st, 0.1);
+        }
+        assert_ne!(st.board.tally.values, before, "a bot took seat 0's turn");
+    }
+
+    /// ★ Passing a turn clears the throw with it. A seat that inherited a die
+    /// somebody else had rolled would move on a number it never threw.
+    #[test]
+    fn passing_a_turn_clears_the_throw() {
+        let mut st = ludo();
+        apply(&mut st, Ask::Play { on: true });
+        st.board.tally.values.insert("rolled".into(), 1.0);
+        st.board.tally.values.insert("turn".into(), 0.0);
+        assert!(st.board.pass_turn());
+        assert_eq!(st.board.whose_turn(), Some(1));
+        let rolled =
+            st.board.written().vars.iter().find(|(n, _)| n == "rolled").map(|(_, v)| v.re);
+        assert_eq!(rolled, Some(0.0), "the next seat throws for itself");
+    }
+
+    /// It wraps, and a drawing with no seats has no turn to pass.
+    #[test]
+    fn passing_wraps_and_needs_seats() {
+        let mut st = ludo();
+        st.board.tally.values.insert("turn".into(), 3.0);
+        assert!(st.board.pass_turn());
+        assert_eq!(st.board.whose_turn(), Some(0));
+
+        let mut plain = a_game();
+        assert!(!plain.board.pass_turn(), "the adding game has no seats");
+    }
+
+    /// ★ **The host chooses the game, and only the host.** Four people
+    /// choosing is three having it chosen for them by whoever clicked last.
+    #[test]
+    fn only_the_host_may_change_the_game() {
+        let mut st = ludo();
+        st.room.call("ann", 0.0);
+        st.room.call("bob", 1.0);
+        assert!(st.room.may("ann", auth::Deed::SetRules, None), "she was here first");
+        assert!(!st.room.may("bob", auth::Deed::SetRules, None));
     }
 
     /// ★ A server that opens whatever path it is handed will one day be

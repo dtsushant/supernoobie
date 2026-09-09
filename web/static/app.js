@@ -698,14 +698,27 @@ function route(who, stream) {
   }
   const src = c.createMediaStreamSource(stream);
   const gain = c.createGain();
-  gain.gain.value = volume;
+  gain.gain.value = volume * (level_of.get(who) ?? 1);
   src.connect(gain).connect(c.destination);
   ears.set(who, { src, gain });
 }
 
+// How loud each person is, over and above the master. One friend on a laptop
+// microphone across a room and another on a headset are not the same loudness,
+// and one master control cannot fix both.
+const level_of = new Map();
+
+function setPersonVolume(who, v) {
+  level_of.set(who, v);
+  const ear = ears.get(who);
+  if (ear) ear.gain.gain.value = volume * v;
+  const el = document.getElementById(`ear-${who}`);
+  if (el) el.volume = Math.min(1, volume * v);
+}
+
 function setVolume(v) {
   volume = v;
-  for (const { gain } of ears.values()) gain.gain.value = v;
+  for (const [who, { gain }] of ears) gain.gain.value = v * (level_of.get(who) ?? 1);
   // The elements too, for whichever path is actually making the sound.
   for (const el of document.querySelectorAll('audio[id^="ear-"]')) {
     el.volume = Math.min(1, v);
@@ -933,6 +946,73 @@ function enterGame(answer) {
   say('the game has started');
 }
 
+// What a room can play. The same list the front door offers, because the
+// choice is the same choice -- and a game is a file, so adding one is a line.
+const GAMES = [
+  { file: 'samples/ludogame.easel', name: 'ludo', ready: true },
+  { file: 'samples/ludogame.easel', name: 'ludo, with adventures', ready: false },
+];
+
+let gamesWord = '';
+function showGames(answer) {
+  const box = document.getElementById('lobby-games');
+  if (!box) return;
+  const key = `${answer.game}|${amHost}|${begun}`;
+  if (key === gamesWord) return;
+  gamesWord = key;
+  box.innerHTML = '';
+  for (const g of GAMES) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = g.ready ? g.name : `${g.name} — not built yet`;
+    b.className = answer.game === g.file && g.ready ? 'on' : '';
+    // Only the holder of the controls chooses, for the same reason only they
+    // set the house rules: four people choosing is three having it chosen for
+    // them by whoever clicked last.
+    b.disabled = !g.ready || !amHost || begun;
+    b.onclick = () => pick(g.file);
+    box.append(b);
+  }
+}
+
+async function pick(file) {
+  await roomSays({ game: file });
+}
+
+// Whether the empty chairs are played by bots.
+const botsBox = document.getElementById('bots-on');
+if (botsBox) {
+  botsBox.onchange = () => roomSays({ bots: botsBox.checked });
+}
+
+// One way to tell the room something, so every one of them goes through the
+// same door and comes back with the same answer.
+async function roomSays(what) {
+  try {
+    const answer = await (
+      await fetch('/talk', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ me, post: [], room, ...what }),
+      })
+    ).json();
+    seatWord = '';
+    lobbyWord = '';
+    gamesWord = '';
+    showSeats(answer);
+    showLobby(answer);
+    showState(answer);
+    // The drawing itself has changed if the game did, so the next scene must
+    // be a whole one rather than a difference from a board that is gone.
+    held = 0;
+    refresh();
+    return answer;
+  } catch (e) {
+    say('could not reach the room');
+    return null;
+  }
+}
+
 function lowestSeat(seats) {
   return seats.length ? Math.min(...seats.map((s) => s.seat)) : -1;
 }
@@ -978,6 +1058,18 @@ function showLobby(answer) {
     row.querySelector('.tag').textContent = seated
       ? SEATNAMES[w.seat] || 'seat ' + (w.seat + 1)
       : 'watching';
+    // A slider each, for everybody but yourself -- your own is the microphone.
+    if (w.id !== me) {
+      const slide = document.createElement('input');
+      slide.type = 'range';
+      slide.className = 'vol';
+      slide.min = 0;
+      slide.max = 200;
+      slide.value = Math.round((level_of.get(w.id) ?? 1) * 100);
+      slide.title = 'how loud they are';
+      slide.oninput = () => setPersonVolume(w.id, Number(slide.value) / 100);
+      row.append(slide);
+    }
     const [how, todo] = soundOf(w.id);
     const sound = document.createElement('span');
     sound.className = `tag sound ${how.replace(/ /g, '-')}`;
@@ -1000,6 +1092,14 @@ function showLobby(answer) {
       row.insertBefore(give, row.querySelector('.lvl'));
     }
     list.append(row);
+  }
+
+  // The bots box follows the room rather than this browser, and only the
+  // holder of the controls may move it.
+  const bb = document.getElementById('bots-on');
+  if (bb) {
+    if (document.activeElement !== bb) bb.checked = answer.botsOn !== false;
+    bb.disabled = !amHost || begun;
   }
 
   // One line of advice, for whoever is reading it. Somebody who cannot be heard
@@ -1451,6 +1551,7 @@ async function callIn() {
   showHere(here);
   showSeats(answer);
   showLobby(answer);
+  showGames(answer);
   showState(answer);
   say(here.length ? `talking to ${here.length}` : 'nobody else is here yet');
 }

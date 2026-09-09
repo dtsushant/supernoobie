@@ -1,90 +1,115 @@
 <!doctype html>
 <meta charset="utf-8">
 <!-- Without this a phone lays the page out at about 980 pixels and scales the
-     result down, so anything pinned to an edge lands off the screen — which is
-     exactly what happened to the microphone button. `viewport-fit=cover` and
-     the safe-area insets in the stylesheet keep the controls clear of the
-     notch and the home bar. -->
+     result down, so anything pinned to an edge lands off the screen. -->
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>studio</title>
 <link rel="stylesheet" href="/app.css">
 
-<div id="home">
-  <h1>studio</h1>
-  <p class="lead">
-    Drawings made of strokes and of arithmetic, in the same file.
-    <b>Edit</b> opens the tools; <b>play</b> opens only the drawing.
-  </p>
+<!--
+  THE FRONT DOOR.
 
-  <section>
-    <h2>start something</h2>
-    <div class="cards">
-      <a class="card new" href="/studio?file=drawing.easel">
-        <span class="what">a blank page</span>
-        <span class="why">draw with the pen, or write a function</span>
-        <span class="go">edit &rarr;</span>
-      </a>
-    </div>
+  One question at a time, in the order somebody actually has them:
+
+      what do you want to play?      -> the games
+      who with?                      -> a room
+
+  Everything else that used to be here -- the blank page, the sample list, the
+  edit links -- is a *workshop* and lives below a fold, because somebody
+  arriving to play a game with three friends should not first have to decide
+  what an `.easel` file is.
+-->
+
+<div id="front">
+  <header>
+    <h1>studio</h1>
+    <p>Games made of arithmetic. Pick one, make a room, send the code.</p>
+  </header>
+
+  <section class="pick">
+    <h2>play</h2>
+    <div class="games" id="games"></div>
   </section>
 
-  <!-- Playing together. Its own section, because "start a room" and "join a
-       room" are the two things somebody arriving to play is looking for, and
-       neither of them was anywhere on this page: a room could only be made
-       from a link buried on one card, and joining meant being sent a URL. -->
-  <section>
-    <h2>play together</h2>
-    <div class="together-box">
-      <div class="together-half">
-        <h3>start a room</h3>
-        <p>You hold the controls, and you can hand them on. Send the code to
-           the others — any seat nobody takes is played by a bot.</p>
-        <button id="make-room">start a room</button>
+  <section class="pick">
+    <h2>where</h2>
+    <form id="go">
+      <label for="room-code">a room name</label>
+      <div class="row">
+        <input id="room-code" maxlength="16" placeholder="friday night"
+               autocomplete="off" autocapitalize="characters" spellcheck="false">
+        <button type="submit" id="enter">go</button>
       </div>
-      <div class="together-half">
-        <h3>join a room</h3>
-        <p>The four characters the host reads out. Case and dashes do not
-           matter.</p>
-        <form id="join-room">
-          <input id="room-code" maxlength="9" placeholder="e.g. PEAR" autocomplete="off"
-                 autocapitalize="characters" spellcheck="false">
-          <button type="submit">join</button>
-        </form>
-        <p class="wrong" id="join-wrong" hidden></p>
-      </div>
-    </div>
-  </section>
+      <p class="hint" id="room-hint">Anything you like. If nobody is using that name you get a
+        fresh room; if your friends are already there, you join them.</p>
+      <p class="hint quiet">Or <button type="button" class="asLink" id="make-room">give me a
+        code</button> and send it to them.</p>
+    </form>
 
-  <section>
-    <h2>open one</h2>
-    <div class="cards" id="list">loading…</div>
-  </section>
-
-  <footer>
-    <p>
-      The file named is the one <code>save</code> writes to. There is no
-      &ldquo;save as&rdquo;: one page, one file.
-      A <code>.rec</code> is <em>imported</em> — its rows come in and saving
-      goes to a <code>.easel</code> beside it, so a script you are borrowing
-      from is never overwritten.
+    <!-- Said once, plainly, and not repeated. Nobody reads a wall of rules,
+         and a room name is visible to everybody who joins. -->
+    <p class="plain">
+      No accounts, nothing saved, nobody watching. Which also means nobody is
+      moderating &mdash; the room name is the first thing your friends see, so
+      please keep it decent.
     </p>
-  </footer>
+  </section>
+
+  <details class="workshop">
+    <summary>the workshop</summary>
+    <p class="hint">Where the games are made. Every one of them is a text file of
+      arithmetic you can open, read and change.</p>
+    <div class="cards" id="list">loading…</div>
+    <p class="hint"><a href="/studio?file=drawing.easel">a blank page</a> &mdash; draw with a
+      pen, or write a function.</p>
+  </details>
 </div>
 
 <script>
-// What each sample is, so the list is not four identical rectangles.
-// Which of these can be played by four people at once. A drawing says so
-// itself with a `seats(...)` row; this list is only which cards offer the
-// button, and the server is what actually knows.
-const SHARED = ['samples/ludogame.easel'];
+// What can be played, and what each one is. The file is the game; adding one
+// here is a line, because a game is a drawing and not a program.
+const GAMES = [
+  {
+    file: 'samples/ludogame.easel',
+    name: 'ludo',
+    blurb: 'Four seats, four tokens each. Throw the die, walk your token home.',
+    ready: true,
+  },
+  {
+    file: 'samples/ludogame.easel',
+    name: 'ludo, with adventures',
+    blurb: 'The die decides how far you may go; a puzzle decides how far you do.',
+    ready: false,
+  },
+];
 
-// The game a room plays. One for now; when there are two, this is a choice on
-// the "start a room" side rather than a constant.
-const ROOM_GAME = 'samples/ludogame.easel';
+const ROOMS = 'ABCDEFGHJKMNPQRSTVWXYZ23456789';
+
+let chosen = GAMES[0];
+
+function drawGames() {
+  const box = document.getElementById('games');
+  box.innerHTML = '';
+  for (const g of GAMES) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'game' + (g === chosen ? ' on' : '') + (g.ready ? '' : ' later');
+    b.innerHTML = '<span class="nm"></span><span class="bl"></span>';
+    b.querySelector('.nm').textContent = g.name;
+    b.querySelector('.bl').textContent = g.ready ? g.blurb : g.blurb + ' — not built yet.';
+    b.disabled = !g.ready;
+    b.onclick = () => {
+      chosen = g;
+      drawGames();
+    };
+    box.append(b);
+  }
+}
+drawGames();
 
 // The same name this browser uses in the studio, made here if it does not
-// exist yet -- so whoever presses "start a room" is the one the server marks
-// as holding the controls, rather than whichever browser happens to call in
-// first afterwards.
+// exist -- so whoever makes a room is the one holding its controls, rather
+// than whichever browser calls in first afterwards.
 function meHere() {
   let id = sessionStorage.getItem('peer');
   if (!id) {
@@ -96,13 +121,27 @@ function meHere() {
 
 function intoRoom(code) {
   location.href =
-    `/studio?file=${encodeURIComponent(ROOM_GAME)}&play=1&room=${encodeURIComponent(code)}`;
+    `/studio?file=${encodeURIComponent(chosen.file)}&play=1&room=${encodeURIComponent(code)}`;
 }
 
+document.getElementById('go').onsubmit = (e) => {
+  e.preventDefault();
+  const field = document.getElementById('room-code');
+  // Read as generously as the server reads it. Somebody typing a name should
+  // not be defeated by a space or a shift key.
+  const code = field.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 16);
+  if (!code) {
+    document.getElementById('room-hint').textContent = 'Give it a name — anything at all.';
+    field.focus();
+    return;
+  }
+  intoRoom(code);
+};
+
 document.getElementById('make-room').onclick = async (e) => {
-  const button = e.currentTarget;
-  button.disabled = true;
-  button.textContent = 'making a room\u2026';
+  const b = e.currentTarget;
+  b.disabled = true;
+  b.textContent = 'making one…';
   try {
     const r = await (
       await fetch('/room', {
@@ -113,78 +152,48 @@ document.getElementById('make-room').onclick = async (e) => {
     ).json();
     intoRoom(r.room);
   } catch (err) {
-    button.disabled = false;
-    button.textContent = 'start a room';
+    b.disabled = false;
+    b.textContent = 'give me a code';
   }
 };
 
-document.getElementById('join-room').onsubmit = (e) => {
-  e.preventDefault();
-  const field = document.getElementById('room-code');
-  const wrong = document.getElementById('join-wrong');
-  // Read as generously as the server reads it: upper case, and only the
-  // letters the alphabet has. Somebody typing a code off a screen should not
-  // be defeated by a shift key.
-  const code = field.value.toUpperCase().replace(/[^A-HJ-NP-Z2-9]/g, '');
-  if (!code) {
-    wrong.hidden = false;
-    wrong.textContent = 'type the code the host read out';
-    return;
-  }
-  intoRoom(code);
-};
-
+// The workshop: every drawing on the server, for whoever wants to open one.
 const ABOUT = {
-  'samples/ludogame.easel': ['LUDO, four players', 'one screen, or one each — press play, or start a room and send the link'],
-  'samples/ludo.easel': ['the ludo board', 'the drawing only — nothing to tap; the game is ludogame'],
+  'samples/ludogame.easel': ['ludo', 'the game above, as a file you can read'],
+  'samples/ludo.easel': ['the ludo board', 'the drawing only — nothing to tap'],
   'samples/adding.easel': ['an adding game', 'tap the box with the right answer'],
   'samples/dials.easel': ['sliders', 'move r or n and everything follows'],
   'samples/bouncing.easel': ['keyframes', 'a ball with its timing said, not computed'],
   'samples/walker.easel': ['verbs and groups', 'six strokes told to walk as one'],
 };
 
-fetch('/list').then(r => r.json()).then(files => {
-  const list = document.getElementById('list');
-  list.textContent = '';
-  if (!files.length) {
-    list.innerHTML = '<p class="none">nothing in <code>samples/</code> yet — run '
-      + '<code>cargo run -p studio --bin sample</code></p>';
-    return;
-  }
-  for (const f of files) {
-    const [what, why] = ABOUT[f] || [f.replace(/^.*\//, '').replace(/\.easel$/, ''), f];
-    const card = document.createElement('div');
-    card.className = 'card';
-    card.innerHTML = `<span class="what">${what}</span><span class="why">${why}</span>`;
-    const go = document.createElement('span');
-    go.className = 'go';
-    const edit = document.createElement('a');
-    edit.href = `/studio?file=${encodeURIComponent(f)}`;
-    edit.textContent = 'edit';
-    const play = document.createElement('a');
-    play.href = `/studio?file=${encodeURIComponent(f)}&play=1`;
-    play.textContent = 'play';
-    go.append(edit, play);
-
-    // A game with seats in it can be played by four people at once, each on
-    // their own screen -- so it gets a room. A sketch does not need one, and
-    // offering one would be offering a thing with nothing on the other end.
-    if (SHARED.includes(f)) {
-      const together = document.createElement('a');
-      together.textContent = 'with friends';
-      together.className = 'together';
-      together.href = '#';
-      together.onclick = async (e) => {
-        e.preventDefault();
-        // The server names the room. It has to: it is the one that knows
-        // which names are already taken.
-        const r = await (await fetch('/room', { method: 'POST' })).json();
-        location.href = `/studio?file=${encodeURIComponent(f)}&play=1&room=${r.room}`;
-      };
-      go.append(together);
+fetch('/list')
+  .then((r) => r.json())
+  .then((files) => {
+    const list = document.getElementById('list');
+    list.innerHTML = '';
+    if (!files.length) {
+      list.innerHTML = '<p class="hint">nothing in <code>samples/</code> yet</p>';
+      return;
     }
-    card.append(go);
-    list.append(card);
-  }
-});
+    for (const f of files) {
+      const [what, why] = ABOUT[f] || [f.replace(/^.*\//, '').replace(/\.easel$/, ''), f];
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.innerHTML = '<span class="what"></span><span class="why"></span>';
+      card.querySelector('.what').textContent = what;
+      card.querySelector('.why').textContent = why;
+      const go = document.createElement('span');
+      go.className = 'go';
+      const edit = document.createElement('a');
+      edit.href = `/studio?file=${encodeURIComponent(f)}`;
+      edit.textContent = 'open';
+      go.append(edit);
+      card.append(go);
+      list.append(card);
+    }
+  })
+  .catch(() => {
+    document.getElementById('list').innerHTML = '<p class="hint">could not read the list</p>';
+  });
 </script>

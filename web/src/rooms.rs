@@ -87,11 +87,22 @@ impl<T> Rooms<T> {
     /// So `pear`, `PEAR` and `p-e-a-r` are one room. Somebody reading a code
     /// off a screen and typing it into a phone should not be defeated by a
     /// shift key.
+    /// Tidy a name as typed: upper case, letters and digits, nothing else.
+    ///
+    /// **Wider than the alphabet a code is MADE from, and deliberately.** A
+    /// generated code has to survive being read down a telephone, so it leaves
+    /// out everything that sounds or looks like something else. A name somebody
+    /// chose is different: they typed it, they will type it again, and refusing
+    /// half the letters in `FRIDAY` because an `I` might be a `1` is a rule
+    /// serving a problem they do not have.
+    ///
+    /// So `friday night` and `FRIDAY-NIGHT` are one room, and it is called
+    /// `FRIDAYNIGHT`.
     pub fn tidy(name: &str) -> String {
         let cleaned: String = name
             .chars()
             .map(|c| c.to_ascii_uppercase())
-            .filter(|c| ALPHABET.contains(&(*c as u8)))
+            .filter(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
             .take(16)
             .collect();
         if cleaned.is_empty() {
@@ -202,6 +213,10 @@ mod tests {
         for typed in ["PEAR", "pear", "Pear", " p e a r ", "p-e-a-r", "pear!!"] {
             assert_eq!(Rooms::<String>::tidy(typed), "PEAR", "{typed}");
         }
+        // A name somebody CHOSE keeps its letters. Only a generated code has
+        // to survive being read out, and `FRIDAY` has an I in it.
+        assert_eq!(Rooms::<String>::tidy("friday night"), "FRIDAYNIGHT");
+        assert_eq!(Rooms::<String>::tidy("Ludo Club 2"), "LUDOCLUB2");
     }
 
     /// ★ Nothing that could be misheard is in the alphabet: no I or L against

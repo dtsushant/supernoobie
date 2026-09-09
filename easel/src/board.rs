@@ -1099,6 +1099,26 @@ impl Board {
         now.is_finite().then(|| (now.round().rem_euclid(how_many as f64)) as usize)
     }
 
+    /// Pass the turn to the next seat.
+    ///
+    /// **For a table with empty chairs and no bots.** The game's own rules pass
+    /// the turn when somebody has moved; nothing passes it when the seat whose
+    /// turn it is has nobody in it at all, so a game of two people sitting in
+    /// seats one and three would wait for seats two and four for ever.
+    ///
+    /// Written here rather than in the drawing because *who is at the table* is
+    /// not something a drawing knows. It reads the name from `seats(...)`, so
+    /// nothing here knows the word `turn` either.
+    pub fn pass_turn(&mut self) -> bool {
+        let Some((name, how_many)) = self.sheet.script.seats(self.clock) else { return false };
+        let Some(now) = self.whose_turn() else { return false };
+        let next = (now + 1) % how_many;
+        self.tally.values.insert(name, next as f64);
+        // Whoever is next has not thrown yet.
+        self.tally.values.insert("rolled".into(), 0.0);
+        true
+    }
+
     /// Set off whatever rules a tap on this figure has.
     ///
     /// Returns whether any fired, so the studio can say nothing happened

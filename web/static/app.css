@@ -757,3 +757,197 @@ a.asbutton:hover { background: var(--lit); color: var(--ink); }
   font-size: 0.8rem !important;
   color: #b9c4d0 !important;
 }
+
+/* ==========================================================================
+   THE FRONT DOOR
+
+   Calm on purpose. One column, generous spacing, few colours, nothing that
+   moves unless it was asked to. Somebody arriving should be able to take the
+   whole page in without reading it -- two questions, in the order they have
+   them: what to play, and where.
+   ========================================================================== */
+#front {
+  max-width: 34rem;
+  margin: 0 auto;
+  padding: 3.5rem 1.25rem 5rem;
+  padding-top: calc(3.5rem + env(safe-area-inset-top, 0px));
+}
+#front header { margin-bottom: 3rem; }
+#front h1 {
+  margin: 0 0 0.4rem;
+  font-size: 1.35rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: #e3e9ef;
+}
+#front header p {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.6;
+  color: #94a1ae;
+}
+.pick { margin-bottom: 2.75rem; }
+.pick h2 {
+  margin: 0 0 0.9rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #6b7987;
+}
+
+/* A game is a wide, quiet card. Chosen is a left edge and a lighter ground --
+   no glow, no shadow, nothing that pulses. */
+.games { display: grid; gap: 0.55rem; }
+.game {
+  display: block;
+  width: 100%;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--edge);
+  border-left: 3px solid transparent;
+  border-radius: 0.5rem;
+  background: var(--panel);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.game:hover { border-color: #46525e; }
+.game.on {
+  border-left-color: #6fcf97;
+  background: #141c24;
+}
+.game .nm {
+  display: block;
+  font-size: 0.95rem;
+  color: #e3e9ef;
+  margin-bottom: 0.2rem;
+}
+.game .bl {
+  display: block;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: #94a1ae;
+}
+.game.later { opacity: 0.45; cursor: default; }
+.game.later:hover { border-color: var(--edge); }
+
+#go label {
+  display: block;
+  margin-bottom: 0.45rem;
+  font-size: 0.82rem;
+  color: #94a1ae;
+}
+#go .row { display: flex; gap: 0.5rem; }
+#room-code {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--edge);
+  border-radius: 0.45rem;
+  background: #0b1017;
+  color: #e3e9ef;
+  font: inherit;
+  font-size: 1rem;
+  letter-spacing: 0.06em;
+}
+#room-code::placeholder { color: #46525e; letter-spacing: 0; }
+#room-code:focus { outline: none; border-color: #6fcf97; }
+#enter {
+  padding: 0.7rem 1.3rem;
+  border: 0;
+  border-radius: 0.45rem;
+  background: #6fcf97;
+  color: #08121a;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+#enter:hover { background: #86dcaa; }
+
+.hint {
+  margin: 0.6rem 0 0;
+  font-size: 0.8rem;
+  line-height: 1.55;
+  color: #6b7987;
+}
+.hint.quiet { margin-top: 0.35rem; }
+.asLink {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #4fbcd4;
+  font: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.asLink:disabled { color: #46525e; cursor: default; }
+
+/* Said once and quietly. A wall of rules is a wall nobody reads. */
+.plain {
+  margin: 1.5rem 0 0;
+  padding: 0.85rem 1rem;
+  border-radius: 0.45rem;
+  background: #141c24;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  color: #94a1ae;
+}
+
+/* Folded away: this is for whoever wants to look inside, not for whoever came
+   to play. */
+.workshop {
+  margin-top: 3.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--edge);
+}
+.workshop summary {
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #6b7987;
+  cursor: pointer;
+}
+.workshop summary:hover { color: #94a1ae; }
+.workshop .cards { margin-top: 1rem; }
+
+/* ---- choosing, in the lobby ---------------------------------------------- */
+#lobby-games { display: grid; gap: 0.4rem; }
+#lobby-games button {
+  display: block;
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--edge);
+  border-left: 3px solid transparent;
+  border-radius: 0.4rem;
+  background: #0f151d;
+  color: #b9c4d0;
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+}
+#lobby-games button.on { border-left-color: #6fcf97; background: #141c24; color: #e3e9ef; }
+#lobby-games button:disabled { opacity: 0.45; cursor: default; }
+
+.opt { display: flex; align-items: flex-start; gap: 0.6rem; cursor: pointer; }
+.opt input { margin-top: 0.2rem; width: 1.05rem; height: 1.05rem; accent-color: #6fcf97; }
+.opt span { font-size: 0.85rem; color: #b9c4d0; }
+.opt em {
+  display: block;
+  font-style: normal;
+  font-size: 0.75rem;
+  color: #6b7987;
+  margin-top: 0.1rem;
+}
+
+/* One volume per person, because one loud friend and one quiet one is the
+   normal case and a single master control cannot fix it. */
+#lobby-list .vol {
+  width: 3.5rem;
+  accent-color: #4fbcd4;
+  flex: 0 0 auto;
+}

@@ -89,7 +89,7 @@ pub struct Note {
 ///
 /// Deliberately ignorant: it does not know what an offer is, what audio is, or
 /// what the game is. A room is a set of names and a pile of letters.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Room {
     /// Peer id to when it was last heard from.
     seen: HashMap<String, f64>,
@@ -109,6 +109,8 @@ pub struct Room {
     /// over a game already in progress — and pressing it set the house rules
     /// again underneath everybody.
     begun: bool,
+    /// Whether empty seats are played by bots. On unless somebody says not.
+    bots: bool,
     /// Who is at the table, who is sitting where, and who holds the controls.
     ///
     /// In [`auth`] rather than here, because "who may do what" turned out to
@@ -117,6 +119,21 @@ pub struct Room {
     /// and a player watched the start button appear and disappear as the
     /// others chose their colours.
     table: auth::Table,
+}
+
+impl Default for Room {
+    fn default() -> Room {
+        Room {
+            seen: HashMap::new(),
+            post: HashMap::new(),
+            names: HashMap::new(),
+            begun: false,
+            // Bots on by default: a room of one who presses start should get a
+            // game rather than a board that waits for three people.
+            bots: true,
+            table: auth::Table::new(),
+        }
+    }
 }
 
 impl Room {
@@ -243,6 +260,18 @@ impl Room {
         self.post.remove(me);
         self.names.remove(me);
         self.table.depart(me, now);
+    }
+
+    /// Whether empty seats are played by bots.
+    ///
+    /// A table of two who want a game of two should get one. With this off the
+    /// empty chairs are simply skipped, which is what "just us" means.
+    pub fn bots_play(&self) -> bool {
+        self.bots
+    }
+
+    pub fn set_bots(&mut self, on: bool) {
+        self.bots = on;
     }
 
     /// Has the game begun?
