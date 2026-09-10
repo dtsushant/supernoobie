@@ -11,29 +11,45 @@ So: DNS first, server second, certificate last and by itself.
 
 ## 1 · Point the domain
 
-At the registrar you bought it from, add two records:
+### GoDaddy
 
-| type | name | value | TTL |
-|---|---|---|---|
-| `A` | `@` | *your server's IP* | 300 |
-| `A` | `www` | *your server's IP* | 300 |
+`supernoobie.com` uses GoDaddy's own nameservers (`ns69`/`ns70.domaincontrol.com`),
+so the records live in GoDaddy and Himalayan Host's DNS panel is not involved at
+all. Do **not** change the nameservers: pointing them at the host would move
+where records are edited without making anything work better.
 
-`@` means the bare name, `supernoobie.com`. Some panels want it blank instead.
+**One record to change**, because `www` is already a `CNAME` to the bare name and
+so follows it:
 
-**Set the TTL low** (300 = five minutes) *before* you need to change anything.
-TTL is how long the rest of the internet is allowed to remember an answer, so a
-mistake made at 3600 takes an hour to correct no matter how fast you fix it. Put
-it back up once things are settled.
+1. GoDaddy → sign in → **My Products**
+2. Find `supernoobie.com` → **DNS** (or ⋮ → *Manage DNS*)
+3. In **DNS Records**, find the row `Type: A`, `Name: @`
+4. **Edit it — do not add a second.** Two A records for `@` means half your
+   visitors reach whichever is wrong, which looks exactly like an intermittent
+   bug and is miserable to diagnose.
+5. Set **Value** to the server's IP
+6. Set **TTL** to *Custom → 600 seconds* (GoDaddy's minimum)
+7. Save
 
-If the registrar has already filled in an A record pointing at a parking page,
-**edit it rather than adding a second** — two A records means half your visitors
-get the parking page, which looks exactly like an intermittent bug.
+If there are **two** A rows for `@` — GoDaddy's parking sometimes leaves a pair —
+delete one and edit the other.
+
+**Set the TTL low before you need it.** TTL is how long the rest of the internet
+may remember an answer, so a mistake made at an hour takes an hour to undo
+however fast you fix it. Put it back up once things have settled.
+
+**Then check Forwarding is off.** On the same page, under *Forwarding*: if a
+domain forward is set, GoDaddy serves its own redirect and quietly overrides the
+A record. It is the usual reason a correct-looking record does nothing.
 
 Then wait, and check from outside your own network:
 
 ```bash
 nslookup supernoobie.com 8.8.8.8
 ```
+
+Ask a resolver that is not yours — your own machine, and often your router, will
+keep serving the old answer from cache long after the change has taken.
 
 Your own machine may cache the old answer for a while; `8.8.8.8` will not.
 Do not go on until this returns your server's IP.
