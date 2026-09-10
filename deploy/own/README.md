@@ -51,8 +51,7 @@ nslookup supernoobie.com 8.8.8.8
 Ask a resolver that is not yours — your own machine, and often your router, will
 keep serving the old answer from cache long after the change has taken.
 
-Your own machine may cache the old answer for a while; `8.8.8.8` will not.
-Do not go on until this returns your server's IP.
+**Do not go on until this returns your server's IP.**
 
 ---
 
