@@ -1,0 +1,62 @@
+# supernoobie.com
+#
+# ## The difference from the borrowed host
+#
+# On the borrowed host there was no route out to Let's Encrypt, so certificates
+# were a wildcard bundle on disk and automatic HTTPS was switched off. Here the
+# server owns its own address and its own domain, so Caddy does the whole thing
+# itself: it asks Let's Encrypt for a certificate the first time somebody visits,
+# and renews it for ever after without being asked.
+#
+# **Which is why DNS has to point here before this starts.** The proof of
+# ownership is Let's Encrypt fetching a file from this machine over port 80 at
+# `supernoobie.com`. If the name still points somewhere else, that fetch reaches
+# the wrong server and the certificate is refused.
+#
+# Rate limits are worth knowing before fighting with it: five failed attempts an
+# hour, and fifty certificates per domain per week. Neither is generous when you
+# are guessing. See the `acme_ca` line below for how to practise without
+# spending them.
+
+{
+	# Where to write when a certificate needs attention. Let's Encrypt sends a
+	# warning if a renewal has not happened twenty days before expiry, which is
+	# the only warning you get before a site goes dark.
+	email {$ADMIN_EMAIL}
+
+	# UNCOMMENT TO PRACTISE. Let's Encrypt's staging issues untrusted
+	# certificates -- the browser will complain -- but it has far looser limits.
+	# Get the setup right against this, then comment it out and reload.
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+# The bare name, and www, are the same site. Redirecting one to the other means
+# a link somebody typed with a www still lands, and only one of them is ever the
+# real address -- two names serving the same thing is two things to keep in
+# step, and it splits the browser's storage besides.
+www.supernoobie.com {
+	redir https://supernoobie.com{uri} permanent
+}
+
+supernoobie.com {
+	encode gzip zstd
+
+	# Said once, and meant. `Strict-Transport-Security` tells a browser never to
+	# come back over plain http, which is what makes the microphone work
+	# reliably rather than depending on how somebody typed the address.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		# The page is a canvas, some inline script and one WebRTC connection to
+		# whoever else is in the room. It has no business loading anything from
+		# anywhere else, and saying so is the cheapest protection there is.
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; media-src 'self' blob:; connect-src 'self' wss: https:; img-src 'self' data:"
+		-Server
+	}
+
+	reverse_proxy ludo:8088 {
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+}

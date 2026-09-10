@@ -1,0 +1,72 @@
+# supernoobie.com — the studio on its own server.
+#
+#     docker compose -f deploy/own/docker-compose.yml up -d
+#
+# Unlike the borrowed host, nothing else lives here: this stack owns ports 80
+# and 443, its own proxy, and its own certificates. Which means no block in
+# somebody else's config to be deleted by somebody else's deploy — the problem
+# that cost two rounds of "the app is down" when it never was.
+
+services:
+  ludo:
+    image: ludo:latest
+    container_name: ludo
+    restart: unless-stopped
+    # No published port. The proxy is the only way in, and it is the only thing
+    # that can see this.
+    expose:
+      - "8088"
+    # The app reads files by name — `.easel` and `.rec` only, relative, no
+    # `..`. A read-only root filesystem and a user who owns nothing else make
+    # that a property rather than a hope.
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    # A room is a board and a few names in memory. This is a small machine, and
+    # a runaway room should be a container that restarts rather than a server
+    # that stops answering ssh.
+    mem_limit: 512m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks: [studio]
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      # HTTP/3. Harmless if the firewall does not allow it; a real improvement
+      # on a mobile network, which is where these players are.
+      - "443:443/udp"
+    environment:
+      # Where Let's Encrypt writes if a renewal is failing. The only warning
+      # before a site goes dark.
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?set ADMIN_EMAIL in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # **Keep these.** The certificates and the account key live here. Losing
+      # them means asking Let's Encrypt for everything again, and their weekly
+      # limit is not generous when you are already in trouble.
+      - caddy_data:/data
+      - caddy_config:/config
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    depends_on: [ludo]
+    networks: [studio]
+
+networks:
+  studio:
+
+volumes:
+  caddy_data:
+  caddy_config:
