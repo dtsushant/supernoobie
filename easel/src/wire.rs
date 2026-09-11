@@ -124,6 +124,24 @@ pub fn still_mark(board: &Board, look: Look) -> u64 {
 /// `have`.
 pub fn since(board: &Board, look: Look, word: &str, have: u64) -> String {
     let mark = still_mark(board, look);
+    let mut out = drawn(board, look, have);
+    rest_of(&mut out, board, word, have, mark);
+    out
+}
+
+/// **The expensive half: where everything is.**
+///
+/// Split out from the cheap half for one reason, and the reason is measured. A
+/// room where nothing is happening produced a *byte-identical drawing* on 29 of
+/// 29 consecutive frames — and a response that never repeated once, because the
+/// clock is in it and the clock always moves. So every cache missed, and a room
+/// full of people thinking cost exactly as much as one with a die in the air:
+/// twenty milliseconds a frame, for a picture nobody could tell apart.
+///
+/// Now the part that can repeat is built on its own, so it can be kept. See
+/// `scene_for` in the server, which is what keeps it.
+pub fn drawn(board: &Board, look: Look, have: u64) -> String {
+    let mark = still_mark(board, look);
     let mut out = String::new();
     let _ = write!(out, "{{\"stillv\":{mark}");
     if have != mark {
@@ -227,24 +245,6 @@ pub fn since(board: &Board, look: Look, word: &str, have: u64) -> String {
         }
     }
     out.push(']');
-
-    let _ = write!(out, ",\"clock\":{:.3},\"playing\":{}", board.clock, board.playing);
-    let _ = write!(out, ",\"game\":{},\"watching\":{}", board.playing_game, board.watching);
-    // The house rules this drawing declares, for the setup screen. Sent every
-    // frame because they are a handful of numbers, and because a page that had
-    // to ask for them separately could show a stale one.
-    // The box the drawing says it lives in, if it says. A page that gets one
-    // fits to it and stops offering the wheel.
-    match board.sheet.script.bounds(board.clock) {
-        Some((lo, hi)) => {
-            let _ = write!(
-                out,
-                ",\"bounds\":[{:.3},{:.3},{:.3},{:.3}]",
-                lo.re, lo.im, hi.re, hi.im
-            );
-        }
-        None => out.push_str(",\"bounds\":null"),
-    }
     // What each sound is watching. The page keeps the last number it saw and
     // plays when the new one is bigger, so it needs to know nothing about what
     // any of them mean.
@@ -273,38 +273,61 @@ pub fn since(board: &Board, look: Look, word: &str, have: u64) -> String {
         out.push_str("]}");
     }
     out.push(']');
-    out.push_str(",\"rules\":[");
-    for (n, (id, name, label, value)) in board.sheet.script.house(board.clock).into_iter().enumerate() {
-        if n > 0 {
-            out.push(',');
-        }
-        let _ = write!(out, "{{\"id\":{id},\"name\":");
-        text(&mut out, &name);
-        out.push_str(",\"label\":");
-        text(&mut out, &label);
-        let _ = write!(out, ",\"value\":{value}}}");
-    }
-    out.push(']');
+    out
+}
+
+/// The cheap half: the clock, and what the room is saying.
+///
+/// A few dozen bytes of formatting. It is rebuilt every time precisely because
+/// it costs nothing to — and because the clock in it is what made the whole
+/// response unrepeatable, which is the thing being fixed.
+pub fn rest_of(out: &mut String, board: &Board, word: &str, have: u64, mark: u64) {
+    let _ = write!(out, ",\"clock\":{:.3},\"playing\":{}", board.clock, board.playing);
+    let _ = write!(out, ",\"game\":{},\"watching\":{}", board.playing_game, board.watching);
     out.push_str(",\"say\":");
-    text(&mut out, word);
-    // **The list of rows, and only when it has changed.**
+    text(out, word);
+
+    // **Everything below here is gated on the mark, and that is the point.**
     //
-    // This is the whole script as text -- four hundred rows of a game of Ludo,
-    // seventy-odd kilobytes -- and it was sent on EVERY frame. It was ninety
-    // per cent of a scene, and none of it changes while anybody is playing:
-    // the tree is the editor's panel, and the editor is not open.
+    // `bounds`, the house rules and the row list all come from the SCRIPT, and
+    // asking the script anything means running all four hundred rows of it.
+    // This half was called the cheap half and was doing that three times a
+    // frame -- which is why an idle room still cost thirteen milliseconds after
+    // the drawing itself had been made free.
     //
-    // Gated on the same mark as the still half, which is a hash of the rows and
-    // the marks -- so it goes again the moment a row is edited or a dial moved,
-    // and never in between. Finding this took measuring the response by key
-    // rather than reasoning about the drawing, which is where I had been
-    // looking.
+    // None of the three changes while anybody is playing. They change when a
+    // row is edited or a dial moved, and the mark is a hash of exactly that.
     if have != mark {
+    // The box the drawing says it lives in, if it says. A page that gets one
+        // fits to it and stops offering the wheel.
+        match board.sheet.script.bounds(board.clock) {
+            Some((lo, hi)) => {
+                let _ = write!(
+                    out,
+                    ",\"bounds\":[{:.3},{:.3},{:.3},{:.3}]",
+                    lo.re, lo.im, hi.re, hi.im
+                );
+            }
+            None => out.push_str(",\"bounds\":null"),
+        }
+    out.push_str(",\"rules\":[");
+        for (n, (id, name, label, value)) in board.sheet.script.house(board.clock).into_iter().enumerate() {
+            if n > 0 {
+                out.push(',');
+            }
+            let _ = write!(out, "{{\"id\":{id},\"name\":");
+            text(out, &name);
+            out.push_str(",\"label\":");
+            text(out, &label);
+            let _ = write!(out, ",\"value\":{value}}}");
+        }
+        out.push(']');
+        // The whole script as text -- four hundred rows, seventy-odd kilobytes,
+        // and it used to go on EVERY frame. It was ninety per cent of a scene.
         out.push_str(",\"tree\":");
-        tree(&mut out, board);
+        tree(out, board);
     }
     out.push('}');
-    out
 }
 
 /// The list, as the browser will show it — real rows with real inputs.

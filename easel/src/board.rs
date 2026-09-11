@@ -511,6 +511,26 @@ impl Board {
         }
     }
 
+    /// Move the clock on **without** asking the rules whether anything has
+    /// become true.
+    ///
+    /// `tick` re-evaluates every `when` condition, because the clock moving can
+    /// make one true — `when time > 3:`. That is right, and it is not free: it
+    /// runs the whole script, up to eight passes, and at twenty frames a second
+    /// in a room where nobody is doing anything it finds nothing, twenty times a
+    /// second, for ever.
+    ///
+    /// So a caller that has established the drawing is not moving may use this
+    /// instead, and ask properly now and then. The thing it risks is a rule
+    /// waiting on a time threshold firing late, by however long the caller
+    /// leaves between proper ticks — which is why the caller is the one that
+    /// decides, and why this is not the default.
+    pub fn drift(&mut self, dt: f64) {
+        if self.playing {
+            self.clock += dt.max(0.0);
+        }
+    }
+
     /// Run, or stop running and stay where you are.
     pub fn play(&mut self, yes: bool) {
         self.playing = yes;

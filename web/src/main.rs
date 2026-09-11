@@ -148,7 +148,7 @@ impl House {
             } else {
                 String::new()
             };
-            Studio { board, file: file.clone(), say, room: talk::Room::new(), began: std::time::Instant::now(), last_bot: 0.0, ticked: std::time::Instant::now(), last_scene: None }
+            Studio { board, file: file.clone(), say, room: talk::Room::new(), began: std::time::Instant::now(), last_bot: 0.0, asked: 0.0, ticked: std::time::Instant::now(), last_scene: None }
         })
     }
 }
@@ -165,12 +165,13 @@ struct Studio {
     began: std::time::Instant,
     /// The board clock when a bot last played, so they do not play instantly.
     last_bot: f64,
-    /// The last scene built, and what it was built from.
+    /// The last drawing built, and what it was built from.
     ///
-    /// Four people in a room are watching one board. With the clock landing on
-    /// a frame grid, their requests fall into the same instant — so the second,
-    /// third and fourth get the answer the first one paid for.
-    last_scene: Option<(u64, u64, u64, String)>,
+    /// See [`scene_for`]. Keyed on what the drawing actually depends on, which
+    /// is **not** the clock — that was the whole bug.
+    last_scene: Option<Drawn>,
+    /// When the rules were last asked whether anything had become true.
+    asked: f64,
     /// When the clock was last moved on.
     ///
     /// **The room owns its clock.** Every browser used to send its own tick to
@@ -218,6 +219,7 @@ async fn main() {
         room: talk::Room::new(),
         began: std::time::Instant::now(),
         last_bot: 0.0,
+        asked: 0.0,
         ticked: std::time::Instant::now(),
         last_scene: None,
     });
@@ -545,7 +547,28 @@ fn advance_by(studio: &mut Studio, seconds: f64) {
     if !studio.board.playing {
         return;
     }
-    studio.board.tick(seconds.clamp(0.0, 2.0));
+    let dt = seconds.clamp(0.0, 2.0);
+
+    // **Asking the rules costs more than drawing the board.**
+    //
+    // `tick` re-evaluates every `when` condition, because the clock moving can
+    // make one true. That runs the whole script, up to eight passes -- and once
+    // the drawing was made free, this was the entire remaining cost of an idle
+    // room: two and a half milliseconds, twenty times a second, finding nothing.
+    //
+    // A drawing that has been seen to repeat is a game in which nothing is
+    // moving, so nothing can become true except a rule waiting on the clock
+    // itself. Those are asked once a second rather than twenty times -- the
+    // same `HOLD` that governs how stale a held drawing may be, for the same
+    // reason and with the same worst case.
+    let resting =
+        studio.last_scene.as_ref().is_some_and(|d| d.still) && studio.board.clock - studio.asked < HOLD;
+    if resting {
+        studio.board.drift(dt);
+    } else {
+        studio.board.tick(dt);
+        studio.asked = studio.board.clock;
+    }
     // **On to a frame grid.** Not for the animation -- a thirtieth of a second
     // is finer than anybody sees -- but so that four people watching one board
     // ask about the same instant. Land the clock anywhere and every request is
@@ -557,6 +580,33 @@ fn advance_by(studio: &mut Studio, seconds: f64) {
 
 /// Frames a second the clock lands on.
 const FRAMES: f64 = 30.0;
+
+/// A drawing that has been built, and what it was built from.
+struct Drawn {
+    /// The tally, the rows, and the window — everything the drawing depends on
+    /// except the clock.
+    of: (u64, u64, u64),
+    /// When it was built, so a held one can be checked again now and then.
+    at: f64,
+    /// Whether this drawing has been seen to repeat. Set when two consecutive
+    /// builds from the same state came out identical, which means nothing in it
+    /// is a function of time.
+    still: bool,
+    body: String,
+}
+
+/// How long a drawing may be held without being checked again.
+///
+/// The reasoning that lets it be held at all: **anything that depends on time
+/// changes every frame**, because time does. So two consecutive frames coming
+/// out identical means nothing in the drawing is moving, and it will stay that
+/// way until the game itself changes.
+///
+/// One exception is worth the second: a row like `digits(floor(time))` is
+/// constant for a second and then jumps. So a held drawing is rebuilt once a
+/// second regardless, which caps how stale that could ever be at the length of
+/// the thing it was hiding.
+const HOLD: f64 = 1.0;
 
 /// The scene, built once per room per frame however many people ask.
 fn scene_for(studio: &mut Studio, look: easel::Look, word: &str, have: u64) -> String {
@@ -574,20 +624,68 @@ fn scene_for(studio: &mut Studio, look: easel::Look, word: &str, have: u64) -> S
         }
         h
     };
-    // A word for the page is said once to one person, so a scene carrying one
-    // is never shared.
-    if word.is_empty() {
-        if let Some((w, m, k, body)) = &studio.last_scene {
-            if *w == when && *m == mark && *k == window {
-                return body.clone();
-            }
+    let _ = when;
+
+    // **What the drawing depends on, and the clock is not in it.**
+    //
+    // It used to be, and that was the bug. A room where nobody was doing
+    // anything produced a byte-identical drawing on 29 of 29 consecutive
+    // frames -- and a response that never once repeated, because the clock is
+    // in the response and the clock always moves. So the cache never hit, and
+    // four people sitting and thinking cost the same as a die in mid-air:
+    // twenty milliseconds a frame, each, for a picture nobody could tell apart.
+    let of = (tally_mark(&studio.board), mark, window);
+    let now = studio.board.clock;
+
+    let held = match &studio.last_scene {
+        Some(d) if d.of == of && d.still && now - d.at < HOLD => Some(d.body.clone()),
+        _ => None,
+    };
+
+    let drawing = match held {
+        Some(body) => body,
+        None => {
+            let fresh = easel::wire::drawn(&studio.board, look, have);
+            // Seen twice from the same state and come out the same: nothing in
+            // it is a function of time, so it may be held.
+            let still = matches!(&studio.last_scene, Some(d) if d.of == of && d.body == fresh);
+            studio.last_scene =
+                Some(Drawn { of, at: now, still, body: fresh.clone() });
+            fresh
+        }
+    };
+
+    // The cheap half is always fresh. It is a few dozen bytes of formatting,
+    // and the clock in it is what made the whole thing unrepeatable.
+    let mut body = drawing;
+    easel::wire::rest_of(&mut body, &studio.board, word, have, mark);
+    body
+}
+
+/// A number that changes when the game does.
+///
+/// The tally is *everything a game has got to* -- whose turn, where the tokens
+/// are, what has been thrown. If it has not changed and nothing in the drawing
+/// depends on time, the picture cannot have changed either.
+fn tally_mark(board: &Board) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut names: Vec<&String> = board.tally.values.keys().collect();
+    // Sorted, or the same game hashes differently depending on how a map felt
+    // about its keys that morning.
+    names.sort();
+    for name in names {
+        for b in name.as_bytes() {
+            h ^= *b as u64;
+            h = h.wrapping_mul(0x100_0000_01b3);
+        }
+        for b in board.tally.values[name].to_bits().to_le_bytes() {
+            h ^= b as u64;
+            h = h.wrapping_mul(0x100_0000_01b3);
         }
     }
-    let body = easel::wire::since(&studio.board, look, word, have);
-    if word.is_empty() {
-        studio.last_scene = Some((when, mark, window, body.clone()));
-    }
-    body
+    // And whether it is running at all, so pausing is noticed.
+    h ^= board.playing as u64;
+    h
 }
 
 /// How long an empty chair is left before its turn passes.
@@ -1143,7 +1241,7 @@ mod tests {
     fn a_game() -> Studio {
         let mut board = Board::new();
         board.load("../samples/adding.easel").expect("the game opens");
-        Studio { board, file: String::new(), say: String::new(), room: talk::Room::new(), began: std::time::Instant::now(), last_bot: 0.0, ticked: std::time::Instant::now(), last_scene: None }
+        Studio { board, file: String::new(), say: String::new(), room: talk::Room::new(), began: std::time::Instant::now(), last_bot: 0.0, asked: 0.0, ticked: std::time::Instant::now(), last_scene: None }
     }
 
     fn score(st: &Studio) -> f64 {
@@ -1171,7 +1269,7 @@ mod tests {
     fn ludo() -> Studio {
         let mut board = Board::new();
         board.load("../samples/ludogame.easel").expect("the game opens");
-        Studio { board, file: String::new(), say: String::new(), room: talk::Room::new(), began: std::time::Instant::now(), last_bot: 0.0, ticked: std::time::Instant::now(), last_scene: None }
+        Studio { board, file: String::new(), say: String::new(), room: talk::Room::new(), began: std::time::Instant::now(), last_bot: 0.0, asked: 0.0, ticked: std::time::Instant::now(), last_scene: None }
     }
 
     /// Where the die is lying. The board throws it across the whole square, so
@@ -1517,6 +1615,148 @@ mod tests {
         assert!(!st.room.may("bob", auth::Deed::SetRules, None));
     }
 
+    /// ★ **A room where nothing is happening is nearly free.**
+    ///
+    /// It was not. The clock is in the response and the clock always moves, so
+    /// every cache missed and four people sitting and thinking cost the same
+    /// as a die in mid-air. This is the fix, asserted rather than hoped for:
+    /// the same drawing, handed out again, without being built again.
+    #[test]
+    fn an_idle_room_is_built_once() {
+        let mut st = ludo();
+        apply(&mut st, Ask::Play { on: true });
+        let look = easel::Look::new(plotkit::Cx::new(-12.0, -9.0), plotkit::Cx::new(12.0, 9.0), 900);
+        let have = easel::wire::still_mark(&st.board, look);
+
+        // Twice, to let it see the drawing repeat -- one sighting proves
+        // nothing, since a moving thing is also identical to itself once.
+        scene_for(&mut st, look, "", have);
+        advance_by(&mut st, 1.0 / 30.0);
+        scene_for(&mut st, look, "", have);
+        assert!(st.last_scene.as_ref().is_some_and(|d| d.still), "seen to repeat");
+
+        // Now the clock may move as much as it likes without a rebuild.
+        let built_at = st.last_scene.as_ref().map(|d| d.at);
+        for _ in 0..10 {
+            advance_by(&mut st, 1.0 / 30.0);
+            scene_for(&mut st, look, "", have);
+        }
+        assert_eq!(st.last_scene.as_ref().map(|d| d.at), built_at, "never rebuilt");
+    }
+
+    /// ★ And a room where something IS happening is never held. A die in the
+    /// air that stopped being redrawn would be a die that had stopped.
+    #[test]
+    fn a_moving_room_is_never_held() {
+        let mut st = ludo();
+        apply(&mut st, Ask::Play { on: true });
+        let look = easel::Look::new(plotkit::Cx::new(-12.0, -9.0), plotkit::Cx::new(12.0, 9.0), 900);
+        let have = easel::wire::still_mark(&st.board, look);
+        st.board.play_tap(17); // throw it
+
+        let mut seen: Vec<String> = Vec::new();
+        for _ in 0..8 {
+            advance_by(&mut st, 1.0 / 30.0);
+            seen.push(scene_for(&mut st, look, "", have));
+        }
+        assert!(!st.last_scene.as_ref().is_some_and(|d| d.still), "it is moving");
+        // Every frame of a throw is a different picture.
+        let mut sorted = seen.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), seen.len(), "no two frames of a throw are the same");
+    }
+
+    /// ★ A held drawing is let go the moment the game changes -- somebody taps,
+    /// and the picture must follow.
+    #[test]
+    fn a_tap_lets_a_held_drawing_go() {
+        let mut st = ludo();
+        apply(&mut st, Ask::Play { on: true });
+        let look = easel::Look::new(plotkit::Cx::new(-12.0, -9.0), plotkit::Cx::new(12.0, 9.0), 900);
+        let have = easel::wire::still_mark(&st.board, look);
+        scene_for(&mut st, look, "", have);
+        advance_by(&mut st, 1.0 / 30.0);
+        let idle = scene_for(&mut st, look, "", have);
+        assert!(st.last_scene.as_ref().is_some_and(|d| d.still));
+
+        st.board.play_tap(17);
+        let after = scene_for(&mut st, look, "", have);
+        assert_ne!(idle, after, "the throw is on the board");
+    }
+
+    /// And it is checked again at least once a second, so a row like
+    /// `digits(floor(time))` -- constant for a second, then jumping -- is never
+    /// stale by more than the thing it was hiding.
+    #[test]
+    fn a_held_drawing_is_checked_again_within_a_second() {
+        let mut st = ludo();
+        apply(&mut st, Ask::Play { on: true });
+        let look = easel::Look::new(plotkit::Cx::new(-12.0, -9.0), plotkit::Cx::new(12.0, 9.0), 900);
+        let have = easel::wire::still_mark(&st.board, look);
+        scene_for(&mut st, look, "", have);
+        advance_by(&mut st, 1.0 / 30.0);
+        scene_for(&mut st, look, "", have);
+        let built_at = st.last_scene.as_ref().map(|d| d.at);
+
+        advance_by(&mut st, HOLD + 0.1);
+        scene_for(&mut st, look, "", have);
+        assert_ne!(st.last_scene.as_ref().map(|d| d.at), built_at, "looked again");
+    }
+
+    /// What a room actually costs, since a server was bought against it.
+    #[test]
+    #[ignore]
+    fn what_a_room_costs() {
+        use std::time::Instant;
+        let look = easel::Look::new(plotkit::Cx::new(-12.0, -9.0), plotkit::Cx::new(12.0, 9.0), 900);
+
+        let mut st = ludo();
+        apply(&mut st, Ask::Play { on: true });
+        let have = easel::wire::still_mark(&st.board, look);
+        // Settle it into the held state, as a real idle room would be.
+        for _ in 0..3 {
+            advance_by(&mut st, 1.0 / 30.0);
+            scene_for(&mut st, look, "", have);
+        }
+        let t = Instant::now();
+        for _ in 0..600 {
+            advance_by(&mut st, 1.0 / 30.0);
+            let _ = scene_for(&mut st, look, "", have);
+        }
+        let idle = t.elapsed().as_secs_f64() * 1000.0 / 600.0;
+
+        let mut live = ludo();
+        apply(&mut live, Ask::Play { on: true });
+        let t = Instant::now();
+        for k in 0..600 {
+            if k % 90 == 0 {
+                live.board.play_tap(17); // keep something in the air
+            }
+            advance_by(&mut live, 1.0 / 30.0);
+            let _ = scene_for(&mut live, look, "", have);
+        }
+        let busy = t.elapsed().as_secs_f64() * 1000.0 / 600.0;
+
+        // Where the remaining time goes.
+        use easel::wire;
+        let t = Instant::now();
+        for _ in 0..2000 { let _ = wire::still_mark(&st.board, look); }
+        println!("  still_mark: {:.3}ms", t.elapsed().as_secs_f64() * 1000.0 / 2000.0);
+        let t = Instant::now();
+        for _ in 0..2000 { let _ = tally_mark(&st.board); }
+        println!("  tally_mark: {:.3}ms", t.elapsed().as_secs_f64() * 1000.0 / 2000.0);
+        let t = Instant::now();
+        for _ in 0..2000 { advance_by(&mut st, 1.0 / 30.0); }
+        println!("  advance:    {:.3}ms", t.elapsed().as_secs_f64() * 1000.0 / 2000.0);
+
+        println!("  idle frame: {idle:.2}ms");
+        println!("  busy frame: {busy:.2}ms");
+        println!("  -- four players polling 20/s, one room --");
+        println!("     idle: {:.2} cores", idle * 20.0 * 4.0 / 1000.0);
+        println!("     busy: {:.2} cores", busy * 20.0 * 4.0 / 1000.0);
+    }
+
     /// ★ A server that opens whatever path it is handed will one day be
     /// asked for something it should not have. That this one is meant for one
     /// person on one machine is not a reason to leave the door open -- it is a
@@ -1539,7 +1779,7 @@ mod tests {
     /// mistake: that is how you ask for one.
     #[test]
     fn a_name_that_is_not_there_yet_is_a_blank_page() {
-        let mut st = Studio { board: Board::new(), file: String::new(), say: String::new(), room: talk::Room::new(), began: std::time::Instant::now(), last_bot: 0.0, ticked: std::time::Instant::now(), last_scene: None };
+        let mut st = Studio { board: Board::new(), file: String::new(), say: String::new(), room: talk::Room::new(), began: std::time::Instant::now(), last_bot: 0.0, asked: 0.0, ticked: std::time::Instant::now(), last_scene: None };
         apply(&mut st, Ask::OpenFile { name: "nothing-here-yet.easel".into() });
         assert!(st.board.sheet.is_empty());
         assert_eq!(st.file, "nothing-here-yet.easel", "and saving will go there");
@@ -1557,7 +1797,7 @@ mod tests {
         first.sheet.script.add("circle(0, 3)");
         first.save("web-test-open.easel").expect("wrote one");
 
-        let mut st = Studio { board: Board::new(), file: String::new(), say: String::new(), room: talk::Room::new(), began: std::time::Instant::now(), last_bot: 0.0, ticked: std::time::Instant::now(), last_scene: None };
+        let mut st = Studio { board: Board::new(), file: String::new(), say: String::new(), room: talk::Room::new(), began: std::time::Instant::now(), last_bot: 0.0, asked: 0.0, ticked: std::time::Instant::now(), last_scene: None };
         st.board.sheet.script.add("ngon(0, 1, 5)");
         apply(&mut st, Ask::OpenFile { name: "web-test-open.easel".into() });
 
