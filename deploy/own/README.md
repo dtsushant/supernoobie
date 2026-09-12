@@ -11,36 +11,45 @@ So: DNS first, server second, certificate last and by itself.
 
 ## 1 · Point the domain
 
-### GoDaddy
+### Where the records actually live
 
-`supernoobie.com` uses GoDaddy's own nameservers (`ns69`/`ns70.domaincontrol.com`),
-so the records live in GoDaddy and Himalayan Host's DNS panel is not involved at
-all. Do **not** change the nameservers: pointing them at the host would move
-where records are edited without making anything work better.
+**Check this before editing anything**, because it moves and the answer decides
+which panel you open:
 
-**One record to change**, because `www` is already a `CNAME` to the bare name and
-so follows it:
+```bash
+nslookup -type=NS supernoobie.com 8.8.8.8
+```
 
-1. GoDaddy → sign in → **My Products**
-2. Find `supernoobie.com` → **DNS** (or ⋮ → *Manage DNS*)
-3. In **DNS Records**, find the row `Type: A`, `Name: @`
-4. **Edit it — do not add a second.** Two A records for `@` means half your
-   visitors reach whichever is wrong, which looks exactly like an intermittent
-   bug and is miserable to diagnose.
-5. Set **Value** to the server's IP
-6. Set **TTL** to *Custom → 600 seconds* (GoDaddy's minimum)
-7. Save
+- `ns__.domaincontrol.com` → GoDaddy's own nameservers, so records are edited
+  **at GoDaddy**, under *My Products → DNS*.
+- `npc__.himalayan.host` → the domain has been **delegated to the host**, and
+  GoDaddy is now only the registrar. Editing records at GoDaddy does nothing at
+  all; they are edited in the host's DNS panel.
 
-If there are **two** A rows for `@` — GoDaddy's parking sometimes leaves a pair —
-delete one and edit the other.
+Whoever holds the nameservers holds the records. Changing one at the other place
+is the commonest reason a correct-looking edit has no effect whatsoever.
 
-**Set the TTL low before you need it.** TTL is how long the rest of the internet
+### The record
+
+**One record**, because `www` is already a `CNAME` to the bare name and follows
+it automatically:
+
+| type | name | value | TTL |
+|---|---|---|---|
+| `A` | `@` | the server's IP | 600 |
+
+**Edit the existing row rather than adding a second.** A fresh domain usually
+arrives with an A record pointing at a parking page. Two A records for `@` means
+half your visitors reach whichever is wrong, which looks exactly like an
+intermittent bug and is miserable to diagnose.
+
+**Lower the TTL before you need it.** TTL is how long the rest of the internet
 may remember an answer, so a mistake made at an hour takes an hour to undo
 however fast you fix it. Put it back up once things have settled.
 
-**Then check Forwarding is off.** On the same page, under *Forwarding*: if a
-domain forward is set, GoDaddy serves its own redirect and quietly overrides the
-A record. It is the usual reason a correct-looking record does nothing.
+**And check there is no domain forwarding.** A forward set at the registrar
+serves its own redirect and quietly overrides the record — the usual reason a
+correct edit appears to do nothing.
 
 Then wait, and check from outside your own network:
 
