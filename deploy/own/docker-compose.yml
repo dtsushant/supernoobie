@@ -45,6 +45,11 @@ services:
       # HTTP/3. Harmless if the firewall does not allow it; a real improvement
       # on a mobile network, which is where these players are.
       - "443:443/udp"
+    environment:
+      # The password for the bidnwin subdomain. Read from a `.env` beside this
+      # file on the server, which is not in the repository.
+      BIDNWIN_USER: ${BIDNWIN_USER:-admin}
+      BIDNWIN_HASH: ${BIDNWIN_HASH:-}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       # **Keep these.** The certificates and the account key live here. Losing

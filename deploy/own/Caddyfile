@@ -62,3 +62,44 @@ supernoobie.com {
 		header_up X-Forwarded-Proto {scheme}
 	}
 }
+
+# bidnwin — the contract system, on the same machine and behind a password.
+#
+# ## Why a password and not nothing
+#
+# It has no login of its own yet, and its seed is a real contract: real BOQ
+# rates, real retention, real margins. A subdomain is not a secret — anybody who
+# wonders what else is on a host tries a dozen obvious names — so "nobody will
+# guess it" is not a way to keep commercial figures private.
+#
+# `basic_auth` is one line and buys exactly one thing: nobody without the
+# password sees anything at all. What it does not buy is per-person access or
+# any record of who looked, which is why it is a stopgap and not an answer.
+#
+# The hash comes from the environment, so it never reaches the repository.
+# Generate one with:
+#
+#     docker run --rm caddy:2-alpine caddy hash-password --plaintext 'the password'
+#
+bidnwin.supernoobie.com {
+	encode gzip zstd
+
+	basic_auth {
+		{$BIDNWIN_USER} {$BIDNWIN_HASH}
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		# A contract system has no business being framed by anybody else's
+		# page, and nothing here needs to be.
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	reverse_proxy bidnwin:8091 {
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+}
