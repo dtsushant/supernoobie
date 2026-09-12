@@ -133,6 +133,71 @@ merely being present.
 
 ---
 
+## 5 · Adding another name later
+
+A second site on the same machine — `bidnwin.supernoobie.com` is the first — is
+one `CNAME` and one block. In that order, and nothing else needed:
+
+| type | name | value | TTL |
+|---|---|---|---|
+| `CNAME` | `bidnwin` | `supernoobie.com` | 600 |
+
+A `CNAME` rather than a second `A`, so the name follows the apex. If the server
+ever moves you edit one record instead of hunting for every one that happened to
+mention the old address.
+
+**Wait for it to resolve before adding the block.** Caddy asks for a certificate
+the moment it sees a new name, and asking for a name that does not resolve spends
+one of five failures an hour.
+
+```bash
+nslookup bidnwin.supernoobie.com 8.8.8.8     # not NXDOMAIN
+```
+
+### Then, three things that each cost a round
+
+**`-p ludo`, not the default.** Compose derives a project name from the
+directory, which here is `own`. The running stack was created as `ludo`, so the
+default name makes compose try to build a *second* set of containers and stop on
+`the container name "/ludo" is already in use`.
+
+**`up -d caddy`, not `reload`.** A reload re-reads the Caddyfile but **not the
+environment the container was started with**, and the password arrives through
+the environment. A reload alone gives a proxy whose config says `{$BIDNWIN_HASH}`
+and whose environment has never heard of it — which fails every login with
+nothing in the log to explain it.
+
+**And the compose file has to go up too.** Copying only the Caddyfile leaves a
+`docker-compose.yml` on the server that never declares those variables, so
+compose sees no change and prints `Container caddy Running` — a success message
+for having done nothing.
+
+```bash
+scp deploy/own/{Caddyfile,docker-compose.yml} you@server:~/ludo/deploy/own/
+ssh you@server 'cd ~/ludo/deploy/own && docker compose -p ludo up -d caddy'
+```
+
+### The dollar-sign trap, from both sides
+
+A bcrypt hash is mostly dollar signs — `$2a$14$Kl…` — and it has now been
+mangled twice, in opposite directions:
+
+- An **unquoted heredoc** writing the `.env` expanded it down to `a4`: a
+  plausible-looking two-character file that would have failed every login.
+- **Sourcing** that `.env` from a script then expanded it again, and under
+  `set -u` died with `$2: unbound variable` — which at least says something.
+
+Single-quote the value in the `.env`. Compose strips surrounding single quotes,
+so it reads exactly as before, and nothing can maul it afterwards:
+
+```
+BIDNWIN_HASH='$2a$14$KlEI…'
+```
+
+Check the length, never the look of it: `${#BIDNWIN_HASH}` is **60** for bcrypt.
+
+---
+
 ## What this ends
 
 On the borrowed host the studio lived as a block in somebody else's proxy
