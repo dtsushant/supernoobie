@@ -16,6 +16,10 @@ HOST="${DEPLOY_HOST:?set DEPLOY_HOST, e.g. user@host}"
 KEY="${DEPLOY_KEY:-$HOME/.ssh/id_rsa}"
 DIR="${DEPLOY_DIR:-ludo}"
 NET="${LUDO_NET:-web}"
+# Which stack. `own` is a server of our own -- its own proxy, its own
+# certificates, nothing else on the box. The default is the other case: sharing
+# a host, where something else already holds 80 and 443.
+COMPOSE="${COMPOSE:-deploy/docker-compose.yml}"
 SSH=(ssh -i "$KEY" -o ConnectTimeout=20)
 
 echo "packing"
@@ -31,7 +35,7 @@ echo "building and restarting (a few minutes)"
   mkdir -p ~/$DIR && cd ~/$DIR
   tar -xzf /tmp/ludo_src.tgz && rm -f /tmp/ludo_src.tgz
   docker build -q -t ludo:latest . >/dev/null
-  LUDO_NET='$NET' docker compose -p ludo -f deploy/docker-compose.yml up -d --force-recreate >/dev/null
+  LUDO_NET='$NET' docker compose -p ludo -f '$COMPOSE' up -d --force-recreate >/dev/null
   sleep 3
   docker ps --filter name=ludo-app --format '  {{.Names}}  {{.Status}}'"
 

@@ -45,10 +45,6 @@ services:
       # HTTP/3. Harmless if the firewall does not allow it; a real improvement
       # on a mobile network, which is where these players are.
       - "443:443/udp"
-    environment:
-      # Where Let's Encrypt writes if a renewal is failing. The only warning
-      # before a site goes dark.
-      ADMIN_EMAIL: ${ADMIN_EMAIL:?set ADMIN_EMAIL in .env}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       # **Keep these.** The certificates and the account key live here. Losing

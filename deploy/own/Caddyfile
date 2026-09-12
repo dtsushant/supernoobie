@@ -19,10 +19,12 @@
 # spending them.
 
 {
-	# Where to write when a certificate needs attention. Let's Encrypt sends a
-	# warning if a renewal has not happened twenty days before expiry, which is
-	# the only warning you get before a site goes dark.
-	email {$ADMIN_EMAIL}
+	# An address here is where Let's Encrypt writes if a renewal starts failing
+	# -- the only warning before a site goes dark. Left out until somebody says
+	# which address, because it is handed to a third party and that is not a
+	# thing to decide on somebody's behalf.
+	#
+	#   email you@example.com
 
 	# UNCOMMENT TO PRACTISE. Let's Encrypt's staging issues untrusted
 	# certificates -- the browser will complain -- but it has far looser limits.

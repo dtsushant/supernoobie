@@ -56,11 +56,17 @@ fi
 say "user"
 if ! id "$WHO" >/dev/null 2>&1; then
   adduser --disabled-password --gecos "" "$WHO" >/dev/null
-  usermod -aG docker "$WHO"
   echo "  $WHO created"
 else
   echo "  $WHO already there"
 fi
+# **Outside the branch, deliberately.** This used to sit inside the "created"
+# arm, so running against a machine that already had the user -- which is the
+# ordinary case, since the host gives you one -- left them unable to talk to
+# Docker, and every later command failed with a permission error that looked
+# like Docker being broken.
+usermod -aG docker "$WHO"
+echo "  $WHO can use docker"
 
 if [ -n "$KEYS" ]; then
   install -d -m 700 -o "$WHO" -g "$WHO" "/home/$WHO/.ssh"
